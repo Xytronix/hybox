@@ -8,7 +8,11 @@ pluginManagement {
     }
 }
 
-rootProject.name = "blackbox"
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
 
-include(":blackbox-core")
-include(":blackbox-hytale")
+rootProject.name = "hybox"
+
+include(":hybox-core")
+include(":hybox-hytale")

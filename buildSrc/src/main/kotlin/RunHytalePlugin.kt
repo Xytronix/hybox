@@ -1,4 +1,4 @@
-package sh.harold.blackbox.gradle
+package io.github.xytronix.hybox.gradle
 
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
@@ -95,9 +95,9 @@ class RunHytalePlugin : Plugin<Project> {
         }
 
         project.gradle.projectsEvaluated {
-            val hytaleProject = project.project(":blackbox-hytale")
+            val hytaleProject = project.project(":hybox-hytale")
             val chosenTask = hytaleProject.tasks.findByName("shadowJar") ?: hytaleProject.tasks.findByName("jar")
-                ?: throw GradleException("Expected :blackbox-hytale to have a 'jar' task (or 'shadowJar').")
+                ?: throw GradleException("Expected :hybox-hytale to have a 'jar' task (or 'shadowJar').")
             runServer.configure { dependsOn(chosenTask) }
         }
     }
@@ -170,17 +170,17 @@ private fun copyServerJarToRunDir(project: Project, cachedJar: Path, runDir: Pat
 }
 
 private fun copyPluginJarToRunDir(project: Project, modsDir: Path) {
-    val hytaleProject = project.project(":blackbox-hytale")
+    val hytaleProject = project.project(":hybox-hytale")
     val archiveTask = (hytaleProject.tasks.findByName("shadowJar") ?: hytaleProject.tasks.findByName("jar"))
-        ?: throw GradleException("Expected :blackbox-hytale to have a 'jar' task (or 'shadowJar').")
+        ?: throw GradleException("Expected :hybox-hytale to have a 'jar' task (or 'shadowJar').")
     if (archiveTask !is AbstractArchiveTask) {
-        throw GradleException("Expected :blackbox-hytale:${archiveTask.name} to be an archive task.")
+        throw GradleException("Expected :hybox-hytale:${archiveTask.name} to be an archive task.")
     }
 
     Files.createDirectories(modsDir)
 
     val pluginJar = archiveTask.archiveFile.get().asFile.toPath()
-    modsDir.toFile().listFiles { file -> file.isFile && file.name.startsWith("blackbox-hytale") && file.name.endsWith(".jar") }
+    modsDir.toFile().listFiles { file -> file.isFile && file.name.startsWith("hybox-hytale") && file.name.endsWith(".jar") }
         ?.forEach { it.delete() }
     val target = modsDir.resolve(pluginJar.fileName)
     Files.copy(pluginJar, target, StandardCopyOption.REPLACE_EXISTING)

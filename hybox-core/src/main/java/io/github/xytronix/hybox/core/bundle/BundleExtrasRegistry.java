@@ -1,0 +1,84 @@
+package io.github.xytronix.hybox.core.bundle;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import io.github.xytronix.hybox.core.capture.BundleExtrasProvider;
+import io.github.xytronix.hybox.core.incident.IncidentReport;
+import io.github.xytronix.hybox.core.trigger.TriggerEvent;
+
+public final class BundleExtrasRegistry implements BundleExtrasProvider {
+    private final List<BundleExtrasProvider> providers = new CopyOnWriteArrayList<>();
+    private final System.Logger logger;
+
+    public BundleExtrasRegistry(System.Logger logger) {
+        this.logger = Objects.requireNonNull(logger, "logger");
+    }
+
+    public void register(BundleExtrasProvider provider) {
+        Objects.requireNonNull(provider, "provider");
+        providers.add(provider);
+    }
+
+    public void unregister(BundleExtrasProvider provider) {
+        Objects.requireNonNull(provider, "provider");
+        providers.remove(provider);
+    }
+
+    @Override
+    public List<BundleAttachment> extras(IncidentReport report, TriggerEvent triggerEvent) {
+        List<BundleAttachment> all = new ArrayList<>();
+        for (BundleExtrasProvider provider : providers) {
+            try {
+                List<BundleAttachment> providerExtras = provider.extras(report, triggerEvent);
+                if (providerExtras != null) {
+                    all.addAll(providerExtras);
+                }
+            } catch (Exception e) {
+                logger.log(System.Logger.Level.WARNING,
+                    "BundleExtrasProvider " + provider.getClass().getName() + " failed.", e);
+            }
+        }
+        return all;
+    }
+
+    @Override
+    public List<BundleAttachment> historicalExtras() {
+        List<BundleAttachment> all = new ArrayList<>();
+        for (BundleExtrasProvider provider : providers) {
+            try {
+                List<BundleAttachment> providerExtras = provider.historicalExtras();
+                if (providerExtras != null) {
+                    all.addAll(providerExtras);
+                }
+            } catch (Exception e) {
+                logger.log(System.Logger.Level.WARNING,
+                    "BundleExtrasProvider " + provider.getClass().getName() + " failed.", e);
+            }
+        }
+        return all;
+    }
+
+    @Override
+    public List<BundleAttachment> configExtras() {
+        List<BundleAttachment> all = new ArrayList<>();
+        for (BundleExtrasProvider provider : providers) {
+            try {
+                List<BundleAttachment> providerExtras = provider.configExtras();
+                if (providerExtras != null) {
+                    all.addAll(providerExtras);
+                }
+            } catch (Exception e) {
+                logger.log(System.Logger.Level.WARNING,
+                    "BundleExtrasProvider " + provider.getClass().getName() + " failed.", e);
+            }
+        }
+        return all;
+    }
+
+    public int size() {
+        return providers.size();
+    }
+}

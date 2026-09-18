@@ -1,0 +1,9 @@
+{
+  "Group": "Xytronix",
+  "Name": "Hybox",
+  "Version": "${version}",
+  "Website": "https://github.com/Xytronix/hybox",
+  "Description": "Always-on incident recording and observability for Hytale dedicated servers.",
+  "Main": "io.github.xytronix.hybox.hytale.HyboxPlugin",
+  "ServerVersion": "=${hytaleVersion}"
+}

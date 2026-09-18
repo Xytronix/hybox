@@ -1,0 +1,496 @@
+package io.github.xytronix.hybox.hytale;
+
+import com.hypixel.hytale.server.core.Message;
+import com.hypixel.hytale.server.core.command.system.CommandContext;
+import com.hypixel.hytale.server.core.command.system.arguments.system.DefaultArg;
+import com.hypixel.hytale.server.core.command.system.arguments.types.ArgTypes;
+import com.hypixel.hytale.server.core.command.system.basecommands.AbstractAsyncCommand;
+import com.hypixel.hytale.server.core.command.system.basecommands.CommandBase;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import io.github.xytronix.hybox.core.capture.CaptureResult;
+
+final class HyboxCommand extends CommandBase {
+    private static final DateTimeFormatter INCIDENT_TIMESTAMP =
+        DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss.SSSZ").withLocale(Locale.ROOT);
+
+    private final HyboxRuntime runtime;
+
+    HyboxCommand(HyboxRuntime runtime) {
+        super("hybox", "Hybox incident recorder");
+        this.runtime = Objects.requireNonNull(runtime, "runtime");
+
+        addSubCommand(new DumpCommand(runtime));
+        addSubCommand(new StatusCommand(runtime));
+        addSubCommand(new ListCommand(runtime));
+        addSubCommand(new TriggersCommand(runtime));
+        addSubCommand(new HistogramCommand(runtime));
+        addSubCommand(new ProfileCommand(runtime));
+        addSubCommand(new TrendCommand(runtime));
+        addSubCommand(new ReloadCommand(runtime));
+    }
+
+    @Override
+    protected void executeSync(CommandContext context) {
+        context.sendMessage(Message.raw("Usage: /hybox dump|status|list|triggers|histogram|profile|trend|reload"));
+    }
+
+    private abstract static class RuntimeAsyncCommand extends AbstractAsyncCommand {
+        protected final HyboxRuntime runtime;
+
+        protected RuntimeAsyncCommand(String name, String description, HyboxRuntime runtime) {
+            super(name, description);
+            this.runtime = Objects.requireNonNull(runtime, "runtime");
+        }
+
+        protected final CompletableFuture<Void> run(CommandContext context, Runnable work) {
+            CompletableFuture<Void> result = new CompletableFuture<>();
+            runtime.submitWorker(() -> {
+                try {
+                    work.run();
+                    result.complete(null);
+                } catch (Throwable failure) {
+                    result.completeExceptionally(failure);
+                }
+            }, () -> {
+                context.sendMessage(Message.raw("Hybox worker is busy or stopping; try again later."));
+                result.complete(null);
+            });
+            return result;
+        }
+    }
+
+    private static final class DumpCommand extends RuntimeAsyncCommand {
+        private DumpCommand(HyboxRuntime runtime) {
+            super("dump", "Trigger a manual incident capture", runtime);
+        }
+
+        @Override
+        protected CompletableFuture<Void> executeAsync(CommandContext context) {
+            return runtime.captureManual().thenAccept(result -> {
+                context.sendMessage(Message.raw(captureMessage(result)));
+                if (result.captured()) {
+                    context.sendMessage(Message.raw("Bundle: " + runtime.incidentDir()
+                        .resolve("incident-" + result.incidentId().value() + ".zip")));
+                }
+            });
+        }
+    }
+
+    private static final class StatusCommand extends CommandBase {
+        private final HyboxRuntime runtime;
+        private StatusCommand(HyboxRuntime runtime) {
+            super("status", "Show Hybox status");
+            this.runtime = runtime;
+        }
+
+        @Override
+        protected void executeSync(CommandContext context) {
+                HyboxRuntime.Health health = runtime.health();
+                context.sendMessage(Message.raw("Hybox status"));
+                context.sendMessage(Message.raw("Recorder: " + (health.running() ? "running" : "stopped")));
+                context.sendMessage(Message.raw("Config: " + runtime.configPath()));
+                context.sendMessage(Message.raw("Incidents: " + runtime.incidentDir() + " (" + health.bundles() + " cached)"));
+                context.sendMessage(Message.raw("Last snapshot: " + value(health.lastSnapshot())
+                    + (health.snapshotError() == null ? "" : "; error=" + health.snapshotError())));
+                context.sendMessage(Message.raw("Capture: " + (health.captureBusy() ? "busy" : "idle")
+                    + " (" + health.captureProgress() + ")"));
+                context.sendMessage(Message.raw("Last incident: " + value(health.lastIncident())
+                    + " @ " + value(health.lastSuccess())));
+                context.sendMessage(Message.raw("Last outcome: "
+                    + (health.lastOutcome() == null ? "none" : captureMessage(health.lastOutcome()))));
+                context.sendMessage(Message.raw("Capture error: " + value(health.captureError())));
+                context.sendMessage(Message.raw("Admission: busy=" + health.busy()
+                    + ", dropped=" + health.dropped() + ", rejected=" + health.rejected()));
+                context.sendMessage(Message.raw("Storage pressure: "
+                    + (health.storageChecked() ? value(health.storagePressure()) : "unknown")));
+                var callbacks = health.callbacks();
+                context.sendMessage(Message.raw("Callbacks: calls=" + callbacks.calls()
+                    + ", failures=" + callbacks.failures() + ", timeouts=" + callbacks.timeouts()
+                    + ", quarantined=" + callbacks.quarantined() + ", rejected=" + callbacks.rejected()
+                    + ", active=" + callbacks.active() + "/2"
+                    + ", exhausted=" + (callbacks.active() >= 2)
+                    + ", lastFailure=" + value(callbacks.lastFailure())));
+
+                var retention = runtime.config().capturePolicy().retention();
+                context.sendMessage(Message.raw("Retention: maxCount=" + retention.maxCount()
+                    + ", maxTotalBytes=" + retention.maxTotalBytes()
+                    + ", maxAge=" + (retention.maxAge() == null ? "none" : retention.maxAge())));
+
+                var triggers = runtime.config().triggerPolicy();
+                context.sendMessage(Message.raw("Triggers: cooldown=" + triggers.cooldown()
+                    + ", debounce=" + triggers.debounce()
+                    + ", stallDegradedMs=" + triggers.stallDegradedMs()
+                    + ", stallCriticalMs=" + triggers.stallCriticalMs()));
+
+                boolean discordEnabled = !runtime.config().discordWebhook().webhookUrl().isBlank();
+                context.sendMessage(Message.raw("Discord webhook: " + (discordEnabled ? "enabled" : "disabled")));
+                if (runtime.profileActive()) {
+                    context.sendMessage(Message.raw("Profile session: active ("
+                        + runtime.profileRemainingSeconds() + "s remaining)"));
+                }
+        }
+    }
+
+    private static String value(Object value) {
+        return value == null ? "none" : value.toString();
+    }
+
+    static String captureMessage(CaptureResult result) {
+        return switch (result.status()) {
+            case CAPTURED -> "Captured incident " + result.incidentId().value();
+            case DISABLED -> "Capture disabled by configuration.";
+            case COOLDOWN -> "Capture skipped: cooldown active.";
+            case DEBOUNCE -> "Capture skipped: duplicate trigger (debounce).";
+            case STORAGE_PRESSURE -> "Capture skipped: storage pressure.";
+            case CANCELLED -> "Capture cancelled.";
+            case FAILED -> "Capture failed: " + value(result.detail());
+            case BUSY -> "Capture busy; try again after the current work finishes.";
+            case STOPPED -> "Capture stopped: Hybox is not running.";
+        };
+    }
+
+    private static final class ListCommand extends RuntimeAsyncCommand {
+        private ListCommand(HyboxRuntime runtime) {
+            super("list", "List recent incidents", runtime);
+        }
+
+        @Override
+        protected CompletableFuture<Void> executeAsync(CommandContext context) {
+            return run(context, () -> {
+                List<IncidentFile> recent = listIncidents(runtime.incidentDir(), 10);
+                if (recent.isEmpty()) {
+                    context.sendMessage(Message.raw("No incidents found."));
+                    return;
+                }
+
+                context.sendMessage(Message.raw("Recent incidents:"));
+                for (IncidentFile file : recent) {
+                    String headline = readHeadline(file.path()).orElse("<headline unavailable>");
+                    context.sendMessage(Message.raw(file.id() + " - " + headline));
+                    context.sendMessage(Message.raw("  " + file.path()));
+                }
+            });
+        }
+    }
+
+    private static final class TriggersCommand extends RuntimeAsyncCommand {
+        private TriggersCommand(HyboxRuntime runtime) {
+            super("triggers", "Show every trigger's live configuration", runtime);
+        }
+
+        @Override
+        protected CompletableFuture<Void> executeAsync(CommandContext context) {
+            return run(context, () -> {
+                var policy = runtime.config().triggerPolicy();
+                var detectors = policy.detectors();
+                context.sendMessage(Message.raw("Triggers (cooldown=" + policy.cooldown()
+                    + ", debounce=" + policy.debounce() + "):"));
+                context.sendMessage(Message.raw("  heartbeat stall: degraded >= " + policy.stallDegradedMs()
+                    + " ms, critical >= " + policy.stallCriticalMs() + " ms"));
+                context.sendMessage(Message.raw("  tick degraded: avg >= " + policy.tickAvgDegradedMs()
+                    + " ms, critical >= " + policy.tickAvgCriticalMs() + " ms"));
+                context.sendMessage(Message.raw("  world failure: always on"));
+                context.sendMessage(Message.raw("  deadlock: "
+                    + (runtime.deadlockArmed() ? "on" : "disabled")));
+                context.sendMessage(Message.raw("  heap pressure: "
+                    + (runtime.heapPressureArmed()
+                        ? ">= " + detectors.heapPressurePct() + "% after GC sustained " + detectors.heapPressureSustain()
+                        : "disabled")));
+                context.sendMessage(Message.raw("  gc pressure: "
+                    + (runtime.gcPressureArmed()
+                        ? ">= " + detectors.gcPressurePct() + "% of " + detectors.gcPressureWindow() + " window"
+                        : "disabled")));
+                context.sendMessage(Message.raw("  cpu saturation: "
+                    + (runtime.cpuSaturationArmed()
+                        ? ">= " + detectors.cpuSaturationPct() + "% sustained " + detectors.cpuSaturationSustain()
+                        : "disabled")));
+                context.sendMessage(Message.raw("  net saturation: "
+                    + (runtime.netSaturationArmed()
+                        ? "in >= " + detectors.netInMbps() + " Mbit/s, out >= " + detectors.netOutMbps()
+                            + " Mbit/s sustained " + detectors.netSustain()
+                        : "disabled")));
+                context.sendMessage(Message.raw("  player drop: "
+                    + (runtime.playerDropArmed()
+                        ? ">= " + detectors.playerDropPct() + "% within " + detectors.playerDropWindow()
+                            + ", min " + detectors.playerDropMinPlayers() + " players"
+                        : "disabled")));
+                context.sendMessage(Message.raw("  log error: "
+                    + (detectors.modules().logError()
+                        ? "on (requireThrowable=" + detectors.logErrorRequireThrowable()
+                            + ", skipSentry=" + detectors.logErrorSkipSentry()
+                            + ", dedupe " + detectors.logErrorDedupeWindow()
+                            + ", ignore " + detectors.logErrorIgnore().size() + ")"
+                        : "disabled")));
+            });
+        }
+    }
+
+    private static final class HistogramCommand extends RuntimeAsyncCommand {
+        private HistogramCommand(HyboxRuntime runtime) {
+            super("histogram", "Show the top heap classes (walks the heap)", runtime);
+        }
+
+        @Override
+        protected CompletableFuture<Void> executeAsync(CommandContext context) {
+            return run(context, () -> {
+                context.sendMessage(Message.raw(
+                    "Walking the heap; this may pause the server for seconds on large heaps."));
+                List<String> lines = io.github.xytronix.hybox.core.capture.HeapHistogram.topLines(10);
+                if (lines.isEmpty()) {
+                    context.sendMessage(Message.raw("Heap histogram unavailable on this JVM."));
+                    return;
+                }
+                context.sendMessage(Message.raw("Top classes by heap bytes:"));
+                for (String line : lines) {
+                    context.sendMessage(Message.raw("  " + line));
+                }
+            });
+        }
+    }
+
+    private static final class ProfileCommand extends RuntimeAsyncCommand {
+        private final DefaultArg<Integer> minutesArg =
+            withDefaultArg("minutes", "Profiling duration in minutes (1-30)", ArgTypes.INTEGER, 5, "5");
+        private final DefaultArg<Boolean> keepBufferArg =
+            withDefaultArg("keep-buffer", "Keep the rolling buffer so one bundle spans before + after (default)",
+                ArgTypes.BOOLEAN, true, "true");
+
+        private ProfileCommand(HyboxRuntime runtime) {
+            super("profile", "Record one high-fidelity profiling bundle spanning before + after the command "
+                + "(keep-buffer=false for a fresh recording instead)", runtime);
+        }
+
+        @Override
+        protected CompletableFuture<Void> executeAsync(CommandContext context) {
+            return run(context, () -> {
+                Integer requested = context.get(minutesArg);
+                int minutes = Math.max(1, Math.min(30, requested == null ? 5 : requested));
+                boolean keepBuffer = Boolean.TRUE.equals(context.get(keepBufferArg));
+                String error = runtime.startProfileSession(minutes, keepBuffer);
+                if (error != null) {
+                    context.sendMessage(Message.raw(error));
+                    return;
+                }
+                if (keepBuffer) {
+                    context.sendMessage(Message.raw(
+                        "Profile session started: high-fidelity recording for the next " + minutes
+                        + " min, captured as one bundle spanning the lead-up and the session."));
+                    context.sendMessage(Message.raw("A capture fires automatically in " + minutes + " min."));
+                } else {
+                    context.sendMessage(Message.raw(
+                        "Profile session started: the rolling buffer was discarded and a fresh high-fidelity "
+                        + "recording is running."));
+                    context.sendMessage(Message.raw("A capture fires automatically in " + minutes
+                        + " min, then the recording reverts to the configured preset."));
+                }
+            });
+        }
+    }
+
+    private static final class TrendCommand extends RuntimeAsyncCommand {
+        private final DefaultArg<Integer> daysArg =
+            withDefaultArg("days", "How many days back to chart (1-30)", ArgTypes.INTEGER, 7, "7");
+
+        private TrendCommand(HyboxRuntime runtime) {
+            super("trend", "Build an HTML report of health metric trends over time", runtime);
+        }
+
+        @Override
+        protected CompletableFuture<Void> executeAsync(CommandContext context) {
+            return run(context, () -> {
+                Integer requested = context.get(daysArg);
+                int days = Math.max(1, Math.min(30, requested == null ? 7 : requested));
+                try {
+                    Path out = runtime.generateTrendReport(days);
+                    if (out == null) {
+                        if (!runtime.config().metricsEnabled()) {
+                            context.sendMessage(Message.raw(
+                                "No health metrics: metrics are disabled. Set Metrics.Enabled to true in the active Hybox configuration."));
+                        } else {
+                            context.sendMessage(Message.raw(
+                                "No health metrics recorded yet for the last " + days + " day(s)."));
+                        }
+                        return;
+                    }
+                    context.sendMessage(Message.raw("Trend report (" + days + "d): " + out));
+                } catch (IOException e) {
+                    context.sendMessage(Message.raw("Failed to build trend report: " + e.getMessage()));
+                }
+            });
+        }
+    }
+
+    private static final class ReloadCommand extends RuntimeAsyncCommand {
+        private ReloadCommand(HyboxRuntime runtime) {
+            super("reload", "Reload the active Hybox configuration without a restart", runtime);
+        }
+
+        @Override
+        protected CompletableFuture<Void> executeAsync(CommandContext context) {
+            return run(context, () -> context.sendMessage(Message.raw(runtime.reload())));
+        }
+    }
+
+
+    private static List<IncidentFile> listIncidents(Path incidentDir, int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+
+        List<Path> zips;
+        try {
+            if (!Files.exists(incidentDir)) {
+                return List.of();
+            }
+            try (var stream = Files.list(incidentDir)) {
+                zips = stream
+                    .filter(path -> path.getFileName().toString().endsWith(".zip"))
+                    .toList();
+            }
+        } catch (Exception e) {
+            return List.of();
+        }
+
+        List<IncidentFile> incidents = new ArrayList<>(zips.size());
+        for (Path zip : zips) {
+            String id = parseIncidentId(zip.getFileName().toString());
+            if (id == null) {
+                continue;
+            }
+            incidents.add(new IncidentFile(id, zip, parseCreatedAtFromId(id)));
+        }
+
+        incidents.sort(Comparator
+            .comparing((IncidentFile f) -> f.createdAt().orElse(Instant.EPOCH))
+            .thenComparing(f -> f.path().getFileName().toString()));
+
+        int from = Math.max(0, incidents.size() - limit);
+        List<IncidentFile> slice = incidents.subList(from, incidents.size());
+        slice = new ArrayList<>(slice);
+        slice.sort(Comparator.comparing(IncidentFile::id).reversed());
+        return slice;
+    }
+
+    private static String parseIncidentId(String fileName) {
+        if (!fileName.endsWith(".zip")) {
+            return null;
+        }
+        String base = fileName.substring(0, fileName.length() - ".zip".length());
+        if (base.startsWith("incident-")) {
+            return base.substring("incident-".length());
+        }
+        return base;
+    }
+
+    private static Optional<Instant> parseCreatedAtFromId(String id) {
+        int lastDash = id.lastIndexOf('-');
+        if (lastDash <= 0) {
+            return Optional.empty();
+        }
+        String timestamp = id.substring(0, lastDash);
+        try {
+            return Optional.of(OffsetDateTime.parse(timestamp, INCIDENT_TIMESTAMP).toInstant());
+        } catch (DateTimeParseException e) {
+            return Optional.empty();
+        }
+    }
+
+    private static Optional<String> readHeadline(Path incidentZip) {
+        try (ZipFile zip = new ZipFile(incidentZip.toFile())) {
+            ZipEntry entry = zip.getEntry("incident.json");
+            if (entry == null) {
+                return Optional.empty();
+            }
+            byte[] bytes = zip.getInputStream(entry).readAllBytes();
+            String json = new String(bytes, StandardCharsets.UTF_8);
+            return Optional.ofNullable(extractJsonString(json, "\"headline\":"));
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    private static String extractJsonString(String json, String keyWithColon) throws IOException {
+        int keyIndex = json.indexOf(keyWithColon);
+        if (keyIndex < 0) {
+            return null;
+        }
+        int i = keyIndex + keyWithColon.length();
+        if (i >= json.length() || json.charAt(i) != '\"') {
+            return null;
+        }
+        return readJsonStringLiteral(json, i);
+    }
+
+    private static String readJsonStringLiteral(String json, int openingQuoteIndex) throws IOException {
+        if (openingQuoteIndex >= json.length() || json.charAt(openingQuoteIndex) != '\"') {
+            return null;
+        }
+        StringBuilder out = new StringBuilder(64);
+        for (int i = openingQuoteIndex + 1; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c == '\"') {
+                return out.toString();
+            }
+            if (c != '\\') {
+                out.append(c);
+                continue;
+            }
+            if (i + 1 >= json.length()) {
+                return null;
+            }
+            char esc = json.charAt(++i);
+            switch (esc) {
+                case '\"' -> out.append('\"');
+                case '\\' -> out.append('\\');
+                case 'n' -> out.append('\n');
+                case 'r' -> out.append('\r');
+                case 't' -> out.append('\t');
+                case 'u' -> {
+                    if (i + 4 >= json.length()) {
+                        return null;
+                    }
+                    int codePoint = parseHex(json, i + 1, i + 5);
+                    if (codePoint < 0) {
+                        return null;
+                    }
+                    out.append((char) codePoint);
+                    i += 4;
+                }
+                default -> out.append(esc);
+            }
+        }
+        return null;
+    }
+
+    private static int parseHex(String value, int startInclusive, int endExclusive) {
+        int codePoint = 0;
+        for (int i = startInclusive; i < endExclusive; i++) {
+            int digit = Character.digit(value.charAt(i), 16);
+            if (digit < 0) {
+                return -1;
+            }
+            codePoint = (codePoint << 4) | digit;
+        }
+        return codePoint;
+    }
+
+    private record IncidentFile(String id, Path path, Optional<Instant> createdAt) {
+    }
+}

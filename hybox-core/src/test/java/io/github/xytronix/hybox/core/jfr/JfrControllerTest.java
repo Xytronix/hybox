@@ -1,0 +1,197 @@
+package io.github.xytronix.hybox.core.jfr;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import jdk.jfr.FlightRecorder;
+import jdk.jfr.Recording;
+import jdk.jfr.consumer.RecordedEvent;
+import jdk.jfr.consumer.RecordingFile;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+class JfrControllerTest {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void healthReflectsExternalStopAndCloseWithoutControllerLock(boolean close) throws Exception {
+        try (JfrController controller = new JfrController(Duration.ofMinutes(1), 1024 * 1024, "hybox-health")) {
+            controller.start();
+            assertTrue(controller.isRunning());
+            Recording owned = extractRecording(controller);
+            synchronized (controller) {
+                CompletableFuture.runAsync(() -> {
+                    if (close) {
+                        owned.close();
+                    } else {
+                        owned.stop();
+                    }
+                }).get(5, TimeUnit.SECONDS);
+                assertFalse(CompletableFuture.supplyAsync(controller::isRunning).get(1, TimeUnit.SECONDS));
+            }
+            controller.restart(null);
+            assertTrue(controller.isRunning());
+        }
+    }
+
+    @Test
+    void dumpsRecordingWithEventsByDefault(@TempDir Path tempDir) throws Exception {
+        assertTrue(FlightRecorder.isAvailable(), "JFR is not available in this runtime.");
+        Path dumpPath = tempDir.resolve("recording.jfr");
+
+        try (JfrController controller = new JfrController(Duration.ofSeconds(60), 16L * 1024L * 1024L,
+            "hybox-test")) {
+            controller.start();
+            controller.dump(dumpPath);
+        }
+
+        assertTrue(Files.exists(dumpPath), "Expected JFR dump to exist.");
+        assertTrue(Files.size(dumpPath) > 0, "Expected JFR dump to be non-empty.");
+
+        boolean foundAnyEvent = false;
+        try (RecordingFile recordingFile = new RecordingFile(dumpPath)) {
+            if (recordingFile.hasMoreEvents()) {
+                foundAnyEvent = true;
+            }
+        }
+
+        assertTrue(foundAnyEvent, "Expected at least one event in the recording.");
+    }
+
+    @Test
+    void dumpsRecordingWithMarkerEvent(@TempDir Path tempDir) throws Exception {
+        assertTrue(FlightRecorder.isAvailable(), "JFR is not available in this runtime.");
+        Path dumpPath = tempDir.resolve("recording.jfr");
+
+        try (JfrController controller = new JfrController(Duration.ofSeconds(60), 16L * 1024L * 1024L,
+            "hybox-test")) {
+            controller.start();
+
+            for (int i = 0; i < 3; i++) {
+                HyboxMarkerEvent event = new HyboxMarkerEvent();
+                event.message = "marker-" + i;
+                event.commit();
+            }
+
+            controller.dump(dumpPath);
+        }
+
+        assertTrue(Files.exists(dumpPath), "Expected JFR dump to exist.");
+        assertTrue(Files.size(dumpPath) > 0, "Expected JFR dump to be non-empty.");
+
+        boolean foundMarker = false;
+        try (RecordingFile recordingFile = new RecordingFile(dumpPath)) {
+            while (recordingFile.hasMoreEvents()) {
+                RecordedEvent event = recordingFile.readEvent();
+                if ("io.github.xytronix.hybox.marker".equals(event.getEventType().getName())) {
+                    foundMarker = true;
+                    break;
+                }
+            }
+        }
+
+        assertTrue(foundMarker, "Expected at least one marker event in the recording.");
+    }
+
+    @Test
+    void disabledEventsAreAppliedToRecordingSettings(@TempDir Path tempDir) throws Exception {
+        assertTrue(FlightRecorder.isAvailable(), "JFR is not available in this runtime.");
+        try (JfrController controller = new JfrController(
+            Duration.ofSeconds(60),
+            16L * 1024L * 1024L,
+            "hybox-test",
+            List.of("jdk.CPULoad")
+        )) {
+            controller.start();
+            Recording recording = extractRecording(controller);
+            assertEquals("false", recording.getSettings().get("jdk.CPULoad#enabled"));
+        }
+    }
+
+    @Test
+    void oldObjectSamplingIsOffByDefault(@TempDir Path tempDir) throws Exception {
+        assertTrue(FlightRecorder.isAvailable(), "JFR is not available in this runtime.");
+        try (JfrController controller = new JfrController(Duration.ofSeconds(60), 16L * 1024L * 1024L,
+            "hybox-test")) {
+            controller.start();
+            Recording recording = extractRecording(controller);
+            assertNotEquals("true", recording.getSettings().get("jdk.OldObjectSample#stackTrace"));
+        }
+    }
+
+    @Test
+    void oldObjectSamplingIsEnabledWhenOptedIn(@TempDir Path tempDir) throws Exception {
+        assertTrue(FlightRecorder.isAvailable(), "JFR is not available in this runtime.");
+        try (JfrController controller = new JfrController(Duration.ofSeconds(60), 16L * 1024L * 1024L,
+            "hybox-test", List.of(), "default", true)) {
+            controller.start();
+            Recording recording = extractRecording(controller);
+            assertEquals("true", recording.getSettings().get("jdk.OldObjectSample#enabled"));
+            assertEquals("true", recording.getSettings().get("jdk.OldObjectSample#stackTrace"));
+        }
+    }
+
+    @Test
+    void applyConfigurationSwitchesSettingsLiveWithoutRestart(@TempDir Path tempDir) throws Exception {
+        assertTrue(FlightRecorder.isAvailable(), "JFR is not available in this runtime.");
+        try (JfrController controller = new JfrController(
+            Duration.ofSeconds(60), 16L * 1024L * 1024L, "hybox-test", List.of("jdk.CPULoad"))) {
+            controller.start();
+            Recording before = extractRecording(controller);
+
+            controller.applyConfiguration("profile");
+            Recording after = extractRecording(controller);
+
+            assertSame(before, after);
+            assertEquals("false", after.getSettings().get("jdk.CPULoad#enabled"));
+        }
+    }
+
+    @Test
+    void restartSwapsRecordingAndPreservesNameAndCaps(@TempDir Path tempDir) throws Exception {
+        assertTrue(FlightRecorder.isAvailable(), "JFR is not available in this runtime.");
+        Path dumpPath = tempDir.resolve("recording.jfr");
+
+        try (JfrController controller = new JfrController(Duration.ofSeconds(60), 16L * 1024L * 1024L,
+            "hybox-test")) {
+            controller.start();
+            Recording before = extractRecording(controller);
+
+            controller.restart("profile");
+            Recording profiled = extractRecording(controller);
+            assertNotSame(before, profiled);
+            assertEquals("hybox-test", profiled.getName());
+            assertEquals(Duration.ofSeconds(60), profiled.getMaxAge());
+            assertEquals(16L * 1024L * 1024L, profiled.getMaxSize());
+
+            controller.restart(null);
+            Recording reverted = extractRecording(controller);
+            assertNotSame(profiled, reverted);
+            assertEquals("hybox-test", reverted.getName());
+
+            controller.dump(dumpPath);
+        }
+
+        assertTrue(Files.exists(dumpPath), "Expected JFR dump to exist after restart.");
+        assertTrue(Files.size(dumpPath) > 0, "Expected JFR dump to be non-empty after restart.");
+    }
+
+    private static Recording extractRecording(JfrController controller) throws Exception {
+        Field field = JfrController.class.getDeclaredField("recording");
+        field.setAccessible(true);
+        return (Recording) field.get(controller);
+    }
+}
