@@ -7,7 +7,7 @@
 <style>
   :root{
     --bg:#0e1116;--panel:#161b22;--border:#222a35;--border2:#2b3543;
-    --tx:#e6edf3;--tx2:#9aa7b4;--tx3:#6b7785;--accent:#5b9dff;--grid:#1d2630;
+    --tx:#e6edf3;--tx2:#9aa7b4;--tx3:#8f9ba8;--accent:#5b9dff;--grid:#1d2630;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--tx);
@@ -17,9 +17,14 @@
   h1{font-size:21px;font-weight:600;margin:0 0 4px}
   .meta{color:var(--tx2);font-size:12.5px;margin-bottom:14px}
   .pmlegend{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 20px;font-size:11px;color:var(--tx2)}
-  .pmlegend .pmlg{display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
+  .pmlegend .pmlg{
+    appearance:none;background:transparent;border:0;color:inherit;font:inherit;
+    display:inline-flex;align-items:center;gap:5px;cursor:pointer;
+    padding:2px 0;text-align:left;user-select:none;
+  }
   .pmlegend .pmlg:hover{color:var(--tx)}
-  .pmlegend .pmlg.off{opacity:.32;text-decoration:line-through}
+  .pmlegend .pmlg:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+  .pmlegend .pmlg.off{color:var(--tx3);text-decoration:line-through}
   .pmlegend .edot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
   .pmlegend .smp{width:20px;border-top:1px dashed #f0626b;display:inline-block;flex:none}
   .card .pmlegend{margin:3px 0 8px;gap:12px;font-variant-numeric:tabular-nums}
@@ -33,12 +38,16 @@
   .cur{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
   .cur.dim{font-size:13px;font-weight:400;color:var(--tx3)}
   .sub{font-size:11.5px;color:var(--tx3);margin:2px 0 6px;font-variant-numeric:tabular-nums}
-  svg{display:block;width:100%;height:auto}
-  .ax{fill:var(--tx3);font-size:10px;font-variant-numeric:tabular-nums}
+  svg{display:block;width:100%;height:170px;overflow:visible}
+  .ax{fill:var(--tx3);font-size:12px;font-variant-numeric:tabular-nums}
   .gl{stroke:var(--grid);stroke-width:1}
   .dl{stroke:var(--grid);stroke-width:1;stroke-dasharray:2 3}
   .il{stroke:#f0626b;stroke-width:1.1;stroke-dasharray:3 2;opacity:.7}
   .ln{fill:none;stroke-width:1.6}
+  @media (max-width:600px){
+    body{padding:20px 12px 44px}
+    .card{padding-left:10px;padding-right:10px}
+  }
 </style>
 </head>
 <body>
@@ -66,6 +75,7 @@ const GROUPS = [
 ];
 
 const hiddenLines = new Set();
+let chartWidth=820;
 let showIncidents = true;
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -97,7 +107,7 @@ function stats(v){
 function lineColor(hue){ return `hsl(${hue} 70% 62%)`; }
 
 function chart(t, lines, g){
-  const W=820,H=170,PADL=52,PADR=12,PADT=12,PADB=24;
+  const W=chartWidth,H=170,PADL=64,PADR=12,PADT=12,PADB=24;
   const visible = lines.filter(l=>l.s && !hiddenLines.has(l.k));
   const use = visible.length ? visible : lines.filter(l=>l.s);
   let mn=Infinity, mx=-Infinity;
@@ -117,8 +127,9 @@ function chart(t, lines, g){
   });
 
   const STEPS=[3600000,2*3600000,3*3600000,6*3600000,12*3600000,86400000,2*86400000,3*86400000,7*86400000];
+  const maxTicks=Math.max(2,Math.min(8,Math.floor((W-PADL-PADR)/80)));
   let step=STEPS[STEPS.length-1];
-  for(const s of STEPS){ if(span/s<=8){ step=s; break; } }
+  for(const s of STEPS){ if(Math.ceil(span/s)<=maxTicks){ step=s; break; } }
   const sub=step<86400000;
   for(let gx=Math.ceil(t0/step)*step; gx<=t1; gx+=step){
     const x=xs(gx);
@@ -144,7 +155,18 @@ function chart(t, lines, g){
     parts.push(`<path class="ln" stroke="${lineColor(l.hue)}" d="${dpath.trim()}"/>`);
   });
 
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${parts.join("")}</svg>`;
+  const chartId="trend-"+g.lines.map(l=>l.k).join("-");
+  const period=t.length>1?` from ${timeLabel(t0)} to ${timeLabel(t1)}`:` at ${timeLabel(t0)}`;
+  const values=use.map(l=>`${l.label}: last ${fmtVal(l.s.last,g.unit)}, minimum ${fmtVal(l.s.mn,g.unit)}, average ${fmtVal(l.s.avg,g.unit)}, maximum ${fmtVal(l.s.mx,g.unit)}`).join(". ");
+  return `<svg role="img" aria-labelledby="${chartId}-title ${chartId}-desc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><title id="${chartId}-title">${g.label} trend</title><desc id="${chartId}-desc">${g.label}${period}. ${values}.</desc>${parts.join("")}</svg>`;
+}
+
+function gridPlotWidth(grid){
+  const columns=Math.max(1,getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length);
+  const styles=getComputedStyle(grid);
+  const gap=columns>1?parseFloat(styles.columnGap)||0:0;
+  const inset=window.matchMedia("(max-width:600px)").matches?22:30;
+  return Math.max(220,Math.round((grid.clientWidth-gap*(columns-1))/columns-inset));
 }
 
 function card(g){
@@ -156,8 +178,8 @@ function card(g){
   let head, extra;
   if(g.lines.length>1){
     head = `<div class="ch"><span class="lbl">${g.label}</span></div>`;
-    extra = `<div class="pmlegend">` + lines.map(l=>
-      `<span class="pmlg${hiddenLines.has(l.k)?" off":""}" data-line="${l.k}"><span class="edot" style="background:${lineColor(l.hue)}"></span>${l.label} ${l.s?fmtVal(l.s.last,g.unit):"n/a"}</span>`
+    extra = `<div class="pmlegend" aria-label="${g.label} series">` + lines.map(l=>
+      `<button type="button" class="pmlg${hiddenLines.has(l.k)?" off":""}" data-line="${l.k}" aria-pressed="${!!l.s&&!hiddenLines.has(l.k)}"${l.s?"":" disabled"}><span class="edot" style="background:${lineColor(l.hue)}" aria-hidden="true"></span><span>${l.label} ${l.s?fmtVal(l.s.last,g.unit):"n/a"}</span></button>`
     ).join("") + `</div>`;
   } else {
     const l = lines[0];
@@ -168,7 +190,19 @@ function card(g){
 }
 
 function renderGrid(){
-  document.getElementById("grid").innerHTML = GROUPS.map(card).join("");
+  const grid=document.getElementById("grid");
+  if(!grid) return;
+  const focusedLine=document.activeElement?.dataset?.line||null;
+  chartWidth=gridPlotWidth(grid);
+  grid.innerHTML=GROUPS.map(card).join("");
+  if(focusedLine){
+    for(const el of grid.querySelectorAll("[data-line]")){
+      if(el.dataset.line===focusedLine){
+        el.focus({preventScroll:true});
+        break;
+      }
+    }
+  }
 }
 
 function toggleLine(k){
@@ -176,7 +210,7 @@ function toggleLine(k){
     hiddenLines.delete(k);
   } else {
     const g = GROUPS.find(gr=>gr.lines.some(l=>l.k===k));
-    if(g && g.lines.filter(l=>!hiddenLines.has(l.k)).length>1) hiddenLines.add(k);
+    if(g && g.lines.some(l=>l.k!==k&&!hiddenLines.has(l.k)&&stats(D[l.k]||[]))) hiddenLines.add(k);
   }
   renderGrid();
 }
@@ -190,7 +224,7 @@ function toggleLine(k){
   const inc=(D.incidents||[]).length;
   let html = `<h1>Health trends</h1>`;
   html += `<div class="meta">Last ${D.days} day(s) · ${D.count.toLocaleString()} samples${inc?` · ${inc} incident${inc>1?"s":""}`:""} · generated ${D.generated}</div>`;
-  if(inc) html += `<div class="pmlegend"><span class="pmlg" data-inc><span class="smp"></span>Incident markers</span></div>`;
+  if(inc) html += `<div class="pmlegend"><button type="button" class="pmlg" data-inc aria-pressed="true"><span class="smp" aria-hidden="true"></span><span>Incident markers</span></button></div>`;
   html += `<div class="grid" id="grid"></div>`;
   app.innerHTML = html;
   renderGrid();
@@ -199,7 +233,13 @@ function toggleLine(k){
     if(el) toggleLine(el.dataset.line);
   });
   const ic=app.querySelector("[data-inc]");
-  if(ic) ic.addEventListener("click",()=>{ showIncidents=!showIncidents; ic.classList.toggle("off",!showIncidents); renderGrid(); });
+  if(ic) ic.addEventListener("click",()=>{
+    showIncidents=!showIncidents;
+    ic.classList.toggle("off",!showIncidents);
+    ic.setAttribute("aria-pressed",String(showIncidents));
+    renderGrid();
+  });
+  window.addEventListener("resize",renderGrid);
 })();
 </script>
 </body>
