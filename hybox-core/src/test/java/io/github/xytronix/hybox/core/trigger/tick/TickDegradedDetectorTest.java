@@ -1,6 +1,8 @@
 package io.github.xytronix.hybox.core.trigger.tick;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -13,6 +15,26 @@ import io.github.xytronix.hybox.core.trigger.TriggerEvent;
 import io.github.xytronix.hybox.core.trigger.TriggerKind;
 
 class TickDegradedDetectorTest {
+
+    @Test
+    void recoveredOnlyAfterAverageFallsBelowRearmLevel() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        Map<String, Double> averages = new HashMap<>();
+        TickDegradedDetector detector = new TickDegradedDetector(clock, () -> averages, 100);
+
+        averages.put("world", 150.0);
+        assertEquals(1, detector.check().size());
+        assertFalse(detector.recovered("world"));
+        assertTrue(detector.recovered("other"));
+
+        averages.put("world", 95.0);
+        detector.check();
+        assertFalse(detector.recovered("world"));
+
+        averages.put("world", 80.0);
+        detector.check();
+        assertTrue(detector.recovered("world"));
+    }
 
     @Test
     void emitsOncePerDegradedTransition() {

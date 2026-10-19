@@ -38,30 +38,33 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
     private final Path metricsDir;
     private final PlayerNameMasker nameMasker;
     private final java.util.function.Supplier<List<String>> spacedDumps;
+    private final java.util.function.BooleanSupplier liveDumpAllowed;
 
     HytaleBundleExtrasProvider(HeartbeatRegistry heartbeatRegistry, int logTailLines, Path metricsDir) {
         this(heartbeatRegistry, () -> logTailLines, () -> true, metricsDir, new PlayerNameMasker(),
-            () -> List.of());
+            () -> List.of(), () -> true);
     }
 
     HytaleBundleExtrasProvider(HeartbeatRegistry heartbeatRegistry,
                                java.util.function.IntSupplier logTailLines,
                                java.util.function.BooleanSupplier includeServerLog, Path metricsDir) {
         this(heartbeatRegistry, logTailLines, includeServerLog, metricsDir, new PlayerNameMasker(),
-            () -> List.of());
+            () -> List.of(), () -> true);
     }
 
     HytaleBundleExtrasProvider(HeartbeatRegistry heartbeatRegistry,
                                java.util.function.IntSupplier logTailLines,
                                java.util.function.BooleanSupplier includeServerLog, Path metricsDir,
                                PlayerNameMasker nameMasker,
-                               java.util.function.Supplier<List<String>> spacedDumps) {
+                               java.util.function.Supplier<List<String>> spacedDumps,
+                               java.util.function.BooleanSupplier liveDumpAllowed) {
         this.heartbeatRegistry = heartbeatRegistry;
         this.logTailLines = logTailLines;
         this.includeServerLog = includeServerLog;
         this.metricsDir = metricsDir;
         this.nameMasker = nameMasker;
         this.spacedDumps = spacedDumps;
+        this.liveDumpAllowed = liveDumpAllowed;
     }
 
     @Override
@@ -72,7 +75,7 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
             buildWorldsText().getBytes(StandardCharsets.UTF_8)));
         extras.add(new BundleAttachment("extras/heartbeats.txt",
             buildHeartbeatsText().getBytes(StandardCharsets.UTF_8)));
-        extras.addAll(threadDumpAttachments(spacedDumps.get()));
+        extras.addAll(threadDumpAttachments(spacedDumps.get(), liveDumpAllowed.getAsBoolean()));
 
         if (includeServerLog.getAsBoolean() && logTailLines.getAsInt() > 0) {
             String logTail = nameMasker.maskText(buildServerLogTail());
@@ -122,11 +125,13 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
         return out;
     }
 
-    static List<BundleAttachment> threadDumpAttachments(List<String> dumps) {
+    static List<BundleAttachment> threadDumpAttachments(List<String> dumps, boolean liveDumpAllowed) {
         List<BundleAttachment> out = new ArrayList<>();
         if (dumps.isEmpty()) {
-            out.add(new BundleAttachment("extras/threads.txt",
-                ThreadDumper.dump().getBytes(StandardCharsets.UTF_8)));
+            if (liveDumpAllowed) {
+                out.add(new BundleAttachment("extras/threads.txt",
+                    ThreadDumper.dump().getBytes(StandardCharsets.UTF_8)));
+            }
         } else if (dumps.size() == 1) {
             out.add(new BundleAttachment("extras/threads.txt",
                 dumps.get(0).getBytes(StandardCharsets.UTF_8)));

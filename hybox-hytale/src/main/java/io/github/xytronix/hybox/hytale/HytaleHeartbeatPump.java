@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import io.github.xytronix.hybox.core.env.ThreadDumper;
 import io.github.xytronix.hybox.core.trigger.TriggerEvent;
 import io.github.xytronix.hybox.core.trigger.TriggerKind;
@@ -81,6 +82,7 @@ final class HytaleHeartbeatPump {
         Duration maxWait,
         int dumpCount,
         Duration dumpInterval,
+        BooleanSupplier recovered,
         System.Logger logger
     ) {
         List<String> dumps = new ArrayList<>();
@@ -89,8 +91,10 @@ final class HytaleHeartbeatPump {
         if (heartbeat && (scope == null || scope.isBlank())) {
             return dumps;
         }
-        int maxDumps = Math.max(1, dumpCount);
-        dumps.add(ThreadDumper.dump());
+        int maxDumps = Math.max(0, dumpCount);
+        if (maxDumps > 0) {
+            dumps.add(ThreadDumper.dump());
+        }
         if (maxWait == null || maxWait.isZero() || maxWait.isNegative()) {
             return dumps;
         }
@@ -106,6 +110,10 @@ final class HytaleHeartbeatPump {
                         "Heartbeat for '" + scope + "' resumed; dumping recording with post-incident recovery.");
                     return dumps;
                 }
+            } else if (recovered != null && recovered.getAsBoolean()) {
+                logger.log(System.Logger.Level.INFO,
+                    event.kind() + " for '" + scope + "' recovered; dumping recording with post-incident recovery.");
+                return dumps;
             }
             if (nextDump != null && dumps.size() < maxDumps && !clock.instant().isBefore(nextDump)) {
                 dumps.add(ThreadDumper.dump());

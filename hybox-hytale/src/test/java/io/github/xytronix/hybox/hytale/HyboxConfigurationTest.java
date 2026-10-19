@@ -14,7 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class HyboxConfigurationTest {
     @Test
-    void packagedManifestTargetsHytale067() throws Exception {
+    void packagedManifestTargetsHytale072() throws Exception {
         try (var input = getClass().getResourceAsStream("/manifest.json")) {
             assertNotNull(input);
             var manifest = PluginManifest.CODEC.decode(BsonDocument.parse(
@@ -22,7 +22,7 @@ class HyboxConfigurationTest {
             assertEquals("Hybox", manifest.getName());
             assertEquals("Xytronix", manifest.getGroup());
             assertEquals(ServerVersionCheck.COMPATIBLE,
-                PluginManifest.checkServerVersionCompatibility(manifest.getServerVersion(), "0.6.7"));
+                PluginManifest.checkServerVersionCompatibility(manifest.getServerVersion(), "0.7.2"));
             assertEquals(ServerVersionCheck.INCOMPATIBLE,
                 PluginManifest.checkServerVersionCompatibility(manifest.getServerVersion(), "0.5.6"));
             assertEquals(HyboxPlugin.class.getName(), manifest.getMain());

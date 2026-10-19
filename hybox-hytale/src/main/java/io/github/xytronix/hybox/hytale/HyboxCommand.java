@@ -279,11 +279,10 @@ final class HyboxCommand extends CommandBase {
 
         @Override
         protected CompletableFuture<Void> executeAsync(CommandContext context) {
-            return run(context, () -> {
-                Integer requested = context.get(minutesArg);
-                int minutes = Math.max(1, Math.min(30, requested == null ? 5 : requested));
-                boolean keepBuffer = Boolean.TRUE.equals(context.get(keepBufferArg));
-                String error = runtime.startProfileSession(minutes, keepBuffer);
+            Integer requested = context.get(minutesArg);
+            int minutes = Math.max(1, Math.min(30, requested == null ? 5 : requested));
+            boolean keepBuffer = Boolean.TRUE.equals(context.get(keepBufferArg));
+            return runtime.startProfileSession(minutes, keepBuffer).thenAccept(error -> {
                 if (error != null) {
                     context.sendMessage(Message.raw(error));
                     return;

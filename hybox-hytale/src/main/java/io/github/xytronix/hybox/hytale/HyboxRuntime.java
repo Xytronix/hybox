@@ -29,6 +29,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.logging.Level;
 import io.github.xytronix.hybox.core.bundle.BundleBuilder;
 import io.github.xytronix.hybox.core.bundle.BundleExtrasRegistry;
@@ -80,6 +81,7 @@ final class HyboxRuntime implements AutoCloseable {
 
     private final ScheduledExecutorService scheduler;
     private final ExecutorService worker;
+    private final ExecutorService captureExecutor;
 
     private final CallbackExecutor callbacks = new CallbackExecutor();
     private final JfrController jfr;
@@ -121,6 +123,7 @@ final class HyboxRuntime implements AutoCloseable {
     private final AtomicBoolean capturePending = new AtomicBoolean(false);
     private final AtomicReference<List<String>> lastSpacedDumps = new AtomicReference<>(List.of());
     private final AtomicBoolean captureAdmitted = new AtomicBoolean();
+    private final AtomicReference<PendingProfile> pendingProfile = new AtomicReference<>();
     private final AtomicLong busyCaptures = new AtomicLong();
     private final AtomicLong droppedCaptures = new AtomicLong();
     private final AtomicLong rejectedWork = new AtomicLong();
@@ -142,15 +145,18 @@ final class HyboxRuntime implements AutoCloseable {
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
             new NamedThreadFactory("hybox-scheduler"));
         ExecutorService worker = null;
+        ExecutorService captureExecutor = null;
         JfrController jfr = null;
         HyboxRuntime runtime = null;
         try {
             worker = newWorker();
+            captureExecutor = newCaptureExecutor();
             jfr = new JfrController(
                 config.jfrMaxAge(), config.jfrMaxSizeBytes(), config.jfrRecordingName(),
                 config.jfrDisabledEvents(), config.jfrConfiguration(), config.jfrOldObjectSampling());
             jfr.start();
-            runtime = new HyboxRuntime(plugin, Clock.systemUTC(), logger, dataDir, scheduler, worker, jfr);
+            runtime = new HyboxRuntime(plugin, Clock.systemUTC(), logger, dataDir, scheduler, worker, captureExecutor,
+                jfr);
             runtime.initialize(config);
             runtime.started = true;
             return runtime;
@@ -160,6 +166,9 @@ final class HyboxRuntime implements AutoCloseable {
             } else {
                 if (worker != null) {
                     rollback(failure, worker::shutdownNow);
+                }
+                if (captureExecutor != null) {
+                    rollback(failure, captureExecutor::shutdownNow);
                 }
                 rollback(failure, scheduler::shutdownNow);
                 if (jfr != null) {
@@ -175,6 +184,12 @@ final class HyboxRuntime implements AutoCloseable {
         return new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(16), new NamedThreadFactory("hybox-worker"));
     }
+
+    static ExecutorService newCaptureExecutor() {
+        return new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(1), new NamedThreadFactory("hybox-capture"));
+    }
+
     private static void rollback(Throwable failure, AutoCloseable resource) {
         try {
             resource.close();
@@ -194,7 +209,8 @@ final class HyboxRuntime implements AutoCloseable {
             () -> engine.config().capturePolicy().includeServerLog(),
             dataDir.resolve("metrics"),
             nameMasker,
-            () -> lastSpacedDumps.getAndSet(List.of())));
+            () -> lastSpacedDumps.getAndSet(List.of()),
+            () -> engine.config().threadDumpCount() > 0));
         healthScheduler.syncNetSampler();
         healthScheduler.start();
         registerCommands();
@@ -225,6 +241,11 @@ final class HyboxRuntime implements AutoCloseable {
                 HytaleHealthScheduler::tickAverageMillis,
                 config.triggerPolicy().tickAvgDegradedMs())
             : null;
+        GcPressureDetector gcPressureDetector = modules.gcPressure() && detectors.gcPressurePct() > 0
+            && !detectors.gcPressureWindow().isZero()
+            ? new GcPressureDetector(clock, JvmProbes::stwGcPauseMillis,
+                detectors.gcPressurePct() / 100.0, detectors.gcPressureWindow())
+            : null;
         TriggerEngine triggerEngine = new TriggerEngine(clock, config.triggerPolicy());
 
         RecordingDumper dumper = (target) -> {
@@ -241,7 +262,8 @@ final class HyboxRuntime implements AutoCloseable {
             captureProgress = "waiting for post-incident evidence";
             capturePending.set(true);
             lastSpacedDumps.set(HytaleHeartbeatPump.awaitRecovery(event, heartbeatRegistry, clock,
-                config.postIncidentMaxWait(), config.threadDumpCount(), config.threadDumpInterval(), logger));
+                config.postIncidentMaxWait(), config.threadDumpCount(), config.threadDumpInterval(),
+                recoverySignal(event, tickDegradedDetector, gcPressureDetector), logger));
         };
         IncidentNotifier configuredNotifier = buildNotifier(clock, config, logger,
             task -> submitWorker(task, () -> logger.log(System.Logger.Level.WARNING,
@@ -285,10 +307,7 @@ final class HyboxRuntime implements AutoCloseable {
                 ? new HeapPressureDetector(clock, JvmProbes::tenuredAfterGcFraction,
                     detectors.heapPressurePct() / 100.0, detectors.heapPressureSustain())
                 : null,
-            modules.gcPressure() && detectors.gcPressurePct() > 0 && !detectors.gcPressureWindow().isZero()
-                ? new GcPressureDetector(clock, JvmProbes::stwGcPauseMillis,
-                    detectors.gcPressurePct() / 100.0, detectors.gcPressureWindow())
-                : null,
+            gcPressureDetector,
             modules.cpuSaturation() && detectors.cpuSaturationPct() > 0
                 ? new CpuSaturationDetector(clock, JvmProbes::processCpuLoad,
                     detectors.cpuSaturationPct() / 100.0, detectors.cpuSaturationSustain())
@@ -302,6 +321,15 @@ final class HyboxRuntime implements AutoCloseable {
                     detectors.playerDropWindow(), detectors.playerDropMinPlayers())
                 : null
         );
+    }
+
+    private static BooleanSupplier recoverySignal(TriggerEvent event, TickDegradedDetector tick,
+                                                  GcPressureDetector gc) {
+        return switch (event.kind()) {
+            case TICK_DEGRADED -> tick == null ? null : () -> tick.recovered(event.scope());
+            case GC_PRESSURE -> gc == null ? null : gc::recovered;
+            default -> null;
+        };
     }
 
     private static IncidentNotifier buildNotifier(
@@ -388,6 +416,19 @@ final class HyboxRuntime implements AutoCloseable {
         ExecutorService worker,
         JfrController jfr
     ) {
+        this(plugin, clock, logger, dataDir, scheduler, worker, newCaptureExecutor(), jfr);
+    }
+
+    private HyboxRuntime(
+        HyboxPlugin plugin,
+        Clock clock,
+        System.Logger logger,
+        Path dataDir,
+        ScheduledExecutorService scheduler,
+        ExecutorService worker,
+        ExecutorService captureExecutor,
+        JfrController jfr
+    ) {
         this.plugin = plugin;
         this.clock = clock;
         this.logger = logger;
@@ -398,6 +439,7 @@ final class HyboxRuntime implements AutoCloseable {
         this.rollingFile = dataDir.resolve("live").resolve("rolling.jfr");
         this.scheduler = scheduler;
         this.worker = worker;
+        this.captureExecutor = captureExecutor;
         this.jfr = jfr;
         this.heartbeatRegistry = new HeartbeatRegistry(clock);
         this.heartbeatPump = new HytaleHeartbeatPump(logger, heartbeatRegistry);
@@ -407,7 +449,7 @@ final class HyboxRuntime implements AutoCloseable {
         this.sessionRecovery = new JfrSessionRecovery(clock, logger, rollingFile,
             dataDir.resolve("live").resolve("recover"), dataDir.resolve("live").resolve("jfr-session"));
         this.profileSessions = new ProfileSessionController(clock, logger, scheduler, jfr,
-            this::performCapture, this::enqueueCapture, this::remember);
+            this::performCapture, this::enqueueProfileCapture, this::remember);
         this.netSampler = new HytaleNetSampler(clock, logger);
         this.telemetry = new HytaleTelemetrySampler(clock, logger, worldStats,
             new MetricsLog(dataDir.resolve("metrics")), healthGauges, heartbeatRegistry,
@@ -433,7 +475,7 @@ final class HyboxRuntime implements AutoCloseable {
 
     void scheduleCapture(TriggerEvent event) {
         if (admitCapture(false) == null) {
-            submitWorker(() -> runCapture(event), () -> {
+            submitCapture(() -> runCapture(event), () -> {
                 remember(CaptureResult.of(closed ? CaptureResult.Status.STOPPED : CaptureResult.Status.BUSY));
                 releaseCapture();
             });
@@ -462,7 +504,12 @@ final class HyboxRuntime implements AutoCloseable {
             return CompletableFuture.completedFuture(denied);
         }
         CompletableFuture<CaptureResult> result = new CompletableFuture<>();
-        submitWorker(() -> {
+        submitAdmittedCapture(event, result);
+        return result;
+    }
+
+    private void submitAdmittedCapture(TriggerEvent event, CompletableFuture<CaptureResult> result) {
+        submitCapture(() -> {
             try {
                 result.complete(runCapture(event));
             } catch (Throwable failure) {
@@ -474,6 +521,38 @@ final class HyboxRuntime implements AutoCloseable {
             releaseCapture();
             result.complete(outcome);
         });
+    }
+
+    private CompletableFuture<CaptureResult> enqueueProfileCapture(TriggerEvent event) {
+        CompletableFuture<CaptureResult> result = new CompletableFuture<>();
+        result.whenComplete((outcome, failure) -> {
+            if (failure != null) {
+                logServer(Level.WARNING, "Profile capture failed: " + failure.getClass().getSimpleName());
+            } else if (outcome.captured()) {
+                logServer(Level.INFO, "Profile capture finished: " + outcome.incidentId().value());
+            } else {
+                logServer(Level.WARNING, "Profile capture finished: " + outcome.status()
+                    + (outcome.detail() == null ? "" : " (" + outcome.detail() + ")"));
+            }
+        });
+        if (closed) {
+            result.complete(remember(CaptureResult.of(CaptureResult.Status.STOPPED)));
+            return result;
+        }
+        if (captureAdmitted.compareAndSet(false, true)) {
+            captureProgress = "queued";
+            submitAdmittedCapture(event, result);
+            return result;
+        }
+        if (!pendingProfile.compareAndSet(null, new PendingProfile(event, result))) {
+            busyCaptures.incrementAndGet();
+            result.complete(remember(CaptureResult.of(CaptureResult.Status.BUSY)));
+            return result;
+        }
+        logServer(Level.INFO, "Profile capture waiting for the in-flight capture to finish.");
+        if (captureAdmitted.compareAndSet(false, true)) {
+            releaseCapture();
+        }
         return result;
     }
 
@@ -513,8 +592,20 @@ final class HyboxRuntime implements AutoCloseable {
     }
 
     private void releaseCapture() {
+        PendingProfile next = pendingProfile.getAndSet(null);
+        if (next != null) {
+            if (!closed) {
+                captureProgress = "queued";
+                submitAdmittedCapture(next.event(), next.result());
+                return;
+            }
+            next.result().complete(remember(CaptureResult.of(CaptureResult.Status.STOPPED)));
+        }
         captureProgress = "idle";
         captureAdmitted.set(false);
+        if (pendingProfile.get() != null && captureAdmitted.compareAndSet(false, true)) {
+            releaseCapture();
+        }
     }
 
     void executeWorker(Runnable work) {
@@ -539,6 +630,23 @@ final class HyboxRuntime implements AutoCloseable {
             rejected.run();
         }
     }
+
+    private void submitCapture(Runnable work, Runnable rejected) {
+        QueuedWork queued = new QueuedWork(work, rejected);
+        if (closed) {
+            rejectedWork.incrementAndGet();
+            rejected.run();
+            return;
+        }
+        try {
+            captureExecutor.execute(queued);
+        } catch (RejectedExecutionException failure) {
+            rejectedWork.incrementAndGet();
+            rejected.run();
+        }
+    }
+
+    private record PendingProfile(TriggerEvent event, CompletableFuture<CaptureResult> result) {}
 
     private record QueuedWork(Runnable work, Runnable rejected) implements Runnable {
         @Override
@@ -632,9 +740,21 @@ final class HyboxRuntime implements AutoCloseable {
         if (closed) {
             return "Reload failed: Hybox is not running.";
         }
-        if (captureAdmitted.get() || profileSessions.active()) {
+        if (profileSessions.active() || pendingProfile.get() != null || !captureAdmitted.compareAndSet(false, true)) {
             return "Reload failed: capture or profile session is busy.";
         }
+        captureProgress = "reloading";
+        try {
+            if (profileSessions.active()) {
+                return "Reload failed: capture or profile session is busy.";
+            }
+            return reloadAdmitted();
+        } finally {
+            releaseCapture();
+        }
+    }
+
+    private String reloadAdmitted() {
         HyboxConfig previous = engine.config();
         HyboxConfig fresh;
         Engine next;
@@ -695,21 +815,47 @@ final class HyboxRuntime implements AutoCloseable {
         return out.toString();
     }
 
-    synchronized String startProfileSession(int minutes, boolean keepBuffer) {
+    synchronized CompletableFuture<String> startProfileSession(int minutes, boolean keepBuffer) {
+        CompletableFuture<String> result = new CompletableFuture<>();
+        result.whenComplete((error, failure) -> {
+            if (failure != null) {
+                logServer(Level.WARNING, "Profile session not started: " + failure);
+            } else if (error != null) {
+                logServer(Level.WARNING, "Profile session not started: " + error);
+            } else {
+                logServer(Level.INFO, "Profile session started: " + minutes + " min, keep-buffer=" + keepBuffer + ".");
+            }
+        });
         if (closed) {
-            return "Hybox is not running.";
+            result.complete("Hybox is not running.");
+            return result;
         }
-        synchronized (profileSessions) {
-            if (!captureAdmitted.compareAndSet(false, true)) {
-                return "Cannot start profile: a capture is busy.";
-            }
-            captureProgress = "starting profile";
+        if (pendingProfile.get() != null || !captureAdmitted.compareAndSet(false, true)) {
+            result.complete("Cannot start profile: a capture is busy.");
+            return result;
+        }
+        captureProgress = "starting profile";
+        submitCapture(() -> {
             try {
-                return profileSessions.start(minutes, keepBuffer);
-            } finally {
-                releaseCapture();
+                String outcome;
+                try {
+                    synchronized (profileSessions) {
+                        outcome = pendingProfile.get() != null
+                            ? "Cannot start profile: a capture is busy."
+                            : profileSessions.start(minutes, keepBuffer);
+                    }
+                } finally {
+                    releaseCapture();
+                }
+                result.complete(outcome);
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
             }
-        }
+        }, () -> {
+            releaseCapture();
+            result.complete(closed ? "Hybox is not running." : "Cannot start profile: a capture is busy.");
+        });
+        return result;
     }
 
     Path generateTrendReport(int days) throws IOException {
@@ -787,6 +933,14 @@ final class HyboxRuntime implements AutoCloseable {
         return Optional.ofNullable(lastIncidentAt.get());
     }
 
+    private void logServer(Level level, String message) {
+        try {
+            plugin.getLogger().at(level).log(message);
+        } catch (Exception e) {
+            logger.log(level == Level.WARNING ? System.Logger.Level.WARNING : System.Logger.Level.INFO, message);
+        }
+    }
+
     private void logStartup() {
         try {
             plugin.getLogger().at(Level.INFO).log("Hybox started.");
@@ -797,10 +951,23 @@ final class HyboxRuntime implements AutoCloseable {
     }
 
     private CompletableFuture<Void> recoverOrphanedRecordings() {
-        return sessionRecovery.recoverOrphanedRecordings(
-            !engine.config().jfrSnapshotInterval().isZero(),
-            () -> engine.capturePipeline(),
-            worker);
+        boolean admitted = captureAdmitted.compareAndSet(false, true);
+        if (admitted) {
+            captureProgress = "recovering";
+        }
+        CompletableFuture<Void> recovery;
+        try {
+            recovery = sessionRecovery.recoverOrphanedRecordings(
+                !engine.config().jfrSnapshotInterval().isZero(),
+                () -> engine.capturePipeline(),
+                captureExecutor);
+        } catch (RuntimeException | Error failure) {
+            if (admitted) {
+                releaseCapture();
+            }
+            throw failure;
+        }
+        return admitted ? recovery.whenComplete((ignored, failure) -> releaseCapture()) : recovery;
     }
 
     @Override
@@ -818,19 +985,16 @@ final class HyboxRuntime implements AutoCloseable {
         cleanup("Event listeners", () -> plugin.getEventRegistry().shutdownAndCleanup(false));
         cleanup("Health scheduler", healthScheduler::close);
         cleanup("Scheduler executor", scheduler::shutdownNow);
-        cleanup("Profile session", profileSessions::close);
         cleanup("Worker executor", worker::shutdown);
+        cleanup("Capture executor", captureExecutor::shutdown);
         cleanup("Network sampler", netSampler);
         awaitTermination(scheduler);
-        if (!awaitTermination(worker)) {
-            cleanup("Worker executor interruption", () -> {
-                for (Runnable queued : worker.shutdownNow()) {
-                    if (queued instanceof QueuedWork work) {
-                        work.rejected().run();
-                    }
-                }
-            });
-            awaitTermination(worker);
+        drain("Worker executor", worker);
+        drain("Capture executor", captureExecutor);
+        cleanup("Profile session", profileSessions::close);
+        PendingProfile pending = pendingProfile.getAndSet(null);
+        if (pending != null) {
+            pending.result().complete(remember(CaptureResult.of(CaptureResult.Status.STOPPED)));
         }
 
         if (started && healthScheduler.ownsRollingSnapshot()) {
@@ -849,6 +1013,19 @@ final class HyboxRuntime implements AutoCloseable {
         }
         cleanup("Callbacks", callbacks);
         cleanup("JFR", jfr);
+    }
+
+    private void drain(String resource, ExecutorService executor) {
+        if (!awaitTermination(executor)) {
+            cleanup(resource + " interruption", () -> {
+                for (Runnable queued : executor.shutdownNow()) {
+                    if (queued instanceof QueuedWork work) {
+                        work.rejected().run();
+                    }
+                }
+            });
+            awaitTermination(executor);
+        }
     }
 
     private boolean awaitTermination(ExecutorService executor) {

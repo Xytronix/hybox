@@ -28,7 +28,7 @@ public final class GcPressureDetector {
     private final double threshold;
     private final Duration window;
     private final Deque<Sample> samples = new ArrayDeque<>();
-    private boolean fired;
+    private volatile boolean fired;
 
     public GcPressureDetector(Clock clock, Source source, double threshold, Duration window) {
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -77,5 +77,9 @@ public final class GcPressureDetector {
             fired = false;
         }
         return List.of();
+    }
+
+    public boolean recovered() {
+        return !fired;
     }
 }

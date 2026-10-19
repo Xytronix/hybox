@@ -1,6 +1,7 @@
 package io.github.xytronix.hybox.core.trigger.jvm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
@@ -36,6 +37,21 @@ class GcPressureDetectorTest {
             }
             return fired;
         }
+    }
+
+    @Test
+    void recoveredOnlyAfterGcFractionFallsBelowRearmLevel() {
+        Fixture f = Fixture.create();
+        assertTrue(f.detector().recovered());
+
+        assertEquals(1, f.poll(12, 2_000).size());
+        assertFalse(f.detector().recovered());
+
+        f.poll(1, 0);
+        assertFalse(f.detector().recovered());
+
+        f.poll(12, 0);
+        assertTrue(f.detector().recovered());
     }
 
     @Test

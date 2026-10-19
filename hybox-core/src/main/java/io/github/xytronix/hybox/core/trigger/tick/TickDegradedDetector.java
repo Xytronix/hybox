@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import io.github.xytronix.hybox.core.trigger.TriggerEvent;
 import io.github.xytronix.hybox.core.trigger.TriggerKind;
 
@@ -22,7 +23,7 @@ public final class TickDegradedDetector {
     private final Clock clock;
     private final Source source;
     private final long degradedMs;
-    private final Map<String, Boolean> inDegraded = new HashMap<>();
+    private final Map<String, Boolean> inDegraded = new ConcurrentHashMap<>();
 
     public TickDegradedDetector(Clock clock, Source source, long degradedMs) {
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -58,5 +59,9 @@ public final class TickDegradedDetector {
             }
         }
         return events;
+    }
+
+    public boolean recovered(String scope) {
+        return scope == null || !inDegraded.getOrDefault(scope, false);
     }
 }

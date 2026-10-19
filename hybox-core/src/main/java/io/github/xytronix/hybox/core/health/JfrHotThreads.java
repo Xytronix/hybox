@@ -24,6 +24,7 @@ public final class JfrHotThreads {
     public static List<HealthSnapshot.HotThread> parse(Path recording, int limit) {
         Map<String, long[]> samplesByThread = new HashMap<>();
         Map<String, Map<String, Long>> topMethodByThread = new HashMap<>();
+        JfrStackCache<RecordedStackTrace, String> tops = new JfrStackCache<>(JfrHotThreads::topMethod);
         try (RecordingFile file = new RecordingFile(recording)) {
             while (file.hasMoreEvents()) {
                 RecordedEvent event = file.readEvent();
@@ -43,7 +44,8 @@ public final class JfrHotThreads {
                 }
                 samplesByThread.computeIfAbsent(threadName, k -> new long[1])[0]++;
 
-                String top = topMethod(event.getStackTrace());
+                RecordedStackTrace stack = event.getStackTrace();
+                String top = stack == null ? null : tops.get(stack);
                 if (top != null) {
                     topMethodByThread
                         .computeIfAbsent(threadName, k -> new HashMap<>())
@@ -88,6 +90,7 @@ public final class JfrHotThreads {
     public static LinkedHashMap<String, String> modContribution(Path recording, int limit) {
         Map<String, long[]> samplesByMod = new HashMap<>();
         Map<String, Map<String, Long>> methodByMod = new HashMap<>();
+        JfrStackCache<RecordedStackTrace, String[][]> stackMods = new JfrStackCache<>(JfrHotThreads::modFrames);
         try (RecordingFile file = new RecordingFile(recording)) {
             while (file.hasMoreEvents()) {
                 RecordedEvent event = file.readEvent();
@@ -98,22 +101,16 @@ public final class JfrHotThreads {
                 if (stack == null) {
                     continue;
                 }
-                Set<String> modsInSample = new HashSet<>();
-                for (RecordedFrame frame : stack.getFrames()) {
-                    if (!frame.isJavaFrame() || frame.getMethod() == null) {
-                        continue;
-                    }
-                    String type = frame.getMethod().getType().getName();
-                    if (isEngine(type)) {
-                        continue;
-                    }
-                    String mod = modId(type);
-                    modsInSample.add(mod);
-                    methodByMod.computeIfAbsent(mod, k -> new HashMap<>())
-                        .merge(JfrTimelineParser.cleanType(type) + "." + frame.getMethod().getName(), 1L, Long::sum);
+                String[][] modFrames = stackMods.get(stack);
+                for (String[] modFrame : modFrames) {
+                    methodByMod.computeIfAbsent(modFrame[0], k -> new HashMap<>())
+                        .merge(modFrame[1], 1L, Long::sum);
                 }
-                for (String mod : modsInSample) {
-                    samplesByMod.computeIfAbsent(mod, k -> new long[1])[0]++;
+                Set<String> modsInSample = new HashSet<>();
+                for (String[] modFrame : modFrames) {
+                    if (modsInSample.add(modFrame[0])) {
+                        samplesByMod.computeIfAbsent(modFrame[0], k -> new long[1])[0]++;
+                    }
                 }
             }
         } catch (Exception e) {
@@ -154,6 +151,21 @@ public final class JfrHotThreads {
         }
         int third = type.indexOf('.', second + 1);
         return third < 0 ? type : type.substring(0, third);
+    }
+
+    private static String[][] modFrames(RecordedStackTrace stack) {
+        List<String[]> out = new ArrayList<>();
+        for (RecordedFrame frame : stack.getFrames()) {
+            if (!frame.isJavaFrame() || frame.getMethod() == null) {
+                continue;
+            }
+            String type = frame.getMethod().getType().getName();
+            if (isEngine(type)) {
+                continue;
+            }
+            out.add(new String[] {modId(type), JfrTimelineParser.cleanType(type) + "." + frame.getMethod().getName()});
+        }
+        return out.toArray(new String[0][]);
     }
 
     private static String topMethod(RecordedStackTrace stack) {
