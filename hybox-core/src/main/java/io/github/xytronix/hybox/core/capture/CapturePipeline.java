@@ -30,7 +30,6 @@ import io.github.xytronix.hybox.core.incident.IncidentId;
 import io.github.xytronix.hybox.core.incident.IncidentIds;
 import io.github.xytronix.hybox.core.incident.IncidentMetadata;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
-import io.github.xytronix.hybox.core.incident.IncidentSummary;
 import io.github.xytronix.hybox.core.incident.Severity;
 import io.github.xytronix.hybox.core.jfr.JfrRepository;
 import io.github.xytronix.hybox.core.retention.RetentionManager;
@@ -370,13 +369,8 @@ public final class CapturePipeline {
             }
             IncidentMetadata meta = new IncidentMetadata(
                 id, when, Severity.DEGRADED, "UNCLEAN_SHUTDOWN", null, "Recovered after an unclean shutdown");
-            IncidentSummary summary = new IncidentSummary(
-                "Unknown; the previous run did not shut down cleanly",
-                List.of("The JVM exited without a clean shutdown; this bundle was rebuilt on the next startup from the "
-                    + "rolling recording. The snapshot below is reconstructed from the recording's last samples."),
-                List.of("Open recording.jfr in JDK Mission Control for the timeline leading up to the exit."));
             IncidentReport report = new IncidentReport(
-                meta, summary, Map.of("recovered", "true"), snapshot, diagnostics);
+                meta, Map.of("recovered", "true"), snapshot, diagnostics);
             Files.createDirectories(incidentDir);
             Path outputZip = incidentDir.resolve("incident-" + id.value() + ".zip");
             List<BundleAttachment> extras = new ArrayList<>(extrasProvider.historicalExtras());
@@ -520,19 +514,7 @@ public final class CapturePipeline {
             headline
         );
 
-        String error = context.get("error");
-        boolean hasError = error != null && !error.isBlank();
-        List<String> whatHappened = new ArrayList<>();
-        whatHappened.add("Triggered by " + event.kind().name());
-        if (hasError) {
-            whatHappened.add(error);
-        }
-        IncidentSummary summary = new IncidentSummary(
-            hasError ? error : "Unknown",
-            whatHappened,
-            List.of("Review the incident report and recording.")
-        );
-        return new IncidentReport(meta, summary, context, snapshot, diagnostics);
+        return new IncidentReport(meta, context, snapshot, diagnostics);
     }
 
     private HealthSnapshot captureSnapshot() {

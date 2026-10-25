@@ -49,20 +49,29 @@ class HeapHistogramTest {
     }
 
     @Test
-    void formatsTopLinesWithHumanBytes() {
-        String raw = "   1:       1234567      123456789  [B (java.base@25)\n"
-            + "   2:        234567       23456789  java.lang.String (java.base@25)\n"
-            + "   3:           512            900  com.example.Tiny\n";
+    void snapshotKeepsTopEntriesAndWholeHeapTotalsForShares() {
+        String raw = " num     #instances         #bytes  class name (module)\n"
+            + "   1:       1234567      600000000  [B (java.base@25)\n"
+            + "   2:        234567      300000000  java.lang.String (java.base@25)\n"
+            + "   3:           512            900  com.example.Tiny\n"
+            + "Total      1469646     1000000000\n";
 
-        var lines = HeapHistogram.formatLines(HeapHistogram.parse(raw), 2);
+        var snapshot = HeapHistogram.snapshot(raw, 2);
 
-        assertEquals(2, lines.size());
-        assertEquals("[B  instances=1234567  bytes=117.7 MiB", lines.get(0));
-        assertEquals("java.lang.String  instances=234567  bytes=22.4 MiB", lines.get(1));
+        assertEquals(2, snapshot.entries().size());
+        assertEquals(new HeapHistogram.Entry("[B", 1234567, 600000000), snapshot.entries().get(0));
+        assertEquals(new HeapHistogram.Entry("java.lang.String", 234567, 300000000), snapshot.entries().get(1));
+        assertEquals(1469646, snapshot.totalInstances());
+        assertEquals(1000000000L, snapshot.shareBase());
     }
 
     @Test
-    void formatLinesIsEmptyOnEmptyInput() {
-        assertTrue(HeapHistogram.formatLines(Map.of(), 10).isEmpty());
+    void shareBaseFallsBackToListedBytesWithoutATotalLine() {
+        var snapshot = HeapHistogram.snapshot("   1:   10   300  a.B\n   2:   5   100  a.C\n", 10);
+
+        assertEquals(0, snapshot.totalBytes());
+        assertEquals(400, snapshot.shareBase());
+        assertTrue(HeapHistogram.snapshot(null, 10).entries().isEmpty());
+        assertEquals(1, HeapHistogram.snapshot(null, 10).shareBase());
     }
 }

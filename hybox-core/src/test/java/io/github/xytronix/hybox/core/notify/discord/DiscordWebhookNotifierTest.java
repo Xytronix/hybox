@@ -10,12 +10,10 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import io.github.xytronix.hybox.core.incident.IncidentId;
 import io.github.xytronix.hybox.core.incident.IncidentMetadata;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
-import io.github.xytronix.hybox.core.incident.IncidentSummary;
 import io.github.xytronix.hybox.core.incident.Severity;
 import io.github.xytronix.hybox.core.testutil.MutableClock;
 
@@ -85,12 +83,7 @@ class DiscordWebhookNotifierTest {
             "world-one",
             "Headline \"quoted\" and path C:\\temp\\file\nLine two"
         );
-        IncidentSummary summary = new IncidentSummary(
-            "Unknown",
-            List.of("One", "Two"),
-            List.of("Next")
-        );
-        return new IncidentReport(meta, summary);
+        return new IncidentReport(meta);
     }
 
     private static final class FakeWebhookTransport implements WebhookTransport {

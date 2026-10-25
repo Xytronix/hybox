@@ -43,6 +43,30 @@ class HytaleHeartbeatPumpTest {
     }
 
     @Test
+    void stoppedWorldRetiresAcceptedTaskThatNeverRanAndIgnoresLateCompletion() throws Exception {
+        HeartbeatRegistry registry = new HeartbeatRegistry(Clock.systemUTC());
+        HytaleHeartbeatPump pump = new HytaleHeartbeatPump(new RecordingLogger(), registry);
+        World world = world(World.class);
+        pump.tick(Map.of("instance", world));
+        run(world);
+        pump.tick(Map.of("instance", world));
+        assertEquals(1, queue(world).size());
+
+        set(World.class, world, "alive", new AtomicBoolean(false));
+        pump.tick(Map.of("instance", world));
+        assertNull(registry.lastBeat("instance"));
+
+        run(world);
+        assertNull(registry.lastBeat("instance"));
+
+        World replacement = world(World.class);
+        pump.tick(Map.of("instance", replacement));
+        assertEquals(1, queue(replacement).size());
+        run(replacement);
+        assertNotNull(registry.lastBeat("instance"));
+    }
+
+    @Test
     void rejectionFromStoppingWorldClearsStaleBeatWithoutWarning() throws Exception {
         HeartbeatRegistry registry = new HeartbeatRegistry(Clock.systemUTC());
         RecordingLogger logger = new RecordingLogger();
@@ -211,7 +235,7 @@ class HytaleHeartbeatPumpTest {
         Clock clock = Clock.systemUTC();
         TriggerEvent event = new TriggerEvent(TriggerKind.HEARTBEAT_STALL, "world", clock.instant(), Map.of());
         List<String> dumps = HytaleHeartbeatPump.awaitRecovery(event, new HeartbeatRegistry(clock), clock,
-            Duration.ofMillis(600), 0, Duration.ofMillis(1), null, LOGGER);
+            Duration.ofMillis(600), 0, Duration.ofMillis(1), null, null, LOGGER);
         assertTrue(dumps.isEmpty());
     }
 
@@ -220,7 +244,7 @@ class HytaleHeartbeatPumpTest {
         Clock clock = Clock.systemUTC();
         TriggerEvent event = new TriggerEvent(TriggerKind.TICK_DEGRADED, "world", clock.instant(), Map.of());
         List<String> dumps = HytaleHeartbeatPump.awaitRecovery(event, new HeartbeatRegistry(clock), clock,
-            Duration.ofMillis(900), 2, Duration.ofMillis(1), null, LOGGER);
+            Duration.ofMillis(900), 2, Duration.ofMillis(1), null, null, LOGGER);
         assertEquals(2, dumps.size());
     }
 
@@ -238,7 +262,7 @@ class HytaleHeartbeatPumpTest {
             recovered.set(true);
         });
         List<String> dumps = HytaleHeartbeatPump.awaitRecovery(event, new HeartbeatRegistry(clock), clock,
-            Duration.ofSeconds(30), 3, Duration.ofSeconds(10), recovered::get, LOGGER);
+            Duration.ofSeconds(30), 3, Duration.ofSeconds(10), recovered::get, null, LOGGER);
         assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(5)) < 0);
         assertEquals(1, dumps.size());
     }
@@ -251,7 +275,26 @@ class HytaleHeartbeatPumpTest {
         registry.beat("world");
         long started = System.nanoTime();
         HytaleHeartbeatPump.awaitRecovery(event, registry, clock, Duration.ofMillis(600), 0,
-            Duration.ofMillis(1), () -> false, LOGGER);
+            Duration.ofMillis(1), () -> false, null, LOGGER);
         assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofMillis(550)) >= 0);
+    }
+
+    @Test
+    void playerSkipEndsHeartbeatWaitAndKeepsInitialDump() {
+        Clock clock = Clock.systemUTC();
+        AtomicBoolean skipped = new AtomicBoolean();
+        TriggerEvent event = new TriggerEvent(TriggerKind.HEARTBEAT_STALL, "world", clock.instant(), Map.of());
+        long started = System.nanoTime();
+        Thread.ofVirtual().start(() -> {
+            try {
+                Thread.sleep(300);
+            } catch (InterruptedException ignored) {
+            }
+            skipped.set(true);
+        });
+        List<String> dumps = HytaleHeartbeatPump.awaitRecovery(event, new HeartbeatRegistry(clock), clock,
+            Duration.ofSeconds(30), 3, Duration.ofSeconds(10), null, skipped::get, LOGGER);
+        assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(5)) < 0);
+        assertEquals(1, dumps.size());
     }
 }

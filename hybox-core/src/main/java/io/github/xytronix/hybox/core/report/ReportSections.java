@@ -30,10 +30,10 @@ record ReportSections(Map<String, String> mixins, Map<String, String> plugins,
             if (section.preformatted() != null) {
                 if ("Server log".equals(section.title())) {
                     serverLog = section.preformatted();
-                } else if ("Stalled thread".equals(section.title()) || "Deadlocked thread".equals(section.title())) {
-                    generic.add(section);
-                } else {
+                } else if (isConfig(section.title())) {
                     configs.add(section);
+                } else {
+                    generic.add(section);
                 }
             } else if ("Mixins".equals(section.title())) {
                 mixins = section.entries();
@@ -60,5 +60,10 @@ record ReportSections(Map<String, String> mixins, Map<String, String> plugins,
         }
         return new ReportSections(mixins, plugins, assetPacks, serverLog, environment, tickSystems, modCpu,
             heapHistogram, memPools, entities, configs, generic);
+    }
+
+    private static boolean isConfig(String title) {
+        return title.endsWith(".json") || title.endsWith(".toml") || title.endsWith(".yaml")
+            || title.endsWith(".yml") || title.endsWith(".properties") || title.endsWith(".cfg");
     }
 }

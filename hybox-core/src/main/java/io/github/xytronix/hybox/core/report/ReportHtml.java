@@ -22,13 +22,12 @@ import io.github.xytronix.hybox.core.incident.IncidentMetadata;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
 import io.github.xytronix.hybox.core.json.JsonWriter;
 
-/**
- * Renders a self-contained incident report HTML page.
- */
 public final class ReportHtml {
     private static final String TEMPLATE_RESOURCE = "report-template.html";
     private static final String TITLE_TOKEN = "__TITLE__";
     private static final String HEADER_TOKEN = "<!--__HEADER__-->";
+    private static final String SUMMARY_TOKEN = "<!--__SUMMARY__-->";
+    private static final String DIAGNOSTICS_TOKEN = "<!--__DIAGNOSTICS__-->";
     private static final String DATA_TOKEN = "/*__DATA__*/null";
 
     private static final DateTimeFormatter CREATED_FORMAT =
@@ -51,25 +50,35 @@ public final class ReportHtml {
     }
 
     public static void write(IncidentReport report, JfrTimeline timeline, OutputStream out) throws IOException {
+        write(report, timeline, null, out);
+    }
+
+    public static void write(IncidentReport report, JfrTimeline timeline, String recordingUnavailableReason,
+                             OutputStream out) throws IOException {
         Objects.requireNonNull(report, "report");
         Objects.requireNonNull(out, "out");
 
         OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-        writer.write(render(report, timeline));
+        writer.write(render(report, timeline, recordingUnavailableReason));
         writer.flush();
     }
 
-    private static String render(IncidentReport report, JfrTimeline timeline) throws IOException {
+    private static String render(IncidentReport report, JfrTimeline timeline, String recordingUnavailableReason)
+        throws IOException {
         String template = loadTemplate();
         ReportSections sections = ReportSections.route(report.diagnostics());
         Long stallMs = parseStallMs(report.context());
         Integer players = totalPlayers(report.snapshot());
+        String unavailableReason = recordingUnavailableReason(timeline, recordingUnavailableReason);
 
         String html = replaceOnce(template, TITLE_TOKEN,
             "Hybox Incident Report · " + escapeHtml(report.meta().id().value()));
         html = replaceOnce(html, HEADER_TOKEN,
             buildHeader(report.meta(), stallMs, players, report.context(), blockedInFrame(report)));
-        String json = buildData(report, timeline, sections, stallMs, players)
+        html = replaceOnce(html, SUMMARY_TOKEN, buildSummary(unavailableReason));
+        html = replaceOnce(html, DIAGNOSTICS_TOKEN,
+            ReportDiagnosticsWriter.genericHtml(sections.generic(), sections.plugins() != null));
+        String json = buildData(report, timeline, sections, stallMs, players, unavailableReason)
             .replace("</", "<\\/");
         return replaceOnce(html, DATA_TOKEN, json);
     }
@@ -156,6 +165,29 @@ public final class ReportHtml {
         return h.toString();
     }
 
+    private static String recordingUnavailableReason(JfrTimeline timeline, String suppliedReason) {
+        if (timeline != null && timeline.start() != null && timeline.end() != null) {
+            return null;
+        }
+        if (suppliedReason != null && !suppliedReason.isBlank()) {
+            return suppliedReason;
+        }
+        return timeline == null ? "no readable recording timeline was supplied"
+            : "the recording contains no usable event timestamps";
+    }
+
+    private static String buildSummary(String unavailableReason) {
+        if (unavailableReason == null) {
+            return "";
+        }
+        return "<div class=\"cwarn\" id=\"jfr-unavailable\"><span><b>JFR recording unavailable: "
+            + escapeHtml(unavailableReason) + "</b><br>"
+            + "Check JFR capture settings and server logs. If recording.jfr is present in the bundle, "
+            + "try opening it in JDK Mission Control. Snapshot and capture diagnostics below remain available."
+            + "</span></div>";
+    }
+
+
     static String worldShort(String world) {
         if (world == null) {
             return null;
@@ -213,7 +245,7 @@ public final class ReportHtml {
 
 
     private static String buildData(IncidentReport report, JfrTimeline timeline, ReportSections sections,
-                                    Long stallMs, Integer players) throws IOException {
+                                    Long stallMs, Integer players, String unavailableReason) throws IOException {
         IncidentMetadata meta = report.meta();
         HealthSnapshot snapshot = report.snapshot();
         Map<String, String> env = sections.environment();
@@ -221,12 +253,33 @@ public final class ReportHtml {
         String serverName = env == null ? null : env.get("Server name");
         String containerRuntime = env == null ? null : env.get("Container runtime");
         List<String[]> loaders = ReportSystemWriter.loaders(env);
+        ReportAttribution attribution = new ReportAttribution(timeline == null ? List.of() : timeline.cpuByMod());
 
         StringBuilder out = new StringBuilder(16384);
         JsonWriter json = new JsonWriter(out);
         json.beginObject();
 
         json.name("hyboxVersion").value(hyboxVersion());
+        json.name("jfrUnavailableReason").value(unavailableReason);
+
+        json.name("diag").beginArray();
+        if (report.diagnostics() != null) {
+            for (DiagnosticSection section : report.diagnostics()) {
+                json.beginObject();
+                json.name("title").value(section.title());
+                json.name("entries").beginArray();
+                for (Map.Entry<String, String> entry : section.entries().entrySet()) {
+                    json.beginArray();
+                    json.value(entry.getKey());
+                    json.value(entry.getValue());
+                    json.endArray();
+                }
+                json.endArray();
+                json.name("pre").value(section.preformatted());
+                json.endObject();
+            }
+        }
+        json.endArray();
 
         json.name("incident").beginObject();
         json.name("id").value(meta.id().value());
@@ -237,7 +290,8 @@ public final class ReportHtml {
         json.name("created").value(CREATED_FORMAT.format(meta.createdAt()));
         json.name("note");
         if ("UNCLEAN_SHUTDOWN".equals(meta.trigger())) {
-            json.value(String.join(" ", report.summary().whatHappened()));
+            json.value("The JVM exited without a clean shutdown; this bundle was rebuilt on the next startup from the "
+                + "rolling recording. The snapshot below is reconstructed from the recording's last samples.");
         } else {
             json.nullValue();
         }
@@ -282,7 +336,7 @@ public final class ReportHtml {
         ReportSystemWriter.writeCpu(json, timeline);
         ReportSystemWriter.writeHeap(json, snapshot, timeline);
         ReportSystemWriter.writeRam(json, timeline);
-        ReportSystemWriter.writeAlloc(json, timeline);
+        ReportSystemWriter.writeAlloc(json, timeline, attribution);
         ReportSystemWriter.writeGc(json, snapshot, timeline);
         ReportSystemWriter.writeGcCauses(json, timeline);
         ReportSystemWriter.writeNet(json, timeline);
@@ -298,7 +352,7 @@ public final class ReportHtml {
         ReportActivityWriter.writeEntities(json, sections.entities());
         ReportActivityWriter.writeTickSystems(json, sections.tickSystems());
         ReportActivityWriter.writeTickSeries(json, timeline);
-        ReportActivityWriter.writeModCpu(json, timeline, sections.modCpu());
+        ReportActivityWriter.writeModCpu(json, timeline, sections.modCpu(), attribution);
         ReportActivityWriter.writeFlame(json, timeline);
         ReportActivityWriter.writeThreadTimeline(json, timeline);
         List<LogLine> logLines = parseLog(sections.serverLog());
@@ -308,13 +362,13 @@ public final class ReportHtml {
         ReportActivityWriter.writeWorlds(json, meta, snapshot, timeline);
         ReportActivityWriter.writeWorldTps(json, timeline, tick);
         ReportActivityWriter.writeSubsystems(json, timeline);
-        ReportActivityWriter.writeCpuByWorld(json, timeline);
+        ReportActivityWriter.writeCpuByWorld(json, timeline, attribution);
         ReportDiagnosticsWriter.writePlugins(json, sections.plugins());
         ReportDiagnosticsWriter.writeAssetPacks(json, sections.assetPacks());
         ReportDiagnosticsWriter.writeMixins(json, sections.mixins());
         ReportDiagnosticsWriter.writeLog(json, logLines);
         ReportDiagnosticsWriter.writeConfigs(json, sections.configs());
-        ReportDiagnosticsWriter.writeGeneric(json, sections.generic(), sections.plugins() != null);
+        ReportFindings.build(report, timeline, sections, stallMs, CREATED_FORMAT.format(meta.createdAt())).write(json);
 
         json.endObject();
         return out.toString();
@@ -377,7 +431,7 @@ public final class ReportHtml {
     }
 
 
-    private static String escapeHtml(String value) {
+    static String escapeHtml(String value) {
         StringBuilder escaped = new StringBuilder(value.length() + 16);
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);

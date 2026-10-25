@@ -1,0 +1,31 @@
+Group {
+  LayoutMode: Top;
+  Anchor: (Width: 368, Height: 116, Right: 8, Bottom: 8);
+  Padding: (Horizontal: 14, Vertical: 11);
+  Background: #7a9cc6(0.10);
+
+  Group {
+    LayoutMode: Left;
+    Anchor: (Height: 21, Bottom: 4);
+    Label #TileLabel {
+      FlexWeight: 1;
+      Style: (FontSize: 12, TextColor: #96a9be, RenderUppercase: true, RenderBold: true);
+    }
+    Group #SeverityPill {
+      Anchor: (Width: 82, Height: 20);
+      Background: #7a9cc6(0.16);
+      Label #Severity {
+        Anchor: (Full: 0);
+        Style: (FontSize: 10, RenderBold: true, TextColor: #b7cedd, HorizontalAlignment: Center, VerticalAlignment: Center);
+      }
+    }
+  }
+  Label #TileValue {
+    Anchor: (Height: 31, Bottom: 3);
+    Style: (FontSize: 24, RenderBold: true, TextColor: #80c991);
+  }
+  Label #TileDetail {
+    Style: (FontSize: 11, TextColor: #96a9be, Wrap: true, WrapMaxLines: 2);
+    FlexWeight: 1;
+  }
+}

@@ -21,8 +21,7 @@ class BundleSafetyTest {
 
     private IncidentReport report() {
         return new IncidentReport(new IncidentMetadata(IncidentIds.next(clock), clock.instant(),
-            Severity.INFO, "MANUAL", null, "Safety regression"),
-            new IncidentSummary("Unknown", List.of("Manual capture"), List.of("Inspect recording")));
+            Severity.INFO, "MANUAL", null, "Safety regression"));
     }
 
     @Test

@@ -137,9 +137,8 @@ final class ReportDiagnosticsWriter {
         json.endArray();
     }
 
-    static void writeGeneric(JsonWriter json, List<DiagnosticSection> generic, boolean hasPlugins)
-        throws IOException {
-        json.name("diag").beginArray();
+    static String genericHtml(List<DiagnosticSection> generic, boolean hasPlugins) {
+        StringBuilder html = new StringBuilder(2048);
         for (DiagnosticSection section : generic) {
             Map<String, String> entries = section.entries();
             if ("Environment".equals(section.title())) {
@@ -159,21 +158,28 @@ final class ReportDiagnosticsWriter {
             if (entries.isEmpty() && !hasPre) {
                 continue;
             }
-            json.beginObject();
-            json.name("title").value(section.title());
-            json.name("entries").beginArray();
-            for (Map.Entry<String, String> e : entries.entrySet()) {
-                json.beginArray();
-                json.value(e.getKey());
-                json.value(e.getValue());
-                json.endArray();
+            html.append("<div class=\"kvcard\" style=\"margin-bottom:16px\"><div class=\"kvh\"><b>")
+                .append(ReportHtml.escapeHtml(section.title())).append("</b></div><div class=\"kv\">");
+            for (Map.Entry<String, String> entry : entries.entrySet()) {
+                html.append("<div class=\"row\"><span class=\"k\">")
+                    .append(ReportHtml.escapeHtml(entry.getKey())).append("</span><span class=\"v\">")
+                    .append(ReportHtml.escapeHtml(entry.getValue())).append("</span></div>");
             }
-            json.endArray();
+            html.append("</div>");
             if (hasPre) {
-                json.name("pre").value(pre);
+                html.append("<pre class=\"logpre\" style=\"margin:12px 0 0\" tabindex=\"0\" aria-label=\"")
+                    .append(ReportHtml.escapeHtml(section.title())).append(" stack or capture text\">")
+                    .append(ReportHtml.escapeHtml(pre)).append("</pre>");
             }
-            json.endObject();
+            html.append("</div>");
         }
-        json.endArray();
+        if (html.isEmpty()) {
+            return "";
+        }
+        return "<section id=\"stalled\"><h2 class=\"section-heading\"><button type=\"button\" class=\"sh\" "
+            + "data-collapse aria-expanded=\"true\" aria-controls=\"stalled-body\"><span class=\"num\">02</span>"
+            + "<span>Captured diagnostics</span><span class=\"sub\">snapshots at capture</span>"
+            + "<span class=\"chev\" aria-hidden=\"true\">▾</span></button></h2>"
+            + "<div class=\"sbody\" id=\"stalled-body\">" + html + "</div></section>";
     }
 }

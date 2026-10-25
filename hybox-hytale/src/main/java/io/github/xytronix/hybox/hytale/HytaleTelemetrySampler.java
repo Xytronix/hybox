@@ -60,8 +60,6 @@ final class HytaleTelemetrySampler {
         long startNanos = System.nanoTime();
         int totalPlayers = 0;
         boolean playersKnown = false;
-        long totalChunks = 0;
-        boolean chunksKnown = false;
         double worstTps = -1;
         double worstMspt = -1;
         List<HealthGauges.World> worldGauges = new ArrayList<>();
@@ -69,10 +67,6 @@ final class HytaleTelemetrySampler {
             if (world.players() >= 0) {
                 totalPlayers += world.players();
                 playersKnown = true;
-            }
-            if (world.chunks() >= 0) {
-                totalChunks += world.chunks();
-                chunksKnown = true;
             }
             worldGauges.add(new HealthGauges.World(world.name(), world.tps(), world.mspt(),
                 world.players(), world.entities(), world.avgPingMs(), world.chunks(),
@@ -95,9 +89,6 @@ final class HytaleTelemetrySampler {
             event.chunksLoadedTotal = world.chunksLoadedTotal();
             event.avgPingMs = world.avgPingMs();
             event.commit();
-        }
-        if (chunksKnown) {
-            HyboxApi.recordGauge("hybox", "Chunks loaded", totalChunks);
         }
         recordHealthMetrics(worstMspt, worstTps, playersKnown ? totalPlayers : -1, worldGauges,
             HyboxApi.sampleSupplierGauges());

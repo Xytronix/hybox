@@ -1,0 +1,36 @@
+Button #IncidentRow {
+  LayoutMode: Left;
+  Anchor: (Height: 44, Bottom: 4);
+  Padding: (Horizontal: 10, Vertical: 6);
+  Style: (
+    Default: (Background: #7a9cc6(0.06)),
+    Hovered: (Background: #7a9cc6(0.18)),
+    Pressed: (Background: #7a9cc6(0.25))
+  );
+
+  Label #Time {
+    Anchor: (Width: 165);
+    Style: (FontSize: 12, TextColor: #b7cedd, VerticalAlignment: Center);
+  }
+  Group {
+    LayoutMode: Left;
+    Anchor: (Width: 100);
+    Group #SeverityPill {
+      Anchor: (Width: 84, Height: 24, Top: 4);
+      Background: #7a9cc6(0.16);
+      Label #Severity { Anchor: (Full: 0); Style: (FontSize: 10, RenderBold: true, TextColor: #b7cedd, HorizontalAlignment: Center, VerticalAlignment: Center); }
+    }
+  }
+  Label #Trigger {
+    Anchor: (Width: 160);
+    Style: (FontSize: 11, TextColor: #b7cedd, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 2);
+  }
+  Label #World {
+    Anchor: (Width: 145);
+    Style: (FontSize: 12, TextColor: #b7cedd, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 2);
+  }
+  Label #Headline {
+    FlexWeight: 1;
+    Style: (FontSize: 12, TextColor: #d3e3ed, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 2);
+  }
+}

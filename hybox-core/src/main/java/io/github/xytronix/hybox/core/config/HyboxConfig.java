@@ -127,17 +127,4 @@ public record HyboxConfig(
              capturePolicy, discordWebhook, postIncidentMaxWait, jfrSnapshotInterval,
              jfrConfiguration, null);
     }
-
-    public HyboxConfig(
-        Duration jfrMaxAge,
-        long jfrMaxSizeBytes,
-        String jfrRecordingName,
-        TriggerPolicy triggerPolicy,
-        CapturePolicy capturePolicy,
-        DiscordWebhookConfig discordWebhook
-    ) {
-        this(jfrMaxAge, jfrMaxSizeBytes, jfrRecordingName, List.of(),
-             triggerPolicy, capturePolicy, discordWebhook, Duration.ZERO, Duration.ZERO,
-             "default", null);
-    }
 }

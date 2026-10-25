@@ -1,0 +1,6 @@
+$C = "../Common.ui";
+$C.@TextButton #Range {
+  @Text = "";
+  Anchor: (Width: 104, Height: 30, Right: 5);
+  Padding: (Horizontal: 8);
+}

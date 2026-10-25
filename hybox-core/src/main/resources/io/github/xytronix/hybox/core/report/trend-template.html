@@ -40,10 +40,13 @@
   .sub{font-size:11.5px;color:var(--tx3);margin:2px 0 6px;font-variant-numeric:tabular-nums}
   svg{display:block;width:100%;height:170px;overflow:visible}
   .ax{fill:var(--tx3);font-size:12px;font-variant-numeric:tabular-nums}
+  .ax.time{font-size:10px}
   .gl{stroke:var(--grid);stroke-width:1}
   .dl{stroke:var(--grid);stroke-width:1;stroke-dasharray:2 3}
   .il{stroke:#f0626b;stroke-width:1.1;stroke-dasharray:3 2;opacity:.7}
   .ln{fill:none;stroke-width:1.6}
+  .band{fill-opacity:.14;stroke:none}
+  .range{fill:none;stroke-width:1;stroke-opacity:.65;stroke-linecap:round}
   @media (max-width:600px){
     body{padding:20px 12px 44px}
     .card{padding-left:10px;padding-right:10px}
@@ -93,15 +96,24 @@ function fmtVal(v, unit){
   return r + (unit?" "+unit:"");
 }
 
-function stats(v){
-  let mn=Infinity,mx=-Infinity,sum=0,c=0,last=null;
-  for(const x of v){
-    if(x==null||isNaN(x)) continue;
-    if(x<mn) mn=x;
-    if(x>mx) mx=x;
-    sum+=x; c++; last=x;
-  }
-  return c ? {mn,mx,avg:sum/c,last,c} : null;
+function timeTicks(t0,t1,width){
+  const span=t1-t0;
+  if(span<=0) return [t0];
+  const steps=[1000,5000,15000,30000,60000,2*60000,5*60000,10*60000,15*60000,30*60000,
+    3600000,2*3600000,3*3600000,6*3600000,12*3600000,86400000,2*86400000,3*86400000,7*86400000];
+  const maxTicks=Math.max(3,Math.min(8,Math.floor(width/80)));
+  let step=steps[steps.length-1];
+  for(const s of steps){ if(Math.floor(span/s)+1<=maxTicks){ step=s; break; } }
+  const ticks=[];
+  for(let ms=Math.ceil(t0/step)*step;ms<=t1;ms+=step) ticks.push(ms);
+  if(span<3600000 && ticks.length<3) return [t0,(t0+t1)/2,t1];
+  return ticks.length?ticks:[t0];
+}
+
+function shortTimeLabel(ms,span){
+  const d=new Date(ms);
+  if(span<1000) return pad2(d.getUTCSeconds())+"."+String(d.getUTCMilliseconds()).padStart(3,"0");
+  return pad2(d.getUTCHours())+":"+pad2(d.getUTCMinutes())+(span<5*60000?":"+pad2(d.getUTCSeconds()):"");
 }
 
 function lineColor(hue){ return `hsl(${hue} 70% 62%)`; }
@@ -111,11 +123,11 @@ function chart(t, lines, g){
   const visible = lines.filter(l=>l.s && !hiddenLines.has(l.k));
   const use = visible.length ? visible : lines.filter(l=>l.s);
   let mn=Infinity, mx=-Infinity;
-  use.forEach(l=>{ if(l.s.mn<mn) mn=l.s.mn; if(l.s.mx>mx) mx=l.s.mx; });
+  use.forEach(l=>{ if(l.s.min<mn) mn=l.s.min; if(l.s.max>mx) mx=l.s.max; });
   if(mn===Infinity){ mn=0; mx=1; }
   if(mn===mx){ mn-=1; mx+=1; }
   if(g.zero && mn>0) mn=0;
-  const t0=t[0], t1=t[t.length-1], span=Math.max(1,t1-t0);
+  const t0=D.start, t1=D.end, span=Math.max(1,t1-t0);
   const xs = ms => PADL + (ms-t0)/span*(W-PADL-PADR);
   const ys = val => (H-PADB) - (val-mn)/(mx-mn)*(H-PADB-PADT);
 
@@ -126,16 +138,15 @@ function chart(t, lines, g){
     parts.push(`<text class="ax" x="${PADL-6}" y="${(ys(gv)+3).toFixed(1)}" text-anchor="end">${fmtVal(gv,g.unit)}</text>`);
   });
 
-  const STEPS=[3600000,2*3600000,3*3600000,6*3600000,12*3600000,86400000,2*86400000,3*86400000,7*86400000];
-  const maxTicks=Math.max(2,Math.min(8,Math.floor((W-PADL-PADR)/80)));
-  let step=STEPS[STEPS.length-1];
-  for(const s of STEPS){ if(Math.ceil(span/s)<=maxTicks){ step=s; break; } }
-  const sub=step<86400000;
-  for(let gx=Math.ceil(t0/step)*step; gx<=t1; gx+=step){
+  const short=t1>t0 && t1-t0<3600000;
+  const sub=span<2*86400000;
+  const ticks=timeTicks(t0,t1,W-PADL-PADR);
+  ticks.forEach((gx,i)=>{
     const x=xs(gx);
+    const anchor=i===0?"start":i===ticks.length-1?"end":"middle";
     parts.push(`<line class="dl" x1="${x.toFixed(1)}" y1="${PADT}" x2="${x.toFixed(1)}" y2="${H-PADB}"/>`);
-    parts.push(`<text class="ax" x="${x.toFixed(1)}" y="${H-7}" text-anchor="middle">${sub?timeLabel(gx):dayLabel(gx)}</text>`);
-  }
+    parts.push(`<text class="ax${short?" time":""}" x="${x.toFixed(1)}" y="${H-7}" text-anchor="${anchor}">${short?shortTimeLabel(gx,t1-t0):sub?timeLabel(gx):dayLabel(gx)}</text>`);
+  });
 
   (showIncidents?(D.incidents||[]):[]).forEach(ms=>{
     if(ms>=t0&&ms<=t1){
@@ -145,20 +156,36 @@ function chart(t, lines, g){
   });
 
   use.forEach(l=>{
-    let dpath="", pen=false;
+    let dpath="", ranges="", band="", pen=false, first=0;
+    const closeBand=end=>{
+      for(let j=end;j>=first;j--) band+="L"+xs(t[j]).toFixed(1)+" "+ys(l.v[j].min).toFixed(1)+" ";
+      band+="Z ";
+    };
     for(let i=0;i<l.v.length;i++){
-      const x=l.v[i];
-      if(x==null||isNaN(x)){ pen=false; continue; }
-      dpath += (pen?"L":"M")+xs(t[i]).toFixed(1)+" "+ys(x).toFixed(1)+" ";
+      const bucket=l.v[i];
+      if(!bucket.count){
+        if(pen) closeBand(i-1);
+        pen=false;
+        continue;
+      }
+      const x=xs(t[i]).toFixed(1);
+      if(!pen) first=i;
+      band+=(pen?"L":"M")+x+" "+ys(bucket.max).toFixed(1)+" ";
+      ranges+="M"+x+" "+ys(bucket.min).toFixed(1)+" L"+x+" "+ys(bucket.max).toFixed(1)+" ";
+      dpath+=(pen?"L":"M")+x+" "+ys(bucket.mean).toFixed(1)+" ";
       pen=true;
     }
-    parts.push(`<path class="ln" stroke="${lineColor(l.hue)}" d="${dpath.trim()}"/>`);
+    if(pen) closeBand(l.v.length-1);
+    const color=lineColor(l.hue);
+    parts.push(`<path class="band" fill="${color}" d="${band.trim()}"/>`);
+    parts.push(`<path class="range" stroke="${color}" d="${ranges.trim()}"/>`);
+    parts.push(`<path class="ln" stroke="${color}" d="${dpath.trim()}"/>`);
   });
 
   const chartId="trend-"+g.lines.map(l=>l.k).join("-");
-  const period=t.length>1?` from ${timeLabel(t0)} to ${timeLabel(t1)}`:` at ${timeLabel(t0)}`;
-  const values=use.map(l=>`${l.label}: last ${fmtVal(l.s.last,g.unit)}, minimum ${fmtVal(l.s.mn,g.unit)}, average ${fmtVal(l.s.avg,g.unit)}, maximum ${fmtVal(l.s.mx,g.unit)}`).join(". ");
-  return `<svg role="img" aria-labelledby="${chartId}-title ${chartId}-desc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><title id="${chartId}-title">${g.label} trend</title><desc id="${chartId}-desc">${g.label}${period}. ${values}.</desc>${parts.join("")}</svg>`;
+  const period=t1>t0?` from ${timeLabel(t0)} to ${timeLabel(t1)}`:` at ${timeLabel(t0)}`;
+  const values=use.map(l=>`${l.label}: last ${fmtVal(l.s.last,g.unit)}, minimum ${fmtVal(l.s.min,g.unit)}, average ${fmtVal(l.s.mean,g.unit)}, maximum ${fmtVal(l.s.max,g.unit)}`).join(". ");
+  return `<svg role="img" aria-labelledby="${chartId}-title ${chartId}-desc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><title id="${chartId}-title">${g.label} trend</title><desc id="${chartId}-desc">${g.label}${period}. ${values}. Lines show bucket means; shaded envelopes and vertical ranges show observed bucket minima and maxima.</desc>${parts.join("")}</svg>`;
 }
 
 function gridPlotWidth(grid){
@@ -171,7 +198,7 @@ function gridPlotWidth(grid){
 
 function card(g){
   const t = D.t||[];
-  const lines = g.lines.map(l=>({...l, v:(D[l.k]||[]), s:stats(D[l.k]||[])}));
+  const lines = g.lines.map(l=>({...l, v:D[l.k].buckets, s:D[l.k].observed.count?D[l.k].observed:null}));
   if(!lines.some(l=>l.s)){
     return `<div class="card"><div class="ch"><span class="lbl">${g.label}</span><span class="cur dim">no data</span></div></div>`;
   }
@@ -181,10 +208,11 @@ function card(g){
     extra = `<div class="pmlegend" aria-label="${g.label} series">` + lines.map(l=>
       `<button type="button" class="pmlg${hiddenLines.has(l.k)?" off":""}" data-line="${l.k}" aria-pressed="${!!l.s&&!hiddenLines.has(l.k)}"${l.s?"":" disabled"}><span class="edot" style="background:${lineColor(l.hue)}" aria-hidden="true"></span><span>${l.label} ${l.s?fmtVal(l.s.last,g.unit):"n/a"}</span></button>`
     ).join("") + `</div>`;
+    extra+=lines.filter(l=>l.s).map(l=>`<div class="sub">${l.label}: min ${fmtVal(l.s.min,g.unit)} · avg ${fmtVal(l.s.mean,g.unit)} · max ${fmtVal(l.s.max,g.unit)}</div>`).join("");
   } else {
     const l = lines[0];
     head = `<div class="ch"><span class="lbl">${g.label}</span><span class="cur">${fmtVal(l.s.last,g.unit)}</span></div>`;
-    extra = `<div class="sub">min ${fmtVal(l.s.mn,g.unit)} · avg ${fmtVal(l.s.avg,g.unit)} · max ${fmtVal(l.s.mx,g.unit)}</div>`;
+    extra = `<div class="sub">min ${fmtVal(l.s.min,g.unit)} · avg ${fmtVal(l.s.mean,g.unit)} · max ${fmtVal(l.s.max,g.unit)}</div>`;
   }
   return `<div class="card">${head}${extra}${chart(t,lines,g)}</div>`;
 }
@@ -210,7 +238,7 @@ function toggleLine(k){
     hiddenLines.delete(k);
   } else {
     const g = GROUPS.find(gr=>gr.lines.some(l=>l.k===k));
-    if(g && g.lines.some(l=>l.k!==k&&!hiddenLines.has(l.k)&&stats(D[l.k]||[]))) hiddenLines.add(k);
+    if(g && g.lines.some(l=>l.k!==k&&!hiddenLines.has(l.k)&&D[l.k].observed.count)) hiddenLines.add(k);
   }
   renderGrid();
 }
@@ -218,12 +246,13 @@ function toggleLine(k){
 (function(){
   const app = document.getElementById("app");
   if(!D || !Array.isArray(D.t) || !D.t.length){
-    app.innerHTML = `<h1>Health trends</h1><div class="empty">No health metrics recorded.</div>`;
+    app.innerHTML = `<h1>Health trends</h1><div class="empty"><strong>No health metrics recorded.</strong><p>In the generated <code>hybox.json</code> in Hybox's plugin data folder, set <code>Metrics.Enabled</code> to <code>true</code>, then run <code>/hybox reload</code>. Allow samples to collect and run <code>/hybox trend</code> again. Check that <code>Metrics.RetentionDays</code> covers the requested window.</p></div>`;
     return;
   }
   const inc=(D.incidents||[]).length;
   let html = `<h1>Health trends</h1>`;
   html += `<div class="meta">Last ${D.days} day(s) · ${D.count.toLocaleString()} samples${inc?` · ${inc} incident${inc>1?"s":""}`:""} · generated ${D.generated}</div>`;
+  html += `<div class="meta">Aggregation: ${D.count.toLocaleString()} recorded samples in ${D.t.length.toLocaleString()} bucket(s). Lines show bucket means; shaded min–max envelopes and vertical ranges preserve observed lows and spikes. Summaries use every available sample, not averages of buckets; last is the latest available observation. Missing values are excluded; empty buckets are gaps. All times are UTC.</div>`;
   if(inc) html += `<div class="pmlegend"><button type="button" class="pmlg" data-inc aria-pressed="true"><span class="smp" aria-hidden="true"></span><span>Incident markers</span></button></div>`;
   html += `<div class="grid" id="grid"></div>`;
   app.innerHTML = html;

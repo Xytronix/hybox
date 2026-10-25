@@ -1,0 +1,57 @@
+$C = "../Common.ui";
+
+Group {
+  Anchor: (Left: 20, Top: 80, Height: 72);
+  LayoutMode: Left;
+
+  Group #Profile {
+    Background: #000000(0.35);
+    Padding: (Horizontal: 14, Vertical: 8);
+    LayoutMode: Left;
+    Visible: false;
+
+    Group {
+      Anchor: (Width: 56, Height: 56, Right: 12);
+      $C.@CircularProgressBar #Ring {
+        @Size = 56;
+        Value: 0;
+        Background: #ffffff(0.12);
+        Color: #80c991;
+      }
+    }
+
+    Group {
+      LayoutMode: Top;
+      Anchor: (Width: 150);
+      Label {
+        Text: "HYBOX PROFILE";
+        Anchor: (Height: 18);
+        Style: (FontSize: 12, RenderBold: true, LetterSpacing: 1.2, TextColor: #bfcdd5);
+      }
+      Group #TimerHost { Anchor: (Height: 32); }
+    }
+  }
+
+  Group #Capture {
+    Background: #000000(0.35);
+    Padding: (Horizontal: 14, Vertical: 8);
+    LayoutMode: Left;
+    Visible: false;
+
+    $C.@DefaultSpinner { @Anchor = (Right: 12, Top: 4); }
+
+    Group {
+      LayoutMode: Top;
+      Anchor: (Width: 260);
+      Label {
+        Text: "HYBOX CAPTURE";
+        Anchor: (Height: 18);
+        Style: (FontSize: 12, RenderBold: true, LetterSpacing: 1.2, TextColor: #bfcdd5);
+      }
+      Label #Step {
+        Anchor: (Height: 22);
+        Style: (FontSize: 14, TextColor: #ffffff, VerticalAlignment: Center);
+      }
+    }
+  }
+}

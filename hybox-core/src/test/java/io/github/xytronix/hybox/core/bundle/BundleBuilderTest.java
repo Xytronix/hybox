@@ -1,6 +1,7 @@
 package io.github.xytronix.hybox.core.bundle;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,7 +21,6 @@ import io.github.xytronix.hybox.core.incident.IncidentId;
 import io.github.xytronix.hybox.core.incident.IncidentIds;
 import io.github.xytronix.hybox.core.incident.IncidentMetadata;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
-import io.github.xytronix.hybox.core.incident.IncidentSummary;
 import io.github.xytronix.hybox.core.incident.Severity;
 
 class BundleBuilderTest {
@@ -51,7 +51,8 @@ class BundleBuilderTest {
 
             String json = new String(zip.getInputStream(incidentEntry).readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(json.contains("\"meta\""));
-            assertTrue(json.contains("\"summary\""));
+            assertTrue(json.contains("Headline with newline\\nand tab\\tplus carriage\\rreturn"));
+            assertFalse(json.contains("\"summary\""));
             assertTrue(json.contains("\\\""));
             assertTrue(json.contains("\\\\"));
             assertTrue(json.contains("\\n"));
@@ -127,12 +128,7 @@ class BundleBuilderTest {
             "world\\one",
             "Headline with newline\nand tab\tplus carriage\rreturn"
         );
-        IncidentSummary summary = new IncidentSummary(
-            "Likely cause: \"quoted\" and backslash \\",
-            List.of("Line1\nLine2", "Tab\tValue", "Carriage\rReturn"),
-            List.of("Step \"one\"", "Check \\logs")
-        );
-        return new IncidentReport(meta, summary);
+        return new IncidentReport(meta);
     }
 
     private static IncidentReport simpleReport(Clock clock) {
@@ -146,11 +142,6 @@ class BundleBuilderTest {
             null,
             "Simple incident"
         );
-        IncidentSummary summary = new IncidentSummary(
-            "Unknown",
-            List.of("Something happened"),
-            List.of("Review logs")
-        );
-        return new IncidentReport(meta, summary);
+        return new IncidentReport(meta);
     }
 }

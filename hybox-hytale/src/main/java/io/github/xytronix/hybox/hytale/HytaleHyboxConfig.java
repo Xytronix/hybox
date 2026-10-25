@@ -1,21 +1,33 @@
 package io.github.xytronix.hybox.hytale;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+import java.util.function.ObjLongConsumer;
+import java.util.function.ToLongFunction;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 import com.hypixel.hytale.codec.Codec;
+import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.server.core.util.Config;
+import com.hypixel.hytale.server.core.util.BsonUtil;
+import org.bson.BsonDocument;
+import org.bson.BsonValue;
 
 import io.github.xytronix.hybox.core.capture.CapturePolicy;
 import io.github.xytronix.hybox.core.config.HyboxConfig;
@@ -116,6 +128,289 @@ final class HytaleHyboxConfig {
             logger.log(System.Logger.Level.INFO, "Wrote default config: " + configPath);
         }
         return loaded;
+    }
+
+    enum SettingKind { TOGGLE, NUMBER }
+
+    enum SettingUnit {
+        BOOLEAN("", 1), COUNT("", 1), PERCENT("percent", 1), MILLISECONDS("ms", 1),
+        SECONDS("seconds", 1), MINUTES("minutes", 60), DAYS("days", 86400), DAY_COUNT("days", 1),
+        MEBIBYTES("MiB", 1024 * 1024), MBPS("Mbit/s", 1);
+
+        private final String label;
+        private final long scale;
+
+        SettingUnit(String label, long scale) {
+            this.label = label;
+            this.scale = scale;
+        }
+
+        long display(long stored) {
+            return stored / scale;
+        }
+
+        long stored(long display) {
+            return Math.multiplyExact(display, scale);
+        }
+    }
+
+    record SettingField(String id, String eventKey, String configKey, SettingKind kind,
+                        SettingUnit unit, long min, long max, String errorName, boolean restartRequired,
+                        Function<FileConfig, Object> getter, BiConsumer<FileConfig, Object> setter) {
+        String selector() {
+            return "#" + id + (kind == SettingKind.TOGGLE ? " #CheckBox.Value" : " #Input.Value");
+        }
+
+        Object read(FileConfig raw) {
+            Object value = getter.apply(raw);
+            return kind == SettingKind.NUMBER ? Math.clamp((long) value, min, max) : value;
+        }
+
+        Object parse(Object submitted, Object current, List<String> problems) {
+            if (submitted == null) return current;
+            if (kind == SettingKind.TOGGLE) return submitted;
+            double number = ((Number) submitted).doubleValue();
+            if (!Double.isFinite(number) || number != Math.rint(number)
+                || number < -0x1p63 || number >= 0x1p63) {
+                problems.add(errorName + " must be a whole number within the supported range.");
+                return current;
+            }
+            return (long) number;
+        }
+
+        void validate(Object value, List<String> problems) {
+            if (kind == SettingKind.NUMBER && ((long) value < min || (long) value > max)) {
+                problems.add(errorName + " must be between " + min + " and " + max
+                    + (unit.label.isEmpty() ? "" : " " + unit.label) + ".");
+            }
+        }
+    }
+
+    private static final long MAX_EXACT_UI_INTEGER = 9_007_199_254_740_991L;
+
+    static final List<SettingField> SETTINGS_FIELDS = List.of(
+        toggle("HeartbeatStall", "Trigger.Modules.HeartbeatStall", false,
+            c -> c.trigger.modules.heartbeatStall, (c, v) -> c.trigger.modules.heartbeatStall = v),
+        number("StallDegraded", "@StallDegradedMs", "Trigger.StallDegradedMs", SettingUnit.MILLISECONDS,
+            1, MAX_EXACT_UI_INTEGER, "Heartbeat degraded threshold", false,
+            c -> c.trigger.stallDegradedMs, (c, v) -> c.trigger.stallDegradedMs = v),
+        number("StallCritical", "@StallCriticalMs", "Trigger.StallCriticalMs", SettingUnit.MILLISECONDS,
+            1, MAX_EXACT_UI_INTEGER, "Heartbeat critical threshold", false,
+            c -> c.trigger.stallCriticalMs, (c, v) -> c.trigger.stallCriticalMs = v),
+        toggle("TickDegraded", "Trigger.Modules.TickDegraded", false,
+            c -> c.trigger.modules.tickDegraded, (c, v) -> c.trigger.modules.tickDegraded = v),
+        number("TickAvgDegraded", "@TickAvgDegradedMs", "Trigger.TickAvgDegradedMs", SettingUnit.MILLISECONDS,
+            1, MAX_EXACT_UI_INTEGER, "Tick degraded threshold", false,
+            c -> c.trigger.tickAvgDegradedMs, (c, v) -> c.trigger.tickAvgDegradedMs = v),
+        number("TickAvgCritical", "@TickAvgCriticalMs", "Trigger.TickAvgCriticalMs", SettingUnit.MILLISECONDS,
+            1, MAX_EXACT_UI_INTEGER, "Tick critical threshold", false,
+            c -> c.trigger.tickAvgCriticalMs, (c, v) -> c.trigger.tickAvgCriticalMs = v),
+        toggle("Deadlock", "Trigger.Modules.Deadlock", false,
+            c -> c.trigger.modules.deadlock, (c, v) -> c.trigger.modules.deadlock = v),
+        toggle("HeapPressure", "Trigger.Modules.HeapPressure", false,
+            c -> c.trigger.modules.heapPressure, (c, v) -> c.trigger.modules.heapPressure = v),
+        number("HeapPressurePct", "@HeapPressurePct", "Trigger.HeapPressurePct", SettingUnit.PERCENT,
+            1, 100, "Heap pressure", false,
+            c -> c.trigger.heapPressurePct, (c, v) -> c.trigger.heapPressurePct = (int) v),
+        duration("HeapPressureSustain", "@HeapPressureSustain", "Trigger.HeapPressureSustain", SettingUnit.SECONDS,
+            0, 3600, "Heap pressure sustain", false,
+            c -> c.trigger.heapPressureSustain, (c, v) -> c.trigger.heapPressureSustain = v),
+        toggle("GcPressure", "Trigger.Modules.GcPressure", false,
+            c -> c.trigger.modules.gcPressure, (c, v) -> c.trigger.modules.gcPressure = v),
+        number("GcPressurePct", "@GcPressurePct", "Trigger.GcPressurePct", SettingUnit.PERCENT,
+            1, 100, "GC pressure", false,
+            c -> c.trigger.gcPressurePct, (c, v) -> c.trigger.gcPressurePct = (int) v),
+        duration("GcPressureWindow", "@GcPressureWindow", "Trigger.GcPressureWindow", SettingUnit.SECONDS,
+            1, 3600, "GC pressure window", false,
+            c -> c.trigger.gcPressureWindow, (c, v) -> c.trigger.gcPressureWindow = v),
+        toggle("CpuSaturation", "Trigger.Modules.CpuSaturation", false,
+            c -> c.trigger.modules.cpuSaturation, (c, v) -> c.trigger.modules.cpuSaturation = v),
+        number("CpuSaturationPct", "@CpuSaturationPct", "Trigger.CpuSaturationPct", SettingUnit.PERCENT,
+            1, 100, "CPU saturation", false,
+            c -> c.trigger.cpuSaturationPct, (c, v) -> c.trigger.cpuSaturationPct = (int) v),
+        duration("CpuSaturationSustain", "@CpuSaturationSustain", "Trigger.CpuSaturationSustain", SettingUnit.SECONDS,
+            0, 3600, "CPU saturation sustain", false,
+            c -> c.trigger.cpuSaturationSustain, (c, v) -> c.trigger.cpuSaturationSustain = v),
+        toggle("NetSaturation", "Trigger.Modules.NetSaturation", false,
+            c -> c.trigger.modules.netSaturation, (c, v) -> c.trigger.modules.netSaturation = v),
+        number("NetInMbps", "@NetInMbps", "Trigger.NetInMbps", SettingUnit.MBPS,
+            0, 100000, "Network inbound limit", false,
+            c -> c.trigger.netInMbps, (c, v) -> c.trigger.netInMbps = v),
+        number("NetOutMbps", "@NetOutMbps", "Trigger.NetOutMbps", SettingUnit.MBPS,
+            0, 100000, "Network outbound limit", false,
+            c -> c.trigger.netOutMbps, (c, v) -> c.trigger.netOutMbps = v),
+        duration("NetSustain", "@NetSustain", "Trigger.NetSustain", SettingUnit.SECONDS,
+            0, 3600, "Network saturation sustain", false,
+            c -> c.trigger.netSustain, (c, v) -> c.trigger.netSustain = v),
+        toggle("PlayerDrop", "Trigger.Modules.PlayerDrop", false,
+            c -> c.trigger.modules.playerDrop, (c, v) -> c.trigger.modules.playerDrop = v),
+        number("PlayerDropPct", "@PlayerDropPct", "Trigger.PlayerDropPct", SettingUnit.PERCENT,
+            1, 100, "Player drop", false,
+            c -> c.trigger.playerDropPct, (c, v) -> c.trigger.playerDropPct = (int) v),
+        duration("PlayerDropWindow", "@PlayerDropWindow", "Trigger.PlayerDropWindow", SettingUnit.SECONDS,
+            1, 3600, "Player drop window", false,
+            c -> c.trigger.playerDropWindow, (c, v) -> c.trigger.playerDropWindow = v),
+        number("PlayerDropMinPlayers", "@PlayerDropMinPlayers", "Trigger.PlayerDropMinPlayers", SettingUnit.COUNT,
+            0, 10000, "Player drop minimum players", false,
+            c -> c.trigger.playerDropMinPlayers, (c, v) -> c.trigger.playerDropMinPlayers = (int) v),
+        toggle("LogError", "Trigger.Modules.LogError", false,
+            c -> c.trigger.modules.logError, (c, v) -> c.trigger.modules.logError = v),
+        duration("LogErrorDedupeWindow", "@LogErrorDedupeWindow", "Trigger.LogErrorDedupeWindow", SettingUnit.SECONDS,
+            0, 86400, "Log error repeat window", false,
+            c -> c.trigger.logErrorDedupeWindow, (c, v) -> c.trigger.logErrorDedupeWindow = v),
+        duration("Cooldown", "@CooldownSeconds", "Trigger.Cooldown", SettingUnit.SECONDS,
+            0, 3600, "Cooldown", false,
+            c -> c.trigger.cooldown, (c, v) -> c.trigger.cooldown = v),
+        duration("Debounce", "@DebounceSeconds", "Trigger.Debounce", SettingUnit.SECONDS,
+            0, 3600, "Debounce", false,
+            c -> c.trigger.debounce, (c, v) -> c.trigger.debounce = v),
+        toggle("CaptureEnabled", "Capture.Enabled", false,
+            c -> c.capture.enabled, (c, v) -> c.capture.enabled = v),
+        number("RetentionMaxCount", "@RetentionMaxCount", "Retention.MaxCount", SettingUnit.COUNT,
+            1, 1000, "Retained bundles", false,
+            c -> c.retention.maxCount, (c, v) -> c.retention.maxCount = (int) v),
+        number("RetentionMaxTotalMiB", "@RetentionMaxTotalMiB", "Retention.MaxTotalBytes", SettingUnit.MEBIBYTES,
+            1, 1048576, "Retention total size", false,
+            c -> c.retention.maxTotalBytes, (c, v) -> c.retention.maxTotalBytes = v),
+        duration("RetentionMaxAgeDays", "@RetentionMaxAgeDays", "Retention.MaxAge", SettingUnit.DAYS,
+            1, 3650, "Retention age", false,
+            c -> c.retention.maxAge == null ? DEFAULT_RETENTION_MAX_AGE : c.retention.maxAge,
+            (c, v) -> c.retention.maxAge = v),
+        toggle("MetricsEnabled", "Metrics.Enabled", false,
+            c -> c.metrics.enabled, (c, v) -> c.metrics.enabled = v),
+        number("MetricsRetentionDays", "@MetricsRetentionDays", "Metrics.RetentionDays", SettingUnit.DAY_COUNT,
+            1, 365, "Metrics retention days", false,
+            c -> c.metrics.retentionDays, (c, v) -> c.metrics.retentionDays = (int) v),
+        toggle("MetricsCpu", "Metrics.Cpu", false,
+            c -> c.metrics.cpu, (c, v) -> c.metrics.cpu = v),
+        toggle("MetricsAllocation", "Metrics.Allocation", false,
+            c -> c.metrics.allocation, (c, v) -> c.metrics.allocation = v),
+        duration("PostIncidentMaxWait", "@PostIncidentMaxWait", "Jfr.PostIncidentMaxWait", SettingUnit.SECONDS,
+            0, 3600, "Post-incident maximum wait", false,
+            c -> c.jfr.postIncidentMaxWait, (c, v) -> c.jfr.postIncidentMaxWait = v),
+        number("ThreadDumpCount", "@ThreadDumpCount", "Jfr.ThreadDumpCount", SettingUnit.COUNT,
+            0, 20, "Thread dump count", false,
+            c -> c.jfr.threadDumpCount, (c, v) -> c.jfr.threadDumpCount = (int) v),
+        duration("ThreadDumpInterval", "@ThreadDumpInterval", "Jfr.ThreadDumpInterval", SettingUnit.SECONDS,
+            1, 3600, "Thread dump interval", false,
+            c -> c.jfr.threadDumpInterval, (c, v) -> c.jfr.threadDumpInterval = v),
+        duration("JfrMaxAgeMinutes", "@JfrMaxAgeMinutes", "Jfr.MaxAge", SettingUnit.MINUTES,
+            1, 1440, "Recording history", true,
+            c -> c.jfr.maxAge, (c, v) -> c.jfr.maxAge = v),
+        number("JfrMaxSizeMiB", "@JfrMaxSizeMiB", "Jfr.MaxSizeBytes", SettingUnit.MEBIBYTES,
+            16, 8192, "Recording size", true,
+            c -> c.jfr.maxSizeBytes, (c, v) -> c.jfr.maxSizeBytes = v),
+        duration("JfrSampleIntervalSeconds", "@JfrSampleIntervalSeconds", "Jfr.SampleInterval", SettingUnit.SECONDS,
+            5, 300, "Recording sample interval", true,
+            c -> c.jfr.sampleInterval, (c, v) -> c.jfr.sampleInterval = v),
+        duration("JfrSnapshotIntervalMinutes", "@JfrSnapshotIntervalMinutes", "Jfr.SnapshotInterval", SettingUnit.MINUTES,
+            0, 1440, "Recording snapshot interval", true,
+            c -> c.jfr.snapshotInterval, (c, v) -> c.jfr.snapshotInterval = v),
+        toggle("JfrOldObjectSampling", "Jfr.OldObjectSampling", true,
+            c -> c.jfr.oldObjectSampling, (c, v) -> c.jfr.oldObjectSampling = v)
+    );
+
+    private static SettingField toggle(String id, String configKey, boolean restartRequired,
+                                       Function<FileConfig, Boolean> getter, BiConsumer<FileConfig, Boolean> setter) {
+        return new SettingField(id, "@" + id, configKey, SettingKind.TOGGLE, SettingUnit.BOOLEAN, 0, 1,
+            id, restartRequired, getter::apply, (c, v) -> setter.accept(c, (boolean) v));
+    }
+
+    private static SettingField number(String id, String eventKey, String configKey, SettingUnit unit,
+                                      long min, long max, String errorName, boolean restartRequired,
+                                      ToLongFunction<FileConfig> getter, ObjLongConsumer<FileConfig> setter) {
+        return new SettingField(id, eventKey, configKey, SettingKind.NUMBER, unit, min, max,
+            errorName, restartRequired, c -> unit.display(getter.applyAsLong(c)),
+            (c, v) -> setter.accept(c, unit.stored((long) v)));
+    }
+
+    private static SettingField duration(String id, String eventKey, String configKey, SettingUnit unit,
+                                        long min, long max, String errorName, boolean restartRequired,
+                                        Function<FileConfig, Duration> getter, BiConsumer<FileConfig, Duration> setter) {
+        return number(id, eventKey, configKey, unit, min, max, errorName, restartRequired,
+            c -> getter.apply(c).getSeconds(), (c, v) -> setter.accept(c, Duration.ofSeconds(v)));
+    }
+
+    record HyboxSettings(Map<String, Object> values) {
+        HyboxSettings {
+            values = Map.copyOf(values);
+        }
+
+        Object value(SettingField field) {
+            return values.get(field.id());
+        }
+
+        List<String> validate() {
+            List<String> problems = new ArrayList<>();
+            for (SettingField field : SETTINGS_FIELDS) field.validate(value(field), problems);
+            if ((long) values.get("StallCritical") < (long) values.get("StallDegraded")) {
+                problems.add("Heartbeat critical threshold must be at least the degraded threshold.");
+            }
+            if ((long) values.get("TickAvgCritical") < (long) values.get("TickAvgDegraded")) {
+                problems.add("Tick critical threshold must be at least the degraded threshold.");
+            }
+            return List.copyOf(problems);
+        }
+    }
+
+    static HyboxSettings read(Path dataDir, System.Logger logger) {
+        Objects.requireNonNull(logger, "logger");
+        FileConfig raw = loadFile(dataDir).get();
+        Map<String, Object> values = new LinkedHashMap<>();
+        for (SettingField field : SETTINGS_FIELDS) values.put(field.id(), field.read(raw));
+        return new HyboxSettings(values);
+    }
+
+    static void write(Path dataDir, HyboxSettings original, HyboxSettings settings, System.Logger logger) {
+        Objects.requireNonNull(original, "original");
+        Objects.requireNonNull(settings, "settings");
+        Objects.requireNonNull(logger, "logger");
+        List<String> problems = settings.validate();
+        if (!problems.isEmpty()) throw new IllegalArgumentException(String.join(" ", problems));
+        Config<FileConfig> configFile = loadFile(dataDir);
+        FileConfig raw = configFile.get();
+        for (SettingField field : SETTINGS_FIELDS) {
+            Object submitted = settings.value(field);
+            if (!submitted.equals(original.value(field))) field.setter().accept(raw, submitted);
+        }
+        try {
+            Path configPath = path(dataDir);
+            BsonDocument encoded = FileConfig.CODEC.encode(raw, new ExtraInfo());
+            BsonDocument document = Files.exists(configPath)
+                ? BsonDocument.parse(Files.readString(configPath)) : encoded;
+            for (SettingField field : SETTINGS_FIELDS) {
+                if (settings.value(field).equals(original.value(field))) continue;
+                String[] keys = field.configKey().split("\\.");
+                BsonDocument target = document;
+                BsonDocument source = encoded;
+                for (int i = 0; i < keys.length - 1; i++) {
+                    BsonValue child = target.get(keys[i]);
+                    if (child == null || !child.isDocument()) {
+                        target.put(keys[i], new BsonDocument());
+                    }
+                    target = target.getDocument(keys[i]);
+                    source = source.getDocument(keys[i]);
+                }
+                String key = keys[keys.length - 1];
+                target.put(key, source.get(key));
+            }
+            BsonUtil.writeDocument(configPath, document).join();
+        } catch (IOException | RuntimeException failure) {
+            throw new IllegalStateException("Failed to save Hybox settings to " + path(dataDir), failure);
+        }
+        logger.log(System.Logger.Level.INFO, "Saved Hybox settings: " + path(dataDir));
+    }
+
+    private static Config<FileConfig> loadFile(Path dataDir) {
+        Objects.requireNonNull(dataDir, "dataDir");
+        Config<FileConfig> configFile = new Config<>(dataDir, FILE_NAME, FileConfig.CODEC);
+        try {
+            Objects.requireNonNull(configFile.load().join(), "Loaded configuration");
+        } catch (RuntimeException failure) {
+            throw new IllegalStateException("Failed to load Hybox config from " + path(dataDir)
+                + "; the existing configuration was not replaced.", failure);
+        }
+        return configFile;
     }
 
     private static HyboxConfig defaultCoreConfig() {
@@ -586,7 +881,7 @@ final class HytaleHyboxConfig {
             }, (c, ei) -> c.recordingName).add()
             .append(new KeyedCodec<>("DisabledEvents", Codec.STRING_ARRAY), (c, v, ei) -> {
                 if (v != null) {
-                    c.disabledEvents = List.of(v);
+                    c.disabledEvents = Arrays.stream(v).filter(Objects::nonNull).toList();
                 }
             }, (c, ei) -> c.disabledEvents.toArray(new String[0])).add()
             .append(new KeyedCodec<>("PostIncidentMaxWait", Codec.DURATION), (c, v, ei) -> {
@@ -689,7 +984,7 @@ final class HytaleHyboxConfig {
             }, (c, ei) -> c.sanitizeLog).add()
             .append(new KeyedCodec<>("RedactPatterns", Codec.STRING_ARRAY), (c, v, ei) -> {
                 if (v != null) {
-                    c.redactPatterns = new ArrayList<>(List.of(v));
+                    c.redactPatterns = Arrays.stream(v).filter(Objects::nonNull).toList();
                 }
             }, (c, ei) -> c.redactPatterns.toArray(new String[0])).add()
             .append(new KeyedCodec<>("Artifacts", Codec.STRING_ARRAY), (c, v, ei) -> {

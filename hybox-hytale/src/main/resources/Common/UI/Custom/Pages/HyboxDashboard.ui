@@ -1,0 +1,102 @@
+$C = "../Common.ui";
+
+$C.@PageOverlay {}
+
+$C.@Container {
+  Anchor: (Width: 1180, Height: 690);
+
+  #Title {
+    Group {
+      LayoutMode: Center;
+      Anchor: (Full: 0);
+      $C.@Title { @Text = "Hybox · Incident recorder"; }
+    }
+  }
+
+  #Content {
+    LayoutMode: Top;
+
+    Group {
+      LayoutMode: Left;
+      Anchor: (Height: 48, Bottom: 12);
+
+      Group {
+        LayoutMode: Top;
+        Anchor: (Width: 180, Right: 8);
+        $C.@SecondaryTextButton #OverviewButton { @Text = "Overview"; }
+        Group #OverviewMarker { Anchor: (Height: 2, Top: 3); Background: #7a9cc6(0.8); }
+      }
+      Group {
+        LayoutMode: Top;
+        Anchor: (Width: 180, Right: 8);
+        $C.@SecondaryTextButton #IncidentsButton { @Text = "Incidents"; }
+        Group #IncidentsMarker { Anchor: (Height: 2, Top: 3); Background: #7a9cc6(0.8); Visible: false; }
+      }
+      Group {
+        LayoutMode: Top;
+        Anchor: (Width: 180, Right: 8);
+        $C.@SecondaryTextButton #TriggersButton { @Text = "Triggers"; }
+        Group #TriggersMarker { Anchor: (Height: 2, Top: 3); Background: #7a9cc6(0.8); Visible: false; }
+      }
+      Group {
+        LayoutMode: Top;
+        Anchor: (Width: 180);
+        $C.@SecondaryTextButton #HeapButton { @Text = "Heap"; }
+        Group #HeapMarker { Anchor: (Height: 2, Top: 3); Background: #7a9cc6(0.8); Visible: false; }
+      }
+    }
+
+    Label #SectionTitle {
+      Anchor: (Height: 25);
+      Style: (RenderBold: true, FontSize: 20, TextColor: #d3e3ed);
+    }
+    Label #SectionCaption {
+      Anchor: (Height: 22, Bottom: 12);
+      Style: (FontSize: 12, TextColor: #96a9be);
+      Visible: false;
+    }
+
+    Group #Section { FlexWeight: 1; LayoutMode: Top; }
+
+    Group {
+      LayoutMode: Left;
+      Anchor: (Height: 32, Top: 6);
+      Label #Feedback {
+        FlexWeight: 1;
+        Style: (FontSize: 12, TextColor: #b7cedd, Wrap: true, WrapMaxLines: 1, VerticalAlignment: Center);
+        Visible: false;
+      }
+      $C.@SecondaryTextButton #OpenLastButton {
+        @Text = "Open incident";
+        @Anchor = Anchor(Width: 160);
+        Visible: false;
+      }
+    }
+
+    Group {
+      LayoutMode: Left;
+      Anchor: (Height: 58, Top: 12);
+      $C.@TextButton #CaptureButton {
+        @Text = "Capture incident";
+        @Anchor = Anchor(Width: 200, Right: 8);
+      }
+      Label #CaptureHint {
+        FlexWeight: 1;
+        Text: "Saves the last 15 minutes of recording, thread dumps, server log and config as an incident bundle.";
+        Style: (FontSize: 12, TextColor: #96a9be, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 3);
+      }
+      $C.@SecondaryTextButton #TrendsButton {
+        @Text = "Trends";
+        @Anchor = Anchor(Width: 120, Left: 12);
+      }
+      $C.@SecondaryTextButton #SettingsButton {
+        @Text = "Settings";
+        @Anchor = Anchor(Width: 120, Left: 12, Right: 8);
+      }
+      $C.@SecondaryTextButton #DismissButton {
+        @Text = "Close";
+        @Anchor = Anchor(Width: 120);
+      }
+    }
+  }
+}

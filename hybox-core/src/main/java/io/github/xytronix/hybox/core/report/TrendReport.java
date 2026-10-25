@@ -47,6 +47,18 @@ public final class TrendReport {
         json.name("days").value((Number) days);
         json.name("generated").value(GENERATED_FORMAT.format(generatedAt));
         json.name("count").value((Number) n);
+        json.name("start");
+        if (n == 0) {
+            json.nullValue();
+        } else {
+            json.value((Number) trend.timestamps()[0]);
+        }
+        json.name("end");
+        if (n == 0) {
+            json.nullValue();
+        } else {
+            json.value((Number) trend.timestamps()[n - 1]);
+        }
 
         json.name("t").beginArray();
         for (int b = 0; b < buckets; b++) {
@@ -56,15 +68,15 @@ public final class TrendReport {
         }
         json.endArray();
 
-        writeSeries(json, "tickAvgMs", trend.tickAvgMs(), n, buckets, 1, 2);
-        writeSeries(json, "tps", trend.tps(), n, buckets, 1, 2);
-        writeSeries(json, "players", trend.players(), n, buckets, 1, 0);
-        writeSeries(json, "heapMb", trend.heapBytes(), n, buckets, MB, 1);
-        writeSeries(json, "rssMb", trend.rssBytes(), n, buckets, MB, 1);
-        writeSeries(json, "gcPct", trend.gcPct(), n, buckets, 1, 2);
-        writeSeries(json, "cpuPct", trend.cpuPct(), n, buckets, 1, 1);
-        writeSeries(json, "allocMbPerSec", trend.allocMbPerSec(), n, buckets, 1, 1);
-        writeSeries(json, "queuedPackets", trend.queuedPackets(), n, buckets, 1, 0);
+        writeSeries(json, "tickAvgMs", trend.tickAvgMs(), n, buckets, 1);
+        writeSeries(json, "tps", trend.tps(), n, buckets, 1);
+        writeSeries(json, "players", trend.players(), n, buckets, 1);
+        writeSeries(json, "heapMb", trend.heapBytes(), n, buckets, MB);
+        writeSeries(json, "rssMb", trend.rssBytes(), n, buckets, MB);
+        writeSeries(json, "gcPct", trend.gcPct(), n, buckets, 1);
+        writeSeries(json, "cpuPct", trend.cpuPct(), n, buckets, 1);
+        writeSeries(json, "allocMbPerSec", trend.allocMbPerSec(), n, buckets, 1);
+        writeSeries(json, "queuedPackets", trend.queuedPackets(), n, buckets, 1);
 
         json.name("incidents").beginArray();
         if (incidents != null) {
@@ -79,31 +91,57 @@ public final class TrendReport {
     }
 
     private static void writeSeries(JsonWriter json, String name, double[] values, int n, int buckets,
-                                    double divisor, int decimals) throws IOException {
-        json.name(name).beginArray();
+                                    double divisor) throws IOException {
+        json.name(name).beginObject();
+        json.name("buckets").beginArray();
+        double observedSum = 0;
+        double observedMin = Double.POSITIVE_INFINITY;
+        double observedMax = Double.NEGATIVE_INFINITY;
+        double observedLast = Double.NaN;
+        int observedCount = 0;
         for (int b = 0; b < buckets; b++) {
             int lo = (int) ((long) b * n / buckets);
             int hi = (int) ((long) (b + 1) * n / buckets);
-            double mean = mean(values, lo, hi);
-            if (Double.isNaN(mean)) {
-                json.nullValue();
-            } else {
-                json.value((Number) round(mean / divisor, decimals));
+            double sum = 0;
+            double min = Double.POSITIVE_INFINITY;
+            double max = Double.NEGATIVE_INFINITY;
+            double last = Double.NaN;
+            int count = 0;
+            for (int i = lo; i < hi; i++) {
+                double value = values[i];
+                if (!Double.isFinite(value)) {
+                    continue;
+                }
+                sum += value;
+                min = Math.min(min, value);
+                max = Math.max(max, value);
+                last = value;
+                count++;
+                observedSum += value;
+            }
+            writeStatistics(json, sum, min, max, last, count, divisor);
+            if (count != 0) {
+                observedMin = Math.min(observedMin, min);
+                observedMax = Math.max(observedMax, max);
+                observedLast = last;
+                observedCount += count;
             }
         }
         json.endArray();
+        json.name("observed");
+        writeStatistics(json, observedSum, observedMin, observedMax, observedLast, observedCount, divisor);
+        json.endObject();
     }
 
-    private static double mean(double[] values, int lo, int hi) {
-        double sum = 0;
-        int count = 0;
-        for (int i = lo; i < hi; i++) {
-            if (!Double.isNaN(values[i])) {
-                sum += values[i];
-                count++;
-            }
-        }
-        return count == 0 ? Double.NaN : sum / count;
+    private static void writeStatistics(JsonWriter json, double sum, double min, double max,
+                                        double last, int count, double divisor) throws IOException {
+        json.beginObject();
+        json.name("mean").value((Number) (count == 0 ? Double.NaN : sum / count / divisor));
+        json.name("min").value((Number) (min / divisor));
+        json.name("max").value((Number) (max / divisor));
+        json.name("last").value((Number) (last / divisor));
+        json.name("count").value((Number) count);
+        json.endObject();
     }
 
     private static long meanTime(long[] values, int lo, int hi) {
@@ -112,11 +150,6 @@ public final class TrendReport {
             sum += values[i];
         }
         return sum / Math.max(1, hi - lo);
-    }
-
-    private static double round(double value, int decimals) {
-        double factor = Math.pow(10, decimals);
-        return Math.round(value * factor) / factor;
     }
 
     private static String loadTemplate() throws IOException {

@@ -123,6 +123,7 @@ final class HytaleHeartbeatPump {
         int dumpCount,
         Duration dumpInterval,
         BooleanSupplier recovered,
+        BooleanSupplier skipped,
         System.Logger logger
     ) {
         List<String> dumps = new ArrayList<>();
@@ -143,6 +144,10 @@ final class HytaleHeartbeatPump {
         boolean spacing = dumpInterval != null && !dumpInterval.isZero() && !dumpInterval.isNegative();
         Instant nextDump = spacing ? clock.instant().plus(dumpInterval) : null;
         while (clock.instant().isBefore(deadline)) {
+            if (skipped != null && skipped.getAsBoolean()) {
+                logger.log(System.Logger.Level.INFO, "Post-incident wait for " + event.kind() + " skipped by a player.");
+                return dumps;
+            }
             if (heartbeat) {
                 Instant last = registry.lastBeat(scope);
                 if (last != null && last.isAfter(triggerAt)) {

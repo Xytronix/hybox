@@ -20,7 +20,6 @@ import io.github.xytronix.hybox.core.incident.IncidentId;
 import io.github.xytronix.hybox.core.incident.IncidentIds;
 import io.github.xytronix.hybox.core.incident.IncidentMetadata;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
-import io.github.xytronix.hybox.core.incident.IncidentSummary;
 import io.github.xytronix.hybox.core.incident.Severity;
 
 class ReportHtmlTest {
@@ -35,8 +34,7 @@ class ReportHtmlTest {
         IncidentId id = IncidentIds.next(CLOCK);
         IncidentMetadata meta = new IncidentMetadata(
             id, CLOCK.instant(), Severity.DEGRADED, "HEARTBEAT_STALL", "default", "Test headline");
-        IncidentSummary summary = new IncidentSummary("Unknown", List.of("x"), List.of("y"));
-        return new IncidentReport(meta, summary, Map.of("stallMs", "2146"), snapshot, diagnostics);
+        return new IncidentReport(meta, Map.of("stallMs", "2146"), snapshot, diagnostics);
     }
 
     private static String render(IncidentReport r) throws Exception {
@@ -107,17 +105,81 @@ class ReportHtmlTest {
     }
 
     @Test
+    void usesConciseThreadAndOwnershipNotes() throws Exception {
+        String html = render(report(null));
+
+        assertTrue(html.contains("<b>Blocked threads</b> ${blocked} blocked thread${blocked===1?\"\":\"s\"}"
+            + " at capture, waiting to enter a monitor."));
+        assertTrue(html.contains("Deadlock detection returned no result."));
+        assertTrue(html.contains("Only <b>${fmt(T)}</b> execution samples; too few to rank threads reliably."));
+        assertTrue(html.contains("sampled code; owner unknown; grouped by package"));
+        assertTrue(html.contains("sampled · owner unknown; grouped by package"));
+        assertFalse(html.contains("No positive deadlock evidence"));
+        assertFalse(html.contains("package fallback is not verified ownership"));
+        assertFalse(html.contains("per-thread shares may be unstable"));
+        assertFalse(html.contains("not proof of a circular wait"));
+    }
+
+    @Test
+    void missingRecordingPreservesWarningWithoutCaptureSummary() throws Exception {
+        IncidentMetadata meta = report(null).meta();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ReportHtml.write(new IncidentReport(meta), null, "recording file is empty", out);
+        String html = out.toString(StandardCharsets.UTF_8);
+        String markup = html.substring(0, html.indexOf("<script>"));
+
+        assertTrue(markup.contains("class=\"cwarn\" id=\"jfr-unavailable\""));
+        assertTrue(markup.contains("JFR recording unavailable: recording file is empty"));
+        assertTrue(markup.contains("Check JFR capture settings and server logs."));
+        assertFalse(markup.contains("Capture summary"));
+        assertFalse(html.contains("\"summary\":"));
+        assertFalse(markup.contains("<!--__SUMMARY__-->"));
+    }
+
+    @Test
+    void rendersGenericDiagnosticsRatherThanOnlyEmbeddingTheirData() throws Exception {
+        String html = render(report(null, List.of(
+            new DiagnosticSection("Heartbeats", Map.of("default", "2026-01-01T00:00:00Z (38 ms ago)")),
+            new DiagnosticSection("Thread progress", Map.of("Dumps compared", "3", "Verdict", "No progress")),
+            new DiagnosticSection("Capture failure", Map.of("Reason", "JFR <not available>"),
+                "capture stack <diagnostic>"))));
+        String markup = html.substring(0, html.indexOf("<script>"));
+
+        assertTrue(markup.contains("<b>Heartbeats</b>"));
+        assertTrue(markup.contains("2026-01-01T00:00:00Z (38 ms ago)"));
+        assertTrue(markup.contains("<b>Thread progress</b>"));
+        assertTrue(markup.contains("<span class=\"k\">Dumps compared</span><span class=\"v\">3</span>"));
+        assertTrue(markup.contains("JFR &lt;not available&gt;"));
+        assertTrue(markup.contains("capture stack &lt;diagnostic&gt;"));
+        assertFalse(markup.contains("<!--__DIAGNOSTICS__-->"));
+    }
+
+    @Test
+    void excludesJdkPackagesFromFallbackModAttribution() throws Exception {
+        String html = render(report(null, List.of(new DiagnosticSection("Mod hot-path contribution (JFR)",
+            Map.of("com.sun.management", "11 samples · com.sun.management.GcInfo.get",
+                "java.util.concurrent", "7 samples · java.util.concurrent.ForkJoinPool.run",
+                "jdk.internal.misc", "6 samples · jdk.internal.misc.Unsafe.park",
+                "sun.nio.ch", "5 samples · sun.nio.ch.Socket.read",
+                "cc.irori.refixes", "585 samples · cc.irori.refixes.Tick.run")))));
+
+        assertTrue(html.contains("\"modCpu\":[[\"cc.irori.refixes\",585,\"cc.irori.refixes.Tick.run\"]]"));
+        String modCpu = html.substring(html.indexOf("\"modCpu\":"), html.indexOf("\"flame\":"));
+        assertFalse(modCpu.contains("com.sun.management"));
+        assertFalse(modCpu.contains("jdk.internal.misc"));
+    }
+
+    @Test
     void emitsRecoveryNoteOnlyForUncleanShutdown() throws Exception {
         IncidentId id = IncidentIds.next(CLOCK);
-        IncidentSummary summary = new IncidentSummary(
-            "Unknown", List.of("The JVM exited without a clean shutdown;", "rebuilt on startup."), List.of("y"));
         IncidentReport recovered = new IncidentReport(new IncidentMetadata(
-            id, CLOCK.instant(), Severity.DEGRADED, "UNCLEAN_SHUTDOWN", null, "Recovered"), summary);
+            id, CLOCK.instant(), Severity.DEGRADED, "UNCLEAN_SHUTDOWN", null, "Recovered"));
 
         String html = render(recovered);
 
         assertTrue(html.contains(
-            "\"note\":\"The JVM exited without a clean shutdown; rebuilt on startup.\""));
+            "\"note\":\"The JVM exited without a clean shutdown; this bundle was rebuilt on the next startup from the "
+                + "rolling recording. The snapshot below is reconstructed from the recording's last samples.\""));
         assertTrue(render(report(null)).contains("\"note\":null"));
     }
 
@@ -132,7 +194,8 @@ class ReportHtmlTest {
 
         assertTrue(html.contains(
             "\"memPools\":[[\"G1 Eden Space\",1024,2048,4096,512],[\"Metaspace\",300,400,-1,-1]]"));
-        assertFalse(html.contains("\"title\":\"Memory pools\""));
+        assertTrue(html.contains("\"title\":\"Memory pools\""));
+        assertFalse(html.substring(0, html.indexOf("<script>")).contains("<b>Memory pools</b>"));
     }
 
     @Test
@@ -146,8 +209,9 @@ class ReportHtmlTest {
 
         String html = render(report(null, List.of(new DiagnosticSection("Stalled thread", entries, stack))));
 
-        assertTrue(html.contains("\"title\":\"Stalled thread\""));
-        assertTrue(html.contains("\"pre\":\"at jdk.internal.misc.Unsafe.park"));
+        assertTrue(html.contains("<b>Stalled thread</b>"));
+        assertTrue(html.contains("aria-label=\"Stalled thread stack or capture text\""));
+        assertTrue(html.contains(stack));
         assertTrue(html.contains("Blocked in <code>com.example.Plugin.onEntityRemove</code>"));
     }
 
@@ -211,25 +275,26 @@ class ReportHtmlTest {
         assertTrue(html.contains("\"ERROR\",\"ExamplePlugin\""));
         assertTrue(html.contains("ExampleSystem.tick"));
         assertTrue(html.contains("\"title\":\"mods/ExampleVendor_ExamplePlugin/config.json\""));
-        assertTrue(html.contains("\"title\":\"ExamplePlugin\""));
+        assertTrue(html.contains("<b>ExamplePlugin</b>"));
         assertTrue(html.contains("ExampleFeature.Enabled"));
         assertTrue(html.contains("\"tickSystems\":[[\"EntityTickingSystem\",\"default\",5.1,12.4,4.8,30.0]]"));
         assertTrue(html.contains("\"tickSystemsNote\":null"));
         assertTrue(html.contains("\"modCpu\":[[\"com.example.plugin\",8123,\"ExampleSystem.tick\"],"
             + "[\"io.github.xytronix.hybox\",412,\"JfrController.dump\"]]"));
-        assertFalse(html.contains("\"title\":\"Mod hot-path contribution (JFR)\""));
+        assertTrue(html.contains("\"title\":\"Mod hot-path contribution (JFR)\""));
         assertTrue(html.contains(
             "\"heapHistogram\":[[\"[B\",1234567,987654321],[\"java.lang.String\",234,5678]]"));
-        assertFalse(html.contains("\"title\":\"Heap histogram\""));
+        assertTrue(html.contains("\"title\":\"Heap histogram\""));
         assertTrue(html.contains("\"entities\":[[\"default\",[[\"Zombie\",12],[\"Cow\",5]]]]"));
-        assertFalse(html.contains("\"title\":\"Entities\""));
+        assertTrue(html.contains("\"title\":\"Entities\""));
         assertTrue(html.contains("\"loaders\":[[\"ExampleLoader\",\"1.0.0\"]]"));
         assertTrue(html.contains("\"server\":\"ExampleServer\""));
         assertTrue(html.contains("\"hytale\":\"0.5.4\""));
         assertTrue(html.contains(
             "\"container\":{\"runtime\":\"Docker\",\"type\":null,\"cpuLimit\":null,\"memLimit\":null}"));
-        assertFalse(html.contains("Container runtime"));
-        assertFalse(html.contains("\"title\":\"Environment\""));
+        assertTrue(html.contains("Container runtime"));
+        assertTrue(html.contains("\"title\":\"Environment\""));
+        assertFalse(html.substring(0, html.indexOf("<script>")).contains("<b>Environment</b>"));
     }
 
     @Test
@@ -251,7 +316,7 @@ class ReportHtmlTest {
         String html = render(report(null, List.of(new DiagnosticSection("Mixins", mixins))));
 
         assertTrue(html.contains("\"conflicts\":[]"));
-        assertFalse(html.contains("\"Conflicts\""));
+        assertTrue(html.contains("\"Conflicts\""));
     }
 
     @Test

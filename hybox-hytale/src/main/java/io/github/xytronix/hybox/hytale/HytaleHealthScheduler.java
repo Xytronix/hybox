@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
@@ -37,6 +38,7 @@ final class HytaleHealthScheduler {
     private final AtomicBoolean healthCheckRunning = new AtomicBoolean(false);
     private CompletableFuture<Void> readyTask;
     private CompletableFuture<Void> snapshotStartTask;
+    private ScheduledFuture<?> snapshotTask;
     private boolean closed;
     private boolean ownsRollingSnapshot;
 
@@ -68,7 +70,8 @@ final class HytaleHealthScheduler {
                             "Rolling snapshot writer disabled to preserve an unrecovered recording at " + rollingFile);
                         return;
                     }
-                    scheduler.scheduleAtFixedRate(this::scheduleSnapshot, millis, millis, TimeUnit.MILLISECONDS);
+                    snapshotTask = scheduler.scheduleAtFixedRate(this::scheduleSnapshot, millis, millis,
+                        TimeUnit.MILLISECONDS);
                     ownsRollingSnapshot = true;
                 }
             }
@@ -138,6 +141,9 @@ final class HytaleHealthScheduler {
         }
         if (snapshotStartTask != null) {
             snapshotStartTask.cancel(false);
+        }
+        if (snapshotTask != null) {
+            snapshotTask.cancel(false);
         }
     }
 

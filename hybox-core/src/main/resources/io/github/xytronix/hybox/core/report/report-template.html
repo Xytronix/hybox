@@ -93,6 +93,11 @@
   .lead b{color:var(--tx)}
   .lead .hot{color:var(--warn);font-weight:600}
 
+  .recording-scope{display:none;color:var(--warn);border:1px solid rgba(230,179,74,.35);border-radius:5px;padding:3px 7px;font-size:12px;font-weight:500;line-height:1.5;margin:0 0 12px}
+  .has-time-filter .recording-scope{display:inline-flex}
+  .cth .recording-scope{margin:0}
+  .filter-empty{padding:18px;color:var(--tx2);border:1px solid var(--border);border-radius:8px}
+  .filter-empty[hidden]{display:none}
   .diag{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px}
   @media(max-width:1080px){.diag{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px}
@@ -441,6 +446,8 @@
     </header>
 
     <div id="presetrow"></div>
+<!--__SUMMARY__-->
+<!--__DIAGNOSTICS__-->
     <div id="sections"></div>
   </main>
 </div>
@@ -908,6 +915,7 @@ function attachChartHover(el){
 let ACTIVE_PRESET="all";
 function setZoom(z,preset){
   ZOOM=z;
+  document.body.classList.toggle("has-time-filter",!!z&&(z.a>0||z.b<1));
   ACTIVE_PRESET=preset||(z?null:"all");
   renderCharts();
   updateStats();
@@ -1135,14 +1143,16 @@ $("#navfoot").innerHTML = `Generated offline by Hybox${D.hyboxVersion?" v"+esc(D
   $("#envstrip").innerHTML = chips.map(e=>`<div class="echip" data-tip="${esc(e.tip)}"><span class="eic">${e.ic}</span><div><div class="el">${e.l}</div><div class="ev">${esc(e.v)}</div></div></div>`).join("");
 })();
 
-const S=[];
-let SECNUM=1;
-function sec(id,icon,title,sub,body){
+const hasCapturedDiagnostics=!!document.getElementById("stalled");
+const S=hasCapturedDiagnostics?[{id:"stalled",icon:I.warn,num:"02",title:"Captured diagnostics"}]:[];
+let SECNUM=hasCapturedDiagnostics?2:1;
+function recordingScopeBadge(){return `<span class="recording-scope">Entire recording, not time-filtered</span>`;}
+function sec(id,icon,title,sub,body,recordingWide=false){
   if(!body) return "";
   SECNUM++;
   const num=String(SECNUM).padStart(2,"0");
   S.push({id,icon,num,title});
-  return `<section id="${id}"><h2 class="section-heading"><button type="button" class="sh" data-collapse aria-expanded="true" aria-controls="${id}-body"><span class="sic" aria-hidden="true">${icon}</span><span class="num">${num}</span><span>${title}</span><span class="sub">${sub||""}</span><span class="chev" aria-hidden="true">${I.chev}</span></button></h2><div class="sbody" id="${id}-body">${body}</div></section>`;
+  return `<section id="${id}"><h2 class="section-heading"><button type="button" class="sh" data-collapse aria-expanded="true" aria-controls="${id}-body"><span class="sic" aria-hidden="true">${icon}</span><span class="num">${num}</span><span>${title}</span><span class="sub">${sub||""}</span><span class="chev" aria-hidden="true">${I.chev}</span></button></h2><div class="sbody" id="${id}-body">${recordingWide?recordingScopeBadge():""}${body}</div></section>`;
 }
 
 function containerRisk(){
@@ -1235,6 +1245,32 @@ function comparisonHtml(){
     <div class="tscroll"><table><thead><tr>${thc("Metric","Series averaged over each window")}${thc("Baseline avg","Average over the calm window",{r:true})}${thc((term==="profile"?"Profile":"Incident")+" avg","Average from just before the "+term+(recov?" through recovery":" to the end of the capture"),{r:true})}${thc("Delta","Red when the change direction is bad for this metric; grey under ±5%.",{r:true})}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 function diagnosisHtml(){
+  if(!has(D.findings)) return legacyDiagnosisHtml();
+  const f=D.findings, cmp=comparisonHtml();
+  if(!f.evidence.length) return cmp;
+  const links={cpu:"#cpu",methods:"#methods",worlds:"#worlds",memory:"#memory",states:"#states",metrics:"#metrics",system:"#system",plugins:"#plugins",config:"#config",log:"#log"};
+  const spans=(items,entry)=>items.map(s=>{
+    const value=esc(s[0]), styled=s[1]==="b"?`<b>${value}</b>`:s[1]==="code"?`<code>${value}</code>`:value;
+    return entry&&links[entry.section]&&s[0]===entry.label?`<a href="${links[entry.section]}">${styled}</a>`:styled;
+  }).join("");
+  const ev=f.evidence.map(e=>`<li><span class="fi" style="color:var(--warn)">${I.fire}</span><span>${spans(e.spans)}${links[e.section]?` <a class="evlink" href="${links[e.section]}">${esc(e.label)} ↗</a>`:""}</span></li>`);
+  const stepHtml=f.steps.map(e=>`<li>${spans(e.spans,e)}</li>`).join("");
+  const left=`<div class="card glow"><h3><span class="ic">${I.warn}</span> Evidence</h3>
+    <div class="diagtext">${spans(f.intro)}</div>
+    <ul class="findings">${ev.join("")}</ul></div>`;
+  const severityClass=f.severity==="CRITICAL"?"bad":f.severity==="DEGRADED"?"warn":"good";
+  const vrows=[];
+  vrows.push(`<div class="vrow"><span class="vk">Severity</span><span class="vv ${severityClass}">${esc(f.severity)}</span></div>`);
+  vrows.push(`<div class="vrow"><span class="vk">Investigation direction</span><span class="vv">${esc(f.direction)}</span></div>`);
+  vrows.push(`<div class="subnote">${esc(f.caveat)}</div>`);
+  const tags=f.tags.map(t=>`<span class="tag">${esc(t)}</span>`);
+  const right=`<div class="card"><h3><span class="ic" style="color:var(--blue)">${I.pulse}</span> Assessment</h3>
+    <div class="verdict">${vrows.join("")}</div>
+    ${stepHtml?`<div style="margin-top:14px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--tx3)">Next steps</div><ol class="nextsteps">${stepHtml}</ol>`:""}
+    ${tags.length?`<div class="tagrow" style="margin-top:12px">${tags.join("")}</div>`:""}</div>`;
+  return `<div class="diag">${left}${right}</div>`+cmp;
+}
+function legacyDiagnosisHtml(){
   const T=DV.samples, ser=D.series||{};
   const ev=[];
   const row=(html,link,label)=>ev.push(`<li><span class="fi" style="color:var(--warn)">${I.fire}</span><span>${html}${link?` <a class="evlink" href="${link}">${label} ↗</a>`:""}</span></li>`);
@@ -1243,8 +1279,8 @@ function diagnosisHtml(){
   if(DV.stalled&&has(DV.stalled.samples)&&T) row(`The stalled world <code>${esc(worldLabel(DV.stalled.name))}</code> drew <b>${pct(DV.stalled.samples,T).toFixed(1)}%</b> of samples, #${DV.stalledRank} of ${DV.worlds.length} by CPU.`,"#worlds","worlds");
   if(D.gc) row(`${esc(DV.gcName||"GC")} ran <b>${D.gc.collections}</b> collections, longest pause <b>${D.gc.maxPauseMs} ms</b> (${D.gc.totalPauseMs} ms total).`,"#memory","memory &amp; GC");
   if(DV.deadlock) row(`The JVM detected a deadlock involving <b>${D.deadlocked.length}</b> thread${D.deadlocked.length===1?"":"s"}.`,"#states","deadlocked threads");
-  if(DV.blocked!=null) row(`<b>${DV.blocked}</b> thread(s) were BLOCKED at capture. This snapshot alone neither confirms nor excludes a deadlock or earlier contention.`,"#states","thread states");
-  if(D.cpu&&has(D.cpu.machMax)) row(`Machine CPU peaked at <b>${D.cpu.machMax.toFixed(1)}%</b>${has(D.cpu.machAvg)?` (average ${D.cpu.machAvg.toFixed(1)}%)`:""}. Aggregate load and sample shares alone do not establish CPU saturation.`,"#cpu","CPU &amp; load");
+  if(DV.blocked!=null) row(`<b>${DV.blocked}</b> thread(s) were BLOCKED at capture.`,"#states","thread states");
+  if(D.cpu&&has(D.cpu.machMax)) row(`Machine CPU peaked at <b>${D.cpu.machMax.toFixed(1)}%</b>${has(D.cpu.machAvg)?` (average ${D.cpu.machAvg.toFixed(1)}%)`:""}.`,"#cpu","CPU &amp; load");
   if(D.ram&&has(DV.memPct)) row(`Process RSS <b>${gb(D.ram.rssLast).toFixed(1)} GB</b> of ${gb(DV.memLimitBytes).toFixed(1)} GB ${DV.memBasis} (${DV.memPct.toFixed(0)}%)${D.heap&&has(D.heap.max)&&D.heap.max>0?`; heap peaked at <b>${gib(D.heap.peak).toFixed(1)}</b> of ${gib(D.heap.max).toFixed(1)} GiB`:""}.`,"#memory","memory &amp; GC");
   let exSpike=null;
   if(ser.exceptions&&ser.exceptions.length>=10){
@@ -1268,8 +1304,8 @@ function diagnosisHtml(){
 
   const steps=[];
   if(DV.deadlock) steps.push(`Inspect the ${D.deadlocked.length} detected deadlocked thread${D.deadlocked.length===1?"":"s"} and their lock owners (<a href="#states">thread states</a>)`);
-  else if(DV.blocked>0) steps.push(`Investigate lock contention in the ${DV.blocked} blocked thread(s); blocking alone is not proof of deadlock (<a href="#states">thread states</a>)`);
-  if(DV.topWorld) steps.push(`Profile <code>WorldThread - ${esc(DV.topWorld.name)}</code> in JDK Mission Control (recording.jfr in this bundle)`);
+  else if(DV.blocked>0) steps.push(`Investigate lock contention in the ${DV.blocked} blocked thread(s) (<a href="#states">thread states</a>)`);
+  if(DV.topWorld) steps.push(`Profile <code>WorldThread - ${esc(DV.topWorld.name)}</code> in JDK Mission Control (recording.jfr)`);
   const topSub=(D.subsystems||[]).find(x=>!String(x[0]).startsWith("Other"));
   if(topSub&&T) steps.push(`Review the ${esc(topSub[0])} hot path: ${fmt(topSub[1])} samples, ${pct(topSub[1],T).toFixed(1)}% of samples (<a href="#methods">hot methods</a>)`);
   if(MIXCONF.list&&MIXCONF.list.length) steps.push(`Inspect the ${MIXCONF.list.length} class${MIXCONF.list.length===1?"":"es"} patched by multiple mixin configs (<a href="#config">mixins</a>)`);
@@ -1277,8 +1313,8 @@ function diagnosisHtml(){
   const stepHtml=steps.slice(0,3).map(s=>`<li>${s}</li>`).join("");
 
   const intro=has(D.incident.stallMs)&&D.incident.worldShort
-    ? `<code>${esc(D.incident.trigger)}</code> fired after <b>${esc(D.incident.worldShort)}</b> missed its heartbeat by <b>${fmt(D.incident.stallMs)} ms</b>. Every line below is computed from this bundle's recording.`
-    : `<code>${esc(D.incident.trigger)}</code> fired at ${esc(D.incident.created)}. Every line below is computed from this bundle's recording.`;
+    ? `<code>${esc(D.incident.trigger)}</code> fired after <b>${esc(D.incident.worldShort)}</b> missed its heartbeat by <b>${fmt(D.incident.stallMs)} ms</b>.`
+    : `<code>${esc(D.incident.trigger)}</code> fired at ${esc(D.incident.created)}.`;
   const left=`<div class="card glow"><h3><span class="ic">${I.warn}</span> Evidence</h3>
     <div class="diagtext">${intro}</div>
     <ul class="findings">${ev.join("")}</ul></div>`;
@@ -1286,10 +1322,10 @@ function diagnosisHtml(){
   const vrows=[];
   vrows.push(`<div class="vrow"><span class="vk">Severity</span><span class="vv ${sevClass}">${esc(D.incident.severity)}</span></div>`);
   vrows.push(`<div class="vrow"><span class="vk">Investigation direction</span><span class="vv">${esc(direction)}</span></div>`);
-  vrows.push(`<div class="subnote">These observations do not establish the incident's cause. Correlate them with timing and stacks; short recorded GC pauses do not rule out GC involvement.</div>`);
+  vrows.push(`<div class="subnote">Correlate CPU share, blocked threads and short GC pauses with timing and stacks.</div>`);
   const tags=[];
   if(D.gc&&has(D.gc.maxPauseMs)) tags.push(`<span class="tag">Longest recorded GC pause: ${D.gc.maxPauseMs} ms</span>`);
-  tags.push(`<span class="tag">${DV.deadlock?"Deadlock detected":"No positive deadlock evidence supplied; absence not established"}</span>`);
+  if(DV.deadlock) tags.push(`<span class="tag">Deadlock detected</span>`);
   const right=`<div class="card"><h3><span class="ic" style="color:var(--blue)">${I.pulse}</span> Assessment</h3>
     <div class="verdict">${vrows.join("")}</div>
     ${stepHtml?`<div style="margin-top:14px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--tx3)">Next steps</div><ol class="nextsteps">${stepHtml}</ol>`:""}
@@ -1983,9 +2019,9 @@ function cpuHtml(){
   const parts=[];
   let lead="";
   if(D.cpu&&T&&DV.lowLoad){
-    lead=`<p class="lead">Host machine CPU averaged <b>${D.cpu.machAvg.toFixed(1)}%</b> (peak ${D.cpu.machMax.toFixed(1)}%)${D.sys&&has(D.sys.hwThreads)?` across ${D.sys.hwThreads} threads`:""}. Only <b>${fmt(T)}</b> execution samples were captured; per-thread shares may be unstable and do not establish that the server was idle.</p>`;
+    lead=`<p class="lead">Host machine CPU averaged <b>${D.cpu.machAvg.toFixed(1)}%</b> (peak ${D.cpu.machMax.toFixed(1)}%)${D.sys&&has(D.sys.hwThreads)?` across ${D.sys.hwThreads} threads`:""}. Only <b>${fmt(T)}</b> execution samples; too few to rank threads reliably.</p>`;
   } else if(D.cpu&&DV.topWorld&&T){
-    lead=`<p class="lead">Host machine CPU averaged <b>${D.cpu.machAvg.toFixed(1)}%</b> (peak ${D.cpu.machMax.toFixed(1)}%)${D.sys&&has(D.sys.hwThreads)?` across ${D.sys.hwThreads} threads`:""}. The busiest sampled world thread, <span class="hot">${esc(worldLabel(DV.topWorld.name))}</span>, holds <b>${pct(DV.topWorld.samples,T).toFixed(0)}%</b> of all samples. Sample share alone does not establish saturation.</p>`;
+    lead=`<p class="lead">Host machine CPU averaged <b>${D.cpu.machAvg.toFixed(1)}%</b> (peak ${D.cpu.machMax.toFixed(1)}%)${D.sys&&has(D.sys.hwThreads)?` across ${D.sys.hwThreads} threads`:""}. The busiest sampled world thread, <span class="hot">${esc(worldLabel(DV.topWorld.name))}</span>, holds <b>${pct(DV.topWorld.samples,T).toFixed(0)}%</b> of all samples.</p>`;
   }
   const cards=[];
   if(ser.cpu){
@@ -2008,7 +2044,7 @@ function cpuHtml(){
       const p=pct(w.samples,T), ic=w.stalled?I.warn:I.globe, lbl=worldLabel(w.name);
       return `<div class="wbar${w.stalled?' stall':''}"><div class="wn">${ic}<span data-tipov="${esc(w.name)}">${esc(lbl)}</span></div><div class="wt"><div class="wf" style="width:${(100*w.samples/Math.max(1,wmax)).toFixed(1)}%"></div></div><div class="wv">${fmt(w.samples)} · ${p.toFixed(1)}%</div></div>`;
     }).join("");
-    cards.push(`<div class="chartcard"><div class="cth"><span class="ctt">CPU samples by world thread</span><span class="ctm">${fmt(T)} total</span></div><div class="wbars">${bars}</div></div>`);
+    cards.push(`<div class="chartcard"><div class="cth"><span class="ctt">CPU samples by world thread</span><span class="ctm">${fmt(T)} total</span></div>${recordingScopeBadge()}<div class="wbars">${bars}</div></div>`);
   }
   if(!cards.length&&!(D.subsystems&&D.subsystems.length)) return "";
   parts.push(cards.length===2?`<div class="charts2">${cards.join("")}</div>`:cards.join(""));
@@ -2027,13 +2063,13 @@ function cpuHtml(){
   if(((D.subsystems&&D.subsystems.length)||(D.modCpu&&D.modCpu.length))&&T){
     const worlds=(D.cpuByWorld||[]).filter(w=>w.samples>0);
     if(worlds.length>1){
-      parts.push(`<div class="tbar wsel"><span class="wsl">scope</span><button type="button" class="chip tog on" data-cpuworld="*" aria-pressed="true">all worlds</button>`
+      parts.push(`${recordingScopeBadge()}<div class="tbar wsel"><span class="wsl">world scope</span><button type="button" class="chip tog on" data-cpuworld="*" aria-pressed="true">all worlds</button>`
         +worlds.map(w=>`<button type="button" class="chip tog" data-cpuworld="${esc(w.world)}" aria-pressed="false">${esc(worldLabel(w.world))} · ${pct(w.samples,T).toFixed(0)}%</button>`).join("")+`</div>`);
     }
     if(D.subsystems&&D.subsystems.length)
-      parts.push(`<div class="chartcard" style="margin-top:12px"><div class="cth"><span class="ctt">Where CPU goes, by engine subsystem</span><span class="ctm">classified by deepest stack frame</span></div><div class="wbars" id="cpuSub"></div></div>`);
+      parts.push(`<div class="chartcard" style="margin-top:12px"><div class="cth"><span class="ctt">Where CPU goes, by engine subsystem</span><span class="ctm">classified by deepest stack frame</span></div>${recordingScopeBadge()}<div class="wbars" id="cpuSub"></div></div>`);
     if(D.modCpu&&D.modCpu.length)
-      parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Where CPU goes, by mod</span><span class="ctm">samples touching each mod's code</span></div><div class="wbars" id="cpuMod"></div></div>`);
+      parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Where CPU goes, by mod / package</span><span class="ctm">sampled code; owner unknown; grouped by package</span></div>${recordingScopeBadge()}<div class="wbars" id="cpuMod"></div></div>`);
   }
   return lead+(ser.cpu?legendHtml():"")+parts.join("");
 }
@@ -2127,7 +2163,7 @@ function threadsHtml(){
   }).join("");
   const stHead=anyState?thc("State","State when last sampled; only RUNNABLE threads gather CPU samples.",{sort:"text"}):"";
   const top=DV.topThread;
-  return `<p class="lead">Threads ranked by execution samples.${top&&T?` The busiest is <code class="mono">${esc(top[2])}</code> at <b>${pct(top[0],T).toFixed(1)}%</b>, with its most-sampled frame in <code class="mono" style="color:var(--violet)">${esc(leafName(top[3]))}</code>.`:""}${anyState?" CPU sampling only sees on-CPU threads, so waiting and blocked threads rarely appear here.":""}</p>
+  return `${recordingScopeBadge()}<p class="lead">Threads ranked by execution samples.${top&&T?` The busiest is <code class="mono">${esc(top[2])}</code> at <b>${pct(top[0],T).toFixed(1)}%</b>, with its most-sampled frame in <code class="mono" style="color:var(--violet)">${esc(leafName(top[3]))}</code>.`:""}${anyState?" CPU sampling only sees on-CPU threads, so waiting and blocked threads rarely appear here.":""}</p>
   ${poolSummaryHtml(ht,T,hasFlame)}
   ${threadTimelineHtml()}
   <div class="tbar"><span class="srch"><span class="si">${I.search}</span><input type="search" aria-label="Filter threads" placeholder="filter threads…" data-filter="th-t"></span>${has(D.threadTotal)?`<span class="chip">${D.threadTotal} live threads</span>`:""}<span class="count" data-count="th-t">${ht.length} rows</span></div>
@@ -2142,7 +2178,7 @@ function statesHtml(){
   if(!segs.length) return dl;
   const legend=segs.map(s=>`<div class="lg"><span class="sw" style="background:${s.c}"></span><span>${esc(s.k.replace("_"," "))}</span><b>${s.v}</b></div>`).join("");
   const blocked=ts.BLOCKED||0;
-  const note=`<b>${blocked} blocked thread(s) observed at capture.</b> BLOCKED indicates a wait to enter a monitor, not proof of a circular wait. Zero BLOCKED threads does not exclude a deadlock or earlier contention.${DV.deadlock?"":" No positive deadlock evidence was supplied; the detector may have returned no results or been unavailable."}`;
+  const note=`<b>Blocked threads</b> ${blocked} blocked thread${blocked===1?"":"s"} at capture, waiting to enter a monitor.${DV.deadlock?"":" Deadlock detection returned no result."}`;
   const total=has(D.threadTotal)?D.threadTotal:segs.reduce((a,s)=>a+s.v,0);
   return `<p class="lead">Live JVM threads by state. <b>${ts.RUNNABLE||0}</b> of <b>${total}</b> were runnable and <b>${blocked}</b> blocked.</p>
   <div class="card"><div class="donutwrap"><div>${donut(segs)}</div><div class="legend">${legend}</div>
@@ -2224,22 +2260,22 @@ function memHtml(){
       }).join("");
     };
     const arate=has(D.incident.windowSec)&&D.incident.windowSec>0?` ≈ ${fmtBytes(tot/D.incident.windowSec)}/s`:"";
-    const note=`<div class="subnote">JFR allocation samples over the window: allocation pressure (GC churn), not retained RAM. ${fmtBytes(tot)} of sampled allocations attributed${arate}.</div>`;
+    const note=`<div class="subnote">JFR allocation samples over the entire recording: allocation pressure (GC churn), not retained RAM. ${fmtBytes(tot)} of sampled allocations attributed${arate}.</div>`;
     const aworlds=(D.alloc.byWorld||[]).filter(w=>w.bytes>0);
     if(aworlds.length>1){
-      parts.push(`<div class="tbar wsel"><span class="wsl">scope</span><button type="button" class="chip tog on" data-allocworld="*" aria-pressed="true">all worlds</button>`
+      parts.push(`${recordingScopeBadge()}<div class="tbar wsel"><span class="wsl">world scope</span><button type="button" class="chip tog on" data-allocworld="*" aria-pressed="true">all worlds</button>`
         +aworlds.map(w=>`<button type="button" class="chip tog" data-allocworld="${esc(w.world)}" aria-pressed="false">${esc(worldLabel(w.world))} · ${pct(w.bytes,tot).toFixed(0)}%</button>`).join("")+`</div>`);
     }
-    if((D.alloc.bySubsystem||[]).length) parts.push(`<div class="chartcard" style="margin-top:12px"><div class="cth"><span class="ctt">Where allocation pressure goes, by engine subsystem</span><span class="ctm">${fmtBytes(tot)} sampled</span></div>${note}<div class="wbars" id="allocSub"></div></div>`);
-    if((D.alloc.byMod||[]).length) parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Where allocation pressure goes, by mod</span><span class="ctm">${fmtBytes(tot)} sampled</span></div><div class="wbars" id="allocMod"></div></div>`);
-    if((D.alloc.byThread||[]).length) parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Top allocating threads</span><span class="ctm">allocation samples</span></div><div class="wbars">${allocBars(D.alloc.byThread,true)}</div></div>`);
+    if((D.alloc.bySubsystem||[]).length) parts.push(`<div class="chartcard" style="margin-top:12px"><div class="cth"><span class="ctt">Where allocation pressure goes, by engine subsystem</span><span class="ctm">${fmtBytes(tot)} sampled</span></div>${recordingScopeBadge()}${note}<div class="wbars" id="allocSub"></div></div>`);
+    if((D.alloc.byMod||[]).length) parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Where allocation pressure goes, by mod / package</span><span class="ctm">${fmtBytes(tot)} sampled · owner unknown; grouped by package</span></div>${recordingScopeBadge()}<div class="wbars" id="allocMod"></div></div>`);
+    if((D.alloc.byThread||[]).length) parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Top allocating threads</span><span class="ctm">allocation samples</span></div>${recordingScopeBadge()}<div class="wbars">${allocBars(D.alloc.byThread,true)}</div></div>`);
     if((D.alloc.byClass||[]).length){
       const mx=Math.max(...D.alloc.byClass.map(i=>i[1]));
       const clsBars=D.alloc.byClass.map(i=>{
         const full=String(i[0]);
         return `<div class="wbar"><div class="wn"><span class="tnc" data-tipov="${esc(full)}">${esc(shortCls(full))}</span></div><div class="wt"><div class="wf al" style="width:${(100*i[1]/Math.max(1,mx)).toFixed(1)}%"></div></div><div class="wv">${fmtBytes(i[1])} · ${pct(i[1],tot).toFixed(1)}%</div></div>`;
       }).join("");
-      parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Top allocated classes</span><span class="ctm">allocation samples</span></div><div class="wbars">${clsBars}</div></div>`);
+      parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Top allocated classes</span><span class="ctm">allocation samples</span></div>${recordingScopeBadge()}<div class="wbars">${clsBars}</div></div>`);
     }
   }
   if(D.retained&&D.retained.length){
@@ -2247,7 +2283,7 @@ function memHtml(){
       const cls=String(r[0]), site=r[2]?String(r[2]):null;
       return `<tr><td class="rank">${i+1}</td><td class="nm"><span class="tnc2" data-tipov="${esc(cls)}">${esc(shortCls(cls))}</span></td><td class="r" data-num="${r[1]}">${fmt(r[1])}</td><td class="mono">${site?`<span class="tnc2" style="max-width:420px" data-tipov="${esc(site)}">${esc(shortCls(site))}</span>`:"·"}</td></tr>`;
     }).join("");
-    parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Long-lived allocations</span><span class="ctm">JFR old-object samples</span></div>
+    parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Long-lived allocations</span><span class="ctm">JFR old-object samples</span></div>${recordingScopeBadge()}
       <div class="subnote">Old-object samples: objects still alive late in the recording, the leak candidates. Ranked by sample count; approximate, not exact retained bytes.</div>
       <div class="tscroll"><table class="sortable" id="ret-t"><thead><tr>${thc("#","Rank by sample count",{r:true})}${thc("Class","Sampled object class",{sort:"text"})}${thc("Samples","Old-object samples of this class still reachable",{sort:"num",r:true,def:"desc"})}${thc("Dominant allocation site","Most common allocation site among the samples")}</tr></thead><tbody>${rrows}</tbody></table></div></div>`);
   }
@@ -2461,7 +2497,8 @@ function pluginsHtml(){
   }).join("");
   return `<p class="lead"><b>${pl.length}</b> plugins loaded: <b>${core}</b> Hytale core modules and <b>${comm}</b> community plugins.${incompat?` <b class="v-bad">${incompat}</b> mod${incompat===1?" declares":"s declare"} a server range that excludes this server.`:""}</p>
   <div class="tbar"><span class="srch"><span class="si">${I.search}</span><input type="search" aria-label="Filter plugins" placeholder="filter plugins…" data-filter="pl-t"></span><button type="button" class="chip tog" data-type-filter="pl-t" data-val="core" aria-pressed="false">${core} core</button><button type="button" class="chip tog on" data-type-filter="pl-t" data-val="community" aria-pressed="true">${comm} community</button><span class="count" data-count="pl-t">${pl.length} rows</span></div>
-  <div class="tscroll"><div class="tcap"><table class="sortable" id="pl-t"><thead><tr>${thc("Plugin","Plugin or module name",{sort:"text"})}${thc("Author","Author or namespace",{sort:"text"})}${thc("Version","Installed version",{sort:"text"})}${thc("Compiled for","Server range from the mod's manifest, checked against the running server.",{sort:"text"})}${thc("Type","Hytale core engine module vs community plugin",{sort:"text"})}${thc("Link","Search for this plugin on CurseForge (external link)")}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  <div class="tscroll"><div class="tcap"><table class="sortable" id="pl-t"><thead><tr>${thc("Plugin","Plugin or module name",{sort:"text"})}${thc("Author","Author or namespace",{sort:"text"})}${thc("Version","Installed version",{sort:"text"})}${thc("Compiled for","Server range from the mod's manifest, checked against the running server.",{sort:"text"})}${thc("Type","Hytale core engine module vs community plugin",{sort:"text"})}${thc("Link","Search for this plugin on CurseForge (external link)")}</tr></thead><tbody>${rows}</tbody></table></div></div>
+  <div class="filter-empty" data-filter-empty="pl-t" role="status" hidden>No matches. <button type="button" class="copybtn" data-clear-filter="pl-t">Clear filters</button></div>`;
 }
 
 function assetPacksHtml(){
@@ -2554,31 +2591,20 @@ function configHtml(){
   return blocks.join("\n")+mix;
 }
 
-function diagSectionsHtml(){
-  const ds=(D.diag||[]).filter(d=>d.title==="Stalled thread"||d.title==="Deadlocked thread");
-  if(!ds.length) return "";
-  const cards=ds.map(d=>{
-    const rows=d.entries.map(e=>`<div class="row"><span class="k">${esc(e[0])}</span><span class="v">${esc(e[1])}</span></div>`).join("");
-    const pre=d.pre?`<pre class="logpre" style="margin:12px 0 0">${esc(d.pre)}</pre>`:"";
-    return `<div class="kvcard" style="margin-bottom:16px"><div class="kvh"><span class="ic">${I.doc}</span><b>${esc(d.title)}</b></div><div class="kv">${rows}</div>${pre}</div>`;
-  }).join("");
-  return cards;
-}
 
 const html=[
-  sec("stalled",I.warn,"Captured thread diagnostics","stacks at capture",diagSectionsHtml()),
-  sec("diagnosis",I.warn,"Diagnosis","what the recording shows",diagnosisHtml()),
+  sec("diagnosis",I.warn,"Diagnosis","what the recording shows",diagnosisHtml(),true),
   sec("metrics",I.pulse,"Key metrics","over the capture window",metricsHtml()),
   sec("cpu",I.cpu,"CPU & load","per-world attribution",cpuHtml()),
   sec("engine",I.chip,"Engine systems","per-system tick wall time",engineHtml()),
-  sec("methods",I.fire,"Hot methods","ranked by CPU samples",methodsHtml()),
-  sec("flame",I.fire,"Flame graph","aggregated call tree",flameHtml()),
+  sec("methods",I.fire,"Hot methods","ranked by CPU samples",methodsHtml(),true),
+  sec("flame",I.fire,"Flame graph","aggregated call tree",flameHtml(),true),
   sec("threads",I.threads,"Hot threads",has(D.threadTotal)?D.threadTotal+" live threads":"",threadsHtml()),
   sec("states",I.layers,"Thread states","state breakdown",statesHtml()),
   sec("memory",I.heap,"Memory & GC",DV.gcName?("heap + "+DV.gcName):"heap",memHtml()),
   sec("pluginmetrics",I.pulse,"Plugin metrics",(D.pluginMetrics&&D.pluginMetrics.length?D.pluginMetrics.length+" series":""),pluginMetricsHtml()),
   sec("network",I.net,"Network","throughput over window",networkHtml()),
-  sec("worlds",I.globe,"Worlds","per-world CPU",worldsHtml()),
+  sec("worlds",I.globe,"Worlds","per-world CPU",worldsHtml(),true),
   sec("system",I.chip,"System & hardware","host / JVM",systemHtml()),
   sec("plugins",I.layers,"Plugins",(D.plugins&&D.plugins.length?D.plugins.length+" loaded":""),pluginsHtml()),
   sec("assetpacks",I.layers,"Asset packs",(D.assetPacks&&D.assetPacks.length?D.assetPacks.length+" loaded":""),assetPacksHtml()),
@@ -2652,6 +2678,7 @@ function applyFilter(id){
     const show=okText&&okType; el.style.display=show?"":"none"; if(show)n++;
   });
   const c=document.querySelector(`[data-count="${id}"]`); if(c)c.textContent=n+(root.tagName==="DIV"?" lines":" rows");
+  const empty=document.querySelector(`[data-filter-empty="${id}"]`); if(empty) empty.hidden=n!==0;
   pruneBarTips();
 }
 document.querySelectorAll("input[data-filter]").forEach(inp=>inp.addEventListener("input",()=>applyFilter(inp.dataset.filter)));
@@ -2659,6 +2686,13 @@ document.querySelectorAll(".chip.tog[data-type-filter]").forEach(chip=>chip.addE
   const id=chip.dataset.typeFilter, was=chip.classList.contains("on");
   document.querySelectorAll(`.chip.tog[data-type-filter="${id}"]`).forEach(c=>setPressed(c,c===chip&&!was));
   applyFilter(id);
+}));
+document.querySelectorAll("[data-clear-filter]").forEach(button=>button.addEventListener("click",()=>{
+  const id=button.dataset.clearFilter, input=document.querySelector(`input[data-filter="${id}"]`);
+  if(input) input.value="";
+  document.querySelectorAll(`.chip.tog[data-type-filter="${id}"]`).forEach(chip=>setPressed(chip,false));
+  applyFilter(id);
+  input?.focus();
 }));
 [...new Set([...document.querySelectorAll(".chip.tog.on[data-type-filter]")].map(c=>c.dataset.typeFilter))].forEach(applyFilter);
 
@@ -2714,6 +2748,8 @@ function buildMarkdown(){
   L.push(`**${D.incident.severity}** · ${D.incident.trigger}${has(D.incident.stallMs)?` · heartbeat stalled ${D.incident.stallMs}ms`:""}${D.incident.worldShort?` on world ${D.incident.worldShort}`:""}`);
   L.push(`Captured ${D.incident.created}${DV.win?` · window ${DV.win}`:""}${T?` · ${fmt(T)} samples`:""}${has(D.incident.players)?` · ${D.incident.players} players`:""}`,"");
   if(has(D.incident.note)) L.push(`> ${D.incident.note}`,"");
+  L.push("> Diagnosis, CPU/method/mod attribution and flame graphs cover the entire recording and are not time-filtered.","");
+  if(D.jfrUnavailableReason) L.push(`JFR recording unavailable: ${D.jfrUnavailableReason}`,"");
   const diag=[];
   if(DV.topWorld&&T) diag.push(`- Busiest world thread: ${worldLabel(DV.topWorld.name)} (${pct(DV.topWorld.samples,T).toFixed(1)}% of samples)`);
   if(DV.topMethod&&T) diag.push(`- Top sampled frame: ${leafName(DV.topMethod[1])} (${pct(DV.topMethod[0],T).toFixed(2)}%)`);

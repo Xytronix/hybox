@@ -25,6 +25,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.RunnableScheduledFuture;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -96,9 +99,9 @@ class HyboxLifecycleTest {
             assertTrue(scheduler.isShutdown());
             assertTrue(worker.isShutdown());
             assertEquals(1, eventCleanup.get());
-            assertEquals(CaptureResult.Status.STOPPED, runtime.captureManual().join().status());
+            assertEquals(CaptureResult.Status.STOPPED, runtime.captureManual(null).join().status());
             assertTrue(runtime.reload().contains("not running"));
-            assertNotNull(runtime.startProfileSession(1, false).join());
+            assertNotNull(runtime.startProfileSession(1, false, null).join());
             assertDoesNotThrow(runtime::close);
             assertEquals(1, eventCleanup.get());
         } finally {
@@ -119,7 +122,7 @@ class HyboxLifecycleTest {
             event -> CaptureResult.captured(new IncidentId("lead-up")), event -> completedCapture, result -> {});
         recorder.start();
         try {
-            assertNull(profiles.start(1, true));
+            assertNull(profiles.start(1, true, null, result -> {}));
             finishProfile(profiles);
             assertFalse(profiles.active());
             profiles.close();
@@ -168,6 +171,48 @@ class HyboxLifecycleTest {
             assertTrue(RecordingFile.readAllEvents(rolling).stream().anyMatch(event ->
                 event.getEventType().getName().equals("io.github.xytronix.hybox.marker")
                     && event.getString("message").equals("hybox dump: rolling.jfr.tmp")));
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void closingHealthSchedulerStopsSnapshotWriterWithoutShuttingDownExecutor(boolean recoveryPending)
+        throws Exception {
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1) {
+            @Override
+            public ScheduledFuture<?> scheduleAtFixedRate(Runnable task, long initialDelay,
+                                                          long period, TimeUnit unit) {
+                return super.scheduleAtFixedRate(task, 1, 1, TimeUnit.DAYS);
+            }
+        };
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        JfrController recorder = new JfrController(Duration.ofMinutes(1), 1024 * 1024, "hybox-cancel-snapshot");
+        HyboxRuntime runtime = runtime(scheduler, worker, recorder);
+        Field healthField = HyboxRuntime.class.getDeclaredField("healthScheduler");
+        healthField.setAccessible(true);
+        HytaleHealthScheduler health = (HytaleHealthScheduler) healthField.get(runtime);
+        CompletableFuture<Void> recovery = new CompletableFuture<>();
+        if (!recoveryPending) {
+            recovery.complete(null);
+        }
+        try {
+            health.startSnapshotWriter(1000, recovery);
+            var periodicTasks = scheduler.getQueue().stream()
+                .filter(task -> task instanceof RunnableScheduledFuture<?> future && future.isPeriodic())
+                .map(task -> (ScheduledFuture<?>) task)
+                .toList();
+            assertEquals(recoveryPending ? 0 : 1, periodicTasks.size());
+
+            health.close();
+            recovery.complete(null);
+
+            assertFalse(scheduler.isShutdown());
+            assertTrue(periodicTasks.stream().allMatch(ScheduledFuture::isCancelled));
+            assertTrue(scheduler.getQueue().stream().allMatch(task ->
+                task instanceof ScheduledFuture<?> future && future.isCancelled()));
+            scheduler.submit(() -> {}).get(5, TimeUnit.SECONDS);
         } finally {
             runtime.close();
         }
@@ -266,9 +311,9 @@ class HyboxLifecycleTest {
                 }
             });
             assertTrue(blocked.await(5, TimeUnit.SECONDS));
-            CompletableFuture<CaptureResult> admitted = runtime.captureManual();
+            CompletableFuture<CaptureResult> admitted = runtime.captureManual(null);
             for (int i = 0; i < 200; i++) {
-                assertEquals(CaptureResult.Status.BUSY, runtime.captureManual().get(1, TimeUnit.SECONDS).status());
+                assertEquals(CaptureResult.Status.BUSY, runtime.captureManual(null).get(1, TimeUnit.SECONDS).status());
                 runtime.scheduleCapture(new TriggerEvent(TriggerKind.MANUAL, "burst", Clock.systemUTC().instant(), Map.of()));
             }
             assertEquals(1, capture.getQueue().size());
@@ -283,7 +328,7 @@ class HyboxLifecycleTest {
             assertEquals(200, health.dropped());
             assertEquals(CaptureResult.Status.BUSY, health.lastOutcome().status());
             assertTrue(runtime.reload().contains("busy"));
-            assertNotNull(runtime.startProfileSession(1, false).get(1, TimeUnit.SECONDS));
+            assertNotNull(runtime.startProfileSession(1, false, null).get(1, TimeUnit.SECONDS));
             release.countDown();
             assertEquals(CaptureResult.Status.DISABLED, admitted.get(5, TimeUnit.SECONDS).status());
             assertFalse(runtime.health().captureBusy());
@@ -294,7 +339,7 @@ class HyboxLifecycleTest {
             runtime.close();
         }
         assertFalse(runtime.health().running());
-        assertEquals(CaptureResult.Status.STOPPED, runtime.captureManual().join().status());
+        assertEquals(CaptureResult.Status.STOPPED, runtime.captureManual(null).join().status());
     }
 
     @Test
@@ -321,7 +366,7 @@ class HyboxLifecycleTest {
             for (int i = 0; i < 16; i++) {
                 worker.execute(drained::countDown);
             }
-            assertEquals(CaptureResult.Status.DISABLED, runtime.captureManual().get(5, TimeUnit.SECONDS).status());
+            assertEquals(CaptureResult.Status.DISABLED, runtime.captureManual(null).get(5, TimeUnit.SECONDS).status());
             assertFalse(runtime.health().captureBusy());
             snapshot.invoke(health);
             snapshot.invoke(health);
@@ -333,7 +378,7 @@ class HyboxLifecycleTest {
             worker.submit(() -> {}).get(5, TimeUnit.SECONDS);
             assertNotNull(runtime.health().lastSnapshot());
             assertNull(runtime.health().snapshotError());
-            assertEquals(CaptureResult.Status.DISABLED, runtime.captureManual().get(5, TimeUnit.SECONDS).status());
+            assertEquals(CaptureResult.Status.DISABLED, runtime.captureManual(null).get(5, TimeUnit.SECONDS).status());
         } finally {
             release.countDown();
             runtime.close();
@@ -356,7 +401,7 @@ class HyboxLifecycleTest {
         CountDownLatch blocked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         try {
-            assertNull(runtime.startProfileSession(1, true).get(5, TimeUnit.SECONDS));
+            assertNull(runtime.startProfileSession(1, true, null).get(5, TimeUnit.SECONDS));
             capture.execute(() -> {
                 blocked.countDown();
                 await(release);
@@ -380,7 +425,7 @@ class HyboxLifecycleTest {
             } else {
                 assertEquals(1, capture.getQueue().size());
                 assertTrue(runtime.health().captureBusy());
-                assertNotNull(runtime.startProfileSession(1, false).get(1, TimeUnit.SECONDS));
+                assertNotNull(runtime.startProfileSession(1, false, null).get(1, TimeUnit.SECONDS));
                 assertEquals(settings, original.getSettings());
             }
             release.countDown();
@@ -400,10 +445,10 @@ class HyboxLifecycleTest {
             event -> CaptureResult.of(CaptureResult.Status.DISABLED),
             event -> CompletableFuture.completedFuture(CaptureResult.of(CaptureResult.Status.DISABLED)), result -> {});
         try {
-            assertNotNull(profiles.start(1, false));
+            assertNotNull(profiles.start(1, false, null, result -> {}));
             assertFalse(profiles.active());
             scheduler.shutdownNow();
-            assertNotNull(profiles.start(1, true));
+            assertNotNull(profiles.start(1, true, null, result -> {}));
             assertFalse(profiles.active());
             assertTrue(recorder.isRunning());
         } finally {
@@ -437,18 +482,18 @@ class HyboxLifecycleTest {
                 await(release);
             });
             assertTrue(blocked.await(5, TimeUnit.SECONDS));
-            CompletableFuture<CaptureResult> manual = runtime.captureManual();
+            CompletableFuture<CaptureResult> manual = runtime.captureManual(null);
             CompletableFuture<CaptureResult> profile = profileCapture(runtime);
             assertEquals(CaptureResult.Status.BUSY, profileCapture(runtime).get(1, TimeUnit.SECONDS).status());
             assertFalse(profile.isDone());
-            assertTrue(runtime.startProfileSession(1, true).get(1, TimeUnit.SECONDS).contains("busy"));
+            assertTrue(runtime.startProfileSession(1, true, null).get(1, TimeUnit.SECONDS).contains("busy"));
             assertTrue(runtime.reload().contains("busy"));
             release.countDown();
             assertEquals(CaptureResult.Status.DISABLED, manual.get(5, TimeUnit.SECONDS).status());
             assertEquals(CaptureResult.Status.DISABLED, profile.get(5, TimeUnit.SECONDS).status());
             capture.submit(() -> {}).get(5, TimeUnit.SECONDS);
             assertFalse(runtime.health().captureBusy());
-            assertNull(runtime.startProfileSession(1, true).get(5, TimeUnit.SECONDS));
+            assertNull(runtime.startProfileSession(1, true, null).get(5, TimeUnit.SECONDS));
         } finally {
             release.countDown();
             runtime.close();
@@ -474,7 +519,7 @@ class HyboxLifecycleTest {
             }
         });
         assertTrue(blocked.await(5, TimeUnit.SECONDS));
-        CompletableFuture<CaptureResult> manual = runtime.captureManual();
+        CompletableFuture<CaptureResult> manual = runtime.captureManual(null);
         CompletableFuture<CaptureResult> profile = profileCapture(runtime);
         runtime.close();
         assertTrue(capture.isTerminated());
@@ -506,13 +551,13 @@ class HyboxLifecycleTest {
             CompletableFuture<?> recovery = (CompletableFuture<?>) recover.invoke(runtime);
             assertTrue(runtime.health().captureBusy());
             assertTrue(runtime.reload().contains("busy"));
-            assertEquals(CaptureResult.Status.BUSY, runtime.captureManual().get(1, TimeUnit.SECONDS).status());
+            assertEquals(CaptureResult.Status.BUSY, runtime.captureManual(null).get(1, TimeUnit.SECONDS).status());
             release.countDown();
             recovery.get(5, TimeUnit.SECONDS);
             assertFalse(runtime.health().captureBusy());
             assertTrue(runtime.reload().startsWith("Reloaded."));
             assertFalse(runtime.health().captureBusy());
-            assertEquals(CaptureResult.Status.DISABLED, runtime.captureManual().get(5, TimeUnit.SECONDS).status());
+            assertEquals(CaptureResult.Status.DISABLED, runtime.captureManual(null).get(5, TimeUnit.SECONDS).status());
         } finally {
             release.countDown();
             runtime.close();
@@ -540,7 +585,7 @@ class HyboxLifecycleTest {
                 }
                 return CaptureResult.of(CaptureResult.Status.CANCELLED);
             }, event -> new CompletableFuture<>(), result -> {}));
-        CompletableFuture<String> started = runtime.startProfileSession(1, false);
+        CompletableFuture<String> started = runtime.startProfileSession(1, false, null);
         assertTrue(entered.await(5, TimeUnit.SECONDS));
         CompletableFuture.runAsync(runtime::close).get(15, TimeUnit.SECONDS);
         assertTrue(capture.isTerminated());

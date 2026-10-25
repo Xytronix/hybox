@@ -1,0 +1,197 @@
+$C = "../Common.ui";
+
+Group {
+  FlexWeight: 1;
+  LayoutMode: TopScrolling;
+  ScrollbarStyle: $C.@DefaultScrollbarStyle;
+
+  Group #Warnings {
+    LayoutMode: Left;
+    Padding: (Horizontal: 14, Vertical: 10);
+    Background: #efbd62(0.10);
+    Anchor: (Bottom: 10);
+    Label {
+      Text: "ATTENTION";
+      Anchor: (Width: 105);
+      Style: (FontSize: 12, TextColor: #efbd62, RenderBold: true, VerticalAlignment: Center);
+    }
+    Label #WarningText {
+      FlexWeight: 1;
+      Style: (FontSize: 12, TextColor: #efbd62, Wrap: true, WrapMaxLines: 3);
+    }
+  }
+
+  Group #Tiles {
+    LayoutMode: LeftWrap;
+    Anchor: (Bottom: 14);
+  }
+
+  Label {
+    Text: "Running now";
+    Anchor: (Height: 26, Bottom: 4);
+    Style: (RenderBold: true, FontSize: 17, TextColor: #d3e3ed);
+  }
+
+  Group #ProfileRunning {
+    LayoutMode: Top;
+    Padding: (Horizontal: 15, Vertical: 12);
+    Background: #7a9cc6(0.10);
+    Anchor: (Bottom: 8);
+    Group {
+      LayoutMode: Left;
+      Anchor: (Height: 36, Bottom: 10);
+      Label {
+        Text: "High-fidelity profile";
+        FlexWeight: 1;
+        Style: (RenderBold: true, FontSize: 14, TextColor: #d3e3ed);
+      }
+      Group #ProfileTimerHost { Anchor: (Width: 150, Height: 36); }
+    }
+    $C.@ProgressBar #ProfileProgress {
+      @Anchor = (Bottom: 10);
+      Value: 0;
+    }
+    Group {
+      LayoutMode: Left;
+      Anchor: (Height: 32);
+      Label #ProfileCaptureAt {
+        FlexWeight: 1;
+        Style: (FontSize: 12, TextColor: #96a9be, VerticalAlignment: Center);
+      }
+      Label #ProfileStopNote {
+        Anchor: (Width: 330);
+        Style: (FontSize: 11, TextColor: #96a9be, HorizontalAlignment: End, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 2);
+        Visible: false;
+      }
+      $C.@SecondaryTextButton #ProfileSaveNow {
+        @Text = "Save now";
+        @Anchor = Anchor(Width: 140, Right: 8);
+      }
+      $C.@SecondaryTextButton #ProfileCancel {
+        @Text = "Cancel";
+        @Anchor = Anchor(Width: 120);
+      }
+    }
+  }
+
+  Group #ProfileSaving {
+    LayoutMode: Left;
+    Padding: (Horizontal: 15, Vertical: 12);
+    Anchor: (Height: 60, Bottom: 8);
+    Background: #7a9cc6(0.10);
+    Visible: false;
+    $C.@DefaultSpinner {}
+    Label {
+      Text: "Saving the profile bundle…";
+      Anchor: (Left: 14);
+      FlexWeight: 1;
+      Style: (RenderBold: true, FontSize: 14, TextColor: #d3e3ed, VerticalAlignment: Center);
+    }
+  }
+
+  Group #CaptureRunning {
+    LayoutMode: Left;
+    Padding: (Horizontal: 15, Vertical: 12);
+    Anchor: (Height: 84, Bottom: 8);
+    Background: #7a9cc6(0.10);
+    $C.@DefaultSpinner #CaptureSpinner {}
+    Group {
+      LayoutMode: Top;
+      Anchor: (Left: 14);
+      FlexWeight: 1;
+      Label {
+        Text: "Capturing incident";
+        Anchor: (Height: 20);
+        Style: (RenderBold: true, FontSize: 14, TextColor: #d3e3ed);
+      }
+      Group {
+        LayoutMode: Left;
+        Anchor: (Height: 20, Top: 4);
+        Label #CaptureStage0 {
+          Text: "1 Queued";
+          Anchor: (Width: 96, Right: 8);
+          Style: (FontSize: 12, TextColor: #96a9be);
+        }
+        Label #CaptureStage1 {
+          Text: "2 Collecting evidence";
+          Anchor: (Width: 158, Right: 8);
+          Style: (FontSize: 12, TextColor: #96a9be);
+        }
+        Label #CaptureStage2 {
+          Text: "3 Waiting for post-incident evidence";
+          FlexWeight: 1;
+          Anchor: (Right: 8);
+          Style: (FontSize: 12, TextColor: #96a9be);
+        }
+        Label #CaptureStage3 {
+          Text: "4 Dumping recording";
+          Anchor: (Width: 152, Right: 8);
+          Style: (FontSize: 12, TextColor: #96a9be);
+        }
+        Label #CaptureStage4 {
+          Text: "5 Building bundle";
+          Anchor: (Width: 134);
+          Style: (FontSize: 12, TextColor: #96a9be);
+        }
+      }
+      Label #CaptureStep {
+        Anchor: (Height: 20);
+        Style: (FontSize: 12, TextColor: #96a9be);
+        Visible: false;
+      }
+    }
+    $C.@SecondaryTextButton #SkipWait {
+      @Text = "Skip wait";
+      @Anchor = Anchor(Width: 140, Left: 12);
+      Visible: false;
+    }
+  }
+
+  Label #NothingRunning {
+    Text: "No capture or profile session is running.";
+    Anchor: (Height: 30);
+    Style: (FontSize: 13, TextColor: #96a9be, VerticalAlignment: Center);
+  }
+
+  Group #ProfileStartPanel {
+    LayoutMode: Top;
+    Padding: (Horizontal: 15, Vertical: 12);
+    Background: #7a9cc6(0.10);
+    Anchor: (Bottom: 8);
+    Label {
+      Text: "Start a high-fidelity profile";
+      Anchor: (Height: 22);
+      Style: (RenderBold: true, FontSize: 14, TextColor: #d3e3ed);
+    }
+    Label #ProfileStartNote {
+      Anchor: (Height: 20, Bottom: 8);
+      Style: (FontSize: 12, TextColor: #96a9be, VerticalAlignment: Center);
+    }
+    Group {
+      LayoutMode: Left;
+      Anchor: (Height: 44);
+      Label {
+        Text: "Duration";
+        Anchor: (Width: 82);
+        Style: (FontSize: 12, TextColor: #bfcdd5, VerticalAlignment: Center);
+      }
+      $C.@SecondaryTextButton #ProfileMinutes1 { @Text = "1 min"; Anchor: (Width: 92, Height: 38, Top: 3, Right: 6); Padding: (Horizontal: 8); }
+      $C.@SecondaryTextButton #ProfileMinutes5 { @Text = "5 min"; Anchor: (Width: 92, Height: 38, Top: 3, Right: 6); Padding: (Horizontal: 8); }
+      $C.@SecondaryTextButton #ProfileMinutes15 { @Text = "15 min"; Anchor: (Width: 92, Height: 38, Top: 3, Right: 6); Padding: (Horizontal: 8); }
+      $C.@SecondaryTextButton #ProfileMinutes30 { @Text = "30 min"; Anchor: (Width: 92, Height: 38, Top: 3, Right: 22); Padding: (Horizontal: 8); }
+      $C.@CheckBox #ProfileKeepBuffer {
+        Anchor: (Width: 22, Height: 22, Top: 11, Right: 10);
+        Value: true;
+      }
+      Label {
+        Text: "Include the recording from before the start";
+        FlexWeight: 1;
+        Style: (FontSize: 12, TextColor: #bfcdd5, VerticalAlignment: Center);
+      }
+      $C.@TextButton #ProfileStartButton {
+        @Text = "Start profile";
+        @Anchor = Anchor(Width: 210);
+      }
+    }
+  }
+}

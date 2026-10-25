@@ -1,0 +1,11 @@
+Group {
+  LayoutMode: Top;
+  Anchor: (Bottom: 8);
+  Padding: (Full: 10);
+  Background: #ffffff(0.04);
+  Label #CardTitle {
+    Anchor: (Bottom: 6);
+    Style: (FontSize: 14, RenderBold: true, TextColor: #bfcdd5, Wrap: true);
+  }
+  Group #CardRows { LayoutMode: Top; }
+}

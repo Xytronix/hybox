@@ -1,0 +1,264 @@
+$C = "../Common.ui";
+$R = "HyboxSettingsRow.ui";
+
+$C.@PageOverlay {}
+
+$C.@Container {
+  Anchor: (Width: 1180, Height: 690);
+
+  #Title {
+    Group {
+      LayoutMode: Center;
+      Anchor: (Full: 0);
+      $C.@Title { @Text = "Hybox · Settings"; }
+    }
+  }
+
+  #Content {
+    LayoutMode: Top;
+
+    Label {
+      Text: "Saved to hybox.json and applied immediately. Recording applies after restart. Discord, Prometheus and bundle contents stay file-only.";
+      Anchor: (Height: 31, Bottom: 10);
+      Style: (FontSize: 12, TextColor: #96a9be, Wrap: true, WrapMaxLines: 2);
+    }
+
+    Group {
+      LayoutMode: TopScrolling;
+      ScrollbarStyle: $C.@DefaultScrollbarStyle;
+      FlexWeight: 1;
+
+      Group {
+        LayoutMode: Top;
+        Background: #ffffff(0.04);
+        Padding: (Full: 12);
+        Anchor: (Bottom: 10);
+        Label {
+          Text: "Automatic triggers";
+          Anchor: (Height: 25, Bottom: 4);
+          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+        }
+
+        $R.@TriggerRow #HeartbeatStall {
+          @Name = "Heartbeat stall";
+          @Description = "Capture when a world stops responding.";
+          #Thresholds {
+            $R.@NumberInput #StallDegraded { @Label = "Degraded (ms)"; @Step = 100; }
+            $R.@NumberInput #StallCritical { @Label = "Critical (ms)"; @Step = 100; }
+          }
+        }
+        $R.@TriggerRow #TickDegraded {
+          @Name = "Slow ticks";
+          @Description = "Capture sustained high average tick time.";
+          #Thresholds {
+            $R.@NumberInput #TickAvgDegraded { @Label = "Degraded (ms)"; @Step = 10; }
+            $R.@NumberInput #TickAvgCritical { @Label = "Critical (ms)"; @Step = 10; }
+          }
+        }
+        $R.@TriggerRow #Deadlock {
+          @Name = "Deadlock";
+          @Description = "Capture when JVM threads cannot make progress.";
+        }
+        $R.@TriggerRow #HeapPressure {
+          @Name = "Heap pressure";
+          @Description = "Capture sustained high heap use.";
+          #Thresholds {
+            $R.@NumberInput #HeapPressurePct { @Label = "Heap used (%)"; }
+            $R.@NumberInput #HeapPressureSustain { @Label = "Sustain (s)"; }
+          }
+        }
+        $R.@TriggerRow #GcPressure {
+          @Name = "GC pressure";
+          @Description = "Capture excessive time spent collecting garbage.";
+          #Thresholds {
+            $R.@NumberInput #GcPressurePct { @Label = "GC time (%)"; }
+            $R.@NumberInput #GcPressureWindow { @Label = "Window (s)"; }
+          }
+        }
+        $R.@TriggerRow #CpuSaturation {
+          @Name = "CPU saturation";
+          @Description = "Capture sustained high process CPU use.";
+          #Thresholds {
+            $R.@NumberInput #CpuSaturationPct { @Label = "CPU used (%)"; }
+            $R.@NumberInput #CpuSaturationSustain { @Label = "Sustain (s)"; }
+          }
+        }
+        $R.@TriggerRow #NetSaturation {
+          @Name = "Network saturation";
+          @Description = "Idle while both limits are 0.";
+          #Thresholds {
+            $R.@NumberInput #NetInMbps { @Label = "In (Mbit/s)"; }
+            $R.@NumberInput #NetOutMbps { @Label = "Out (Mbit/s)"; }
+            $R.@NumberInput #NetSustain { @Label = "Sustain (s)"; }
+          }
+        }
+        $R.@TriggerRow #PlayerDrop {
+          @Name = "Player drop";
+          @Description = "Capture a sudden decrease in connected players.";
+          #Thresholds {
+            $R.@NumberInput #PlayerDropPct { @Label = "Player loss (%)"; }
+            $R.@NumberInput #PlayerDropWindow { @Label = "Window (s)"; }
+            $R.@NumberInput #PlayerDropMinPlayers { @Label = "Min players"; }
+          }
+        }
+        $R.@TriggerRow #LogError {
+          @Name = "Log errors";
+          @Description = "Ignore patterns stay in hybox.json.";
+          #Thresholds {
+            $R.@NumberInput #LogErrorDedupeWindow { @Label = "Repeat window (s)"; }
+          }
+        }
+      }
+
+      Group {
+        LayoutMode: Top;
+        Background: #ffffff(0.04);
+        Padding: (Full: 12);
+        Anchor: (Bottom: 10);
+        Label {
+          Text: "Timing";
+          Anchor: (Height: 25, Bottom: 8);
+          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+        }
+        Group {
+          LayoutMode: Left;
+          Anchor: (Height: 42);
+          $R.@NumberInput #Cooldown { @Label = "Cooldown (seconds)"; }
+          $R.@NumberInput #Debounce { @Label = "Debounce (seconds)"; }
+          Label {
+            Text: "0–3600 seconds.";
+            FlexWeight: 1;
+            Style: (FontSize: 11, TextColor: #96a9be, VerticalAlignment: Center);
+          }
+        }
+      }
+
+      Group {
+        LayoutMode: Top;
+        Background: #ffffff(0.04);
+        Padding: (Full: 12);
+        Anchor: (Bottom: 10);
+        Label {
+          Text: "Capture and storage";
+          Anchor: (Height: 25, Bottom: 4);
+          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+        }
+        $R.@TriggerRow #CaptureEnabled {
+          @Name = "Incident capture enabled";
+          @Description = "Allow incident bundles to be written.";
+          #Thresholds {
+            $R.@NumberInput #RetentionMaxCount { @Label = "Max bundles"; }
+            $R.@NumberInput #RetentionMaxTotalMiB { @Label = "Total (MiB)"; }
+            $R.@NumberInput #RetentionMaxAgeDays { @Label = "Age (days)"; }
+          }
+        }
+      }
+
+      Group {
+        LayoutMode: Top;
+        Background: #ffffff(0.04);
+        Padding: (Full: 12);
+        Anchor: (Bottom: 10);
+        Label {
+          Text: "Metrics";
+          Anchor: (Height: 25, Bottom: 4);
+          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+        }
+        $R.@TriggerRow #MetricsEnabled {
+          @Name = "Metrics history";
+          @Description = "Keep history for /hybox trend.";
+          #Thresholds {
+            $R.@NumberInput #MetricsRetentionDays { @Label = "Keep (days)"; }
+          }
+        }
+        $R.@TriggerRow #MetricsCpu {
+          @Name = "CPU samples";
+          @Description = "Collect CPU samples for history and live metrics.";
+        }
+        $R.@TriggerRow #MetricsAllocation {
+          @Name = "Allocation samples";
+          @Description = "Collect allocation samples; adds overhead.";
+        }
+      }
+
+      Group {
+        LayoutMode: Top;
+        Background: #ffffff(0.04);
+        Padding: (Full: 12);
+        Anchor: (Bottom: 10);
+        Label {
+          Text: "Incident evidence · applies on save";
+          Anchor: (Height: 25, Bottom: 8);
+          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+        }
+        Group {
+          LayoutMode: Left;
+          Anchor: (Height: 42);
+          $R.@NumberInput #PostIncidentMaxWait { @Label = "Max wait (s)"; }
+          $R.@NumberInput #ThreadDumpCount { @Label = "Dump count"; }
+          $R.@NumberInput #ThreadDumpInterval { @Label = "Dump every (s)"; }
+        }
+      }
+
+      Group {
+        LayoutMode: Top;
+        Background: #ffffff(0.04);
+        Padding: (Full: 12);
+        Anchor: (Bottom: 4);
+        Label {
+          Text: "Recording · applies after restart";
+          Anchor: (Height: 25, Bottom: 8);
+          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+        }
+        Group {
+          LayoutMode: Left;
+          Anchor: (Height: 42);
+          $R.@NumberInput #JfrMaxAgeMinutes { @Label = "History (min)"; }
+          $R.@NumberInput #JfrMaxSizeMiB { @Label = "Size (MiB)"; }
+          $R.@NumberInput #JfrSampleIntervalSeconds { @Label = "Sample every (s)"; }
+        }
+        Group {
+          LayoutMode: Left;
+          Anchor: (Height: 42);
+          $R.@NumberInput #JfrSnapshotIntervalMinutes { @Label = "Snapshot (min)"; }
+          Label {
+            Text: "0 = off.";
+            FlexWeight: 1;
+            Style: (FontSize: 11, TextColor: #96a9be, VerticalAlignment: Center);
+          }
+        }
+        $R.@TriggerRow #JfrOldObjectSampling {
+          @Name = "Old-object sampling";
+          @Description = "Track retained objects; adds overhead.";
+        }
+      }
+    }
+
+    Group {
+      LayoutMode: Top;
+      Anchor: (Top: 6);
+      Label #Feedback {
+        Anchor: (Height: 34, Bottom: 4);
+        Style: (FontSize: 12, TextColor: #bfcdd5, Wrap: true, WrapMaxLines: 2);
+        Visible: false;
+      }
+      Group {
+        LayoutMode: Left;
+        Anchor: (Height: 44);
+        $C.@TextButton #SaveButton {
+          @Text = "Save and reload";
+          @Anchor = (Width: 210, Right: 10);
+        }
+        Group { FlexWeight: 1; }
+        $C.@SecondaryTextButton #BackButton {
+          @Text = "Back to dashboard";
+          @Anchor = (Width: 230, Right: 10);
+        }
+        $C.@SecondaryTextButton #CloseButton {
+          @Text = "Close";
+          @Anchor = (Width: 120);
+        }
+      }
+    }
+  }
+}

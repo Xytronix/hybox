@@ -1,0 +1,15 @@
+$C = "../Common.ui";
+@DefaultStyle = (Default: (Background: #7a9cc6(0.6)), Hovered: (Background: #7a9cc6(0.9)), Pressed: (Background: #ffffff(0.08)), Sounds: $C.@ButtonSounds);
+@EngineStyle = (Default: (Background: #3686b4(0.8)), Hovered: (Background: #3686b4), Pressed: (Background: #ffffff(0.08)), Sounds: $C.@ButtonSounds);
+@ModStyle = (Default: (Background: #e69a27(0.8)), Hovered: (Background: #e69a27), Pressed: (Background: #ffffff(0.08)), Sounds: $C.@ButtonSounds);
+@JdkStyle = (Default: (Background: #777b85(0.8)), Hovered: (Background: #777b85), Pressed: (Background: #ffffff(0.08)), Sounds: $C.@ButtonSounds);
+Group {
+  Button #Frame {
+    LayoutMode: Left;
+    Anchor: (Width: 100, Height: 23);
+    Background: #7a9cc6(0.6);
+    TextTooltipStyle: $C.@DefaultTextTooltipStyle;
+    Style: @DefaultStyle;
+    Label #FrameLabel { FlexWeight: 1; Padding: (Horizontal: 4); Style: (FontSize: 10, TextColor: #ffffff, VerticalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 8); }
+  }
+}

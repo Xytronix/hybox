@@ -1,0 +1,46 @@
+$C = "../Common.ui";
+
+@TriggerRow = Group {
+  LayoutMode: Left;
+  Anchor: (Height: 56, Bottom: 2);
+  Padding: (Horizontal: 10, Vertical: 7);
+
+  $C.@CheckBox #CheckBox {
+    Anchor: (Width: 22, Height: 22, Top: 9, Right: 12);
+  }
+  Group {
+    LayoutMode: Top;
+    FlexWeight: 1;
+    Label {
+      Text: @Name;
+      Anchor: (Height: 21);
+      Style: (FontSize: 13, TextColor: #d3e3ed, RenderBold: true);
+    }
+    Label {
+      Text: @Description;
+      Anchor: (Height: 19);
+      Style: (FontSize: 11, TextColor: #96a9be);
+    }
+  }
+  Group #Thresholds {
+    LayoutMode: Left;
+    Anchor: (Width: 660, Height: 40);
+  }
+};
+
+@NumberInput = Group {
+  @Step = 1;
+  LayoutMode: Left;
+  Anchor: (Width: 220, Height: 38);
+
+  Label {
+    Text: @Label;
+    Anchor: (Width: 126, Right: 4);
+    Style: (FontSize: 12, TextColor: #bfcdd5, VerticalAlignment: Center);
+  }
+  $C.@NumberField #Input {
+    @Anchor = (Width: 78, Right: 12);
+    Style: (FontSize: 12);
+    Format: (MaxDecimalPlaces: 0, Step: @Step);
+  }
+};

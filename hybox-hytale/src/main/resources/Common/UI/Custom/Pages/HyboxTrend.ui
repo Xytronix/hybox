@@ -1,0 +1,39 @@
+$C = "../Common.ui";
+
+$C.@PageOverlay {}
+
+$C.@Container {
+  Anchor: (Width: 1040, Height: 700);
+  #Title { $C.@Title { @Text = "Hybox · Trends"; } }
+  #Content {
+    LayoutMode: Top;
+    Padding: (Full: 14);
+    Group {
+      LayoutMode: Left;
+      Anchor: (Height: 32, Bottom: 8);
+      Label #RangeLabel { FlexWeight: 1; Style: (FontSize: 19, RenderBold: true, VerticalAlignment: Center); }
+      $C.@SecondaryTextButton #Range1 { @Text = "1 day"; Anchor: (Width: 102, Height: 32, Right: 6); Padding: (Horizontal: 8); }
+      $C.@SecondaryTextButton #Range7 { @Text = "7 days"; Anchor: (Width: 102, Height: 32, Right: 6); Padding: (Horizontal: 8); }
+      $C.@SecondaryTextButton #Range30 { @Text = "30 days"; Anchor: (Width: 102, Height: 32); Padding: (Horizontal: 8); }
+    }
+    Label #Summary { Anchor: (Height: 20, Bottom: 3); Style: (FontSize: 12, TextColor: #bfcdd5, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9); }
+    Label #Unavailable { Anchor: (Height: 18, Bottom: 6); Style: (FontSize: 11, TextColor: #96a9be, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9); Visible: false; }
+    Group #TrendScroll {
+      FlexWeight: 1;
+      LayoutMode: TopScrolling;
+      ScrollbarStyle: $C.@DefaultScrollbarStyle;
+      Label #EmptyState { Anchor: (Height: 56, Bottom: 8); Padding: (Full: 10); Background: #ffffff(0.04); Style: (FontSize: 13, TextColor: #bfcdd5, Wrap: true, WrapMaxLines: 2, VerticalAlignment: Center); Visible: false; }
+      Group #Charts { LayoutMode: Top; }
+    }
+    Label #Feedback { Anchor: (Height: 22, Top: 6); Style: (FontSize: 12, TextColor: #b7cedd, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9, VerticalAlignment: Center); TextTooltipStyle: $C.@DefaultTextTooltipStyle; }
+    Group {
+      LayoutMode: Left;
+      Anchor: (Height: 40, Top: 8);
+      $C.@SecondaryTextButton #BackButton { @Text = "Back to dashboard"; Anchor: (Width: 208, Height: 38, Right: 8); Padding: (Horizontal: 10); }
+      $C.@SecondaryTextButton #SaveButton { @Text = "Save HTML report"; Anchor: (Width: 182, Height: 38, Right: 8); Padding: (Horizontal: 10); }
+      $C.@SecondaryTextButton #SettingsButton { @Text = "Open settings"; Anchor: (Width: 156, Height: 38, Right: 8); Padding: (Horizontal: 10); Visible: false; }
+      Group { FlexWeight: 1; }
+      $C.@SecondaryTextButton #DismissButton { @Text = "Close"; Anchor: (Width: 130, Height: 38); Padding: (Horizontal: 10); }
+    }
+  }
+}

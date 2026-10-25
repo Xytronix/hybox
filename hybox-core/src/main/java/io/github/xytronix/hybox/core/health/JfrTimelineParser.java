@@ -110,7 +110,7 @@ final class JfrTimelineParser {
         {"Crafting", ".crafting."},
         {"World map", "worldmap", "WorldMap"},
         {"Saving / storage", "ChunkSaving", "SavingSystem"},
-        {"Persistence (Mongo)", "org.bson", "com.mongodb"},
+        {"BSON serialization", "org.bson", "com.mongodb"},
         {"Networking", "io.netty.", ".protocol.", "PacketHandler"},
     };
     private static final String SUBSYSTEM_OTHER = "Other";

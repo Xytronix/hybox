@@ -24,6 +24,7 @@ import io.github.xytronix.hybox.core.bundle.BundleAttachment;
 import io.github.xytronix.hybox.core.capture.BundleExtrasProvider;
 import io.github.xytronix.hybox.core.env.ThreadDumper;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
+import io.github.xytronix.hybox.core.incident.DiagnosticSection;
 import io.github.xytronix.hybox.core.trigger.TriggerEvent;
 import io.github.xytronix.hybox.core.trigger.heartbeat.HeartbeatRegistry;
 
@@ -31,6 +32,7 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
     private static final System.Logger LOGGER = System.getLogger(HytaleBundleExtrasProvider.class.getName());
     private static final String NITRADO_WEB_SERVER_CLASS = "de.nitrado.hytale.NitradoWebServer";
     private static final int MAX_LOG_TAIL_BYTES = 256 * 1024;
+    private static final int MAX_METRICS_TAIL_BYTES = 1024 * 1024;
 
     private final HeartbeatRegistry heartbeatRegistry;
     private final java.util.function.IntSupplier logTailLines;
@@ -39,18 +41,6 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
     private final PlayerNameMasker nameMasker;
     private final java.util.function.Supplier<List<String>> spacedDumps;
     private final java.util.function.BooleanSupplier liveDumpAllowed;
-
-    HytaleBundleExtrasProvider(HeartbeatRegistry heartbeatRegistry, int logTailLines, Path metricsDir) {
-        this(heartbeatRegistry, () -> logTailLines, () -> true, metricsDir, new PlayerNameMasker(),
-            () -> List.of(), () -> true);
-    }
-
-    HytaleBundleExtrasProvider(HeartbeatRegistry heartbeatRegistry,
-                               java.util.function.IntSupplier logTailLines,
-                               java.util.function.BooleanSupplier includeServerLog, Path metricsDir) {
-        this(heartbeatRegistry, logTailLines, includeServerLog, metricsDir, new PlayerNameMasker(),
-            () -> List.of(), () -> true);
-    }
 
     HytaleBundleExtrasProvider(HeartbeatRegistry heartbeatRegistry,
                                java.util.function.IntSupplier logTailLines,
@@ -78,7 +68,7 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
         extras.addAll(threadDumpAttachments(spacedDumps.get(), liveDumpAllowed.getAsBoolean()));
 
         if (includeServerLog.getAsBoolean() && logTailLines.getAsInt() > 0) {
-            String logTail = nameMasker.maskText(buildServerLogTail());
+            String logTail = nameMasker.maskText(buildServerLogTail(report));
             if (!logTail.isEmpty()) {
                 extras.add(new BundleAttachment("extras/server-log.txt",
                     logTail.getBytes(StandardCharsets.UTF_8)));
@@ -117,7 +107,7 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
                 .toList();
             for (Path file : recent) {
                 out.add(new BundleAttachment("extras/metrics/" + file.getFileName(),
-                    Files.readAllBytes(file)));
+                    readTail(file, Integer.MAX_VALUE, MAX_METRICS_TAIL_BYTES).getBytes(StandardCharsets.UTF_8)));
             }
         } catch (IOException e) {
             LOGGER.log(System.Logger.Level.WARNING, "Failed to attach metrics CSV.", e);
@@ -213,7 +203,15 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
         return out.toString();
     }
 
-    private String buildServerLogTail() {
+    private String buildServerLogTail(IncidentReport report) {
+        if (report != null) {
+            for (int i = report.diagnostics().size() - 1; i >= 0; i--) {
+                DiagnosticSection section = report.diagnostics().get(i);
+                if ("Server log".equals(section.title()) && section.preformatted() != null) {
+                    return section.preformatted();
+                }
+            }
+        }
         Path latestLog = latestServerLog();
         if (latestLog == null) {
             return "";
@@ -262,34 +260,33 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
                 return "";
             }
 
-            int newlineCount = 0;
-            long pos = length - 1;
-
-            raf.seek(pos);
-            if (raf.readByte() == '\n') {
-                pos--;
+            long startPos = Math.max(0, length - maxBytes);
+            boolean partialLine = false;
+            if (startPos > 0) {
+                raf.seek(startPos - 1);
+                partialLine = raf.read() != '\n';
             }
-
-            while (pos >= 0) {
-                raf.seek(pos);
-                if (raf.readByte() == '\n') {
-                    newlineCount++;
-                    if (newlineCount >= lines) {
-                        pos++;
-                        break;
-                    }
-                }
-                pos--;
-            }
-
-            long lineBoundStart = Math.max(pos, 0);
-            long byteBoundStart = Math.max(0, length - maxBytes);
-            long startPos = Math.max(lineBoundStart, byteBoundStart);
-            int tailLength = (int) (length - startPos);
-            byte[] tailBytes = new byte[tailLength];
+            byte[] tailBytes = new byte[(int) (length - startPos)];
             raf.seek(startPos);
             raf.readFully(tailBytes);
-            return new String(tailBytes, StandardCharsets.UTF_8);
+
+            int start = 0;
+            if (partialLine) {
+                while (start < tailBytes.length && tailBytes[start] != '\n') {
+                    start++;
+                }
+                if (start < tailBytes.length) {
+                    start++;
+                }
+            }
+            int newlineCount = 0;
+            for (int pos = tailBytes.length - 2; pos >= start; pos--) {
+                if (tailBytes[pos] == '\n' && ++newlineCount >= lines) {
+                    start = pos + 1;
+                    break;
+                }
+            }
+            return new String(tailBytes, start, tailBytes.length - start, StandardCharsets.UTF_8);
         }
     }
 

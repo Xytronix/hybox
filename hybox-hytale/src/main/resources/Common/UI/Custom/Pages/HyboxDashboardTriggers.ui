@@ -1,0 +1,20 @@
+$C = "../Common.ui";
+
+Group {
+  LayoutMode: Top;
+  FlexWeight: 1;
+  Group {
+    LayoutMode: Left;
+    Anchor: (Height: 30, Bottom: 5);
+    Padding: (Horizontal: 12);
+    Background: #7a9cc6(0.13);
+    Label { Text: "TRIGGER"; Anchor: (Width: 190); Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
+    Label { Text: "STATE"; Anchor: (Width: 118); Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
+    Label { Text: "THRESHOLD"; FlexWeight: 1; Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
+  }
+  Group #TriggerRows {
+    FlexWeight: 1;
+    LayoutMode: TopScrolling;
+    ScrollbarStyle: $C.@DefaultScrollbarStyle;
+  }
+}

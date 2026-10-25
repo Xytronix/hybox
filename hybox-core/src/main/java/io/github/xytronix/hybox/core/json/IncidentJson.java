@@ -10,14 +10,12 @@ import java.util.TreeMap;
 
 import io.github.xytronix.hybox.core.incident.IncidentMetadata;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
-import io.github.xytronix.hybox.core.incident.IncidentSummary;
 
 /**
  * Deterministic JSON writer for incident reports.
  *
  * Field order:
  * - meta: id, createdAt, severity, trigger, world, headline
- * - summary: likelyCause, whatHappened, nextSteps
  */
 public final class IncidentJson {
     private IncidentJson() {
@@ -31,7 +29,6 @@ public final class IncidentJson {
         JsonWriter json = new JsonWriter(writer);
         json.beginObject();
         writeMeta(json, report.meta());
-        writeSummary(json, report.summary());
         writeContext(json, report.context());
         json.endObject();
         writer.flush();
@@ -53,21 +50,6 @@ public final class IncidentJson {
         json.endObject();
     }
 
-    private static void writeSummary(JsonWriter json, IncidentSummary summary) throws IOException {
-        json.name("summary").beginObject();
-        json.name("likelyCause").value(summary.likelyCause());
-        json.name("whatHappened").beginArray();
-        for (String item : summary.whatHappened()) {
-            json.value(item);
-        }
-        json.endArray();
-        json.name("nextSteps").beginArray();
-        for (String item : summary.nextSteps()) {
-            json.value(item);
-        }
-        json.endArray();
-        json.endObject();
-    }
 
     private static void writeContext(JsonWriter json, Map<String, String> context) throws IOException {
         if (context == null || context.isEmpty()) {

@@ -1,0 +1,9 @@
+Group {
+  LayoutMode: Left;
+  Anchor: (Height: 24, Bottom: 6);
+  Group { LayoutMode: Left; Anchor: (Right: 14); Group { Anchor: (Width: 10, Height: 10, Top: 4, Right: 5); Background: #80c991; } Label { Text: "RUNNABLE"; Style: (FontSize: 11, TextColor: #bfcdd5); } }
+  Group { LayoutMode: Left; Anchor: (Right: 14); Group { Anchor: (Width: 10, Height: 10, Top: 4, Right: 5); Background: #7a9cc6; } Label { Text: "WAITING"; Style: (FontSize: 11, TextColor: #bfcdd5); } }
+  Group { LayoutMode: Left; Anchor: (Right: 14); Group { Anchor: (Width: 10, Height: 10, Top: 4, Right: 5); Background: #efbd62; } Label { Text: "TIMED WAITING"; Style: (FontSize: 11, TextColor: #bfcdd5); } }
+  Group { LayoutMode: Left; Anchor: (Right: 14); Group { Anchor: (Width: 10, Height: 10, Top: 4, Right: 5); Background: #ef8181; } Label { Text: "BLOCKED"; Style: (FontSize: 11, TextColor: #bfcdd5); } }
+  Group { LayoutMode: Left; Anchor: (Right: 14); Group { Anchor: (Width: 10, Height: 10, Top: 4, Right: 5); Background: #acb9ca; } Label { Text: "No samples"; Style: (FontSize: 11, TextColor: #bfcdd5); } }
+}

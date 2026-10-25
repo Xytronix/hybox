@@ -12,7 +12,6 @@ plugins {
 
 val hytaleServerVersion = providers
     .gradleProperty("hytaleServerVersion")
-    .orElse("0.6.7")
 
 repositories {
     mavenCentral()
@@ -38,7 +37,9 @@ tasks.named<ProcessResources>("processResources") {
 }
 
 tasks.named<Test>("test") {
+    inputs.property("hytaleVersion", hytaleServerVersion)
     jvmArgs("-Djava.util.logging.manager=com.hypixel.hytale.logger.backend.HytaleLogManager")
+    systemProperty("hybox.hytaleServerVersion", hytaleServerVersion.get())
 }
 
 tasks.named<Jar>("jar") {

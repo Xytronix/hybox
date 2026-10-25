@@ -1,0 +1,7 @@
+Group {
+  LayoutMode: Left;
+  Anchor: (Height: 24, Bottom: 6);
+  Group { LayoutMode: Left; Anchor: (Right: 14); Group { Anchor: (Width: 10, Height: 10, Top: 4, Right: 5); Background: #3686b4; } Label { Text: "Engine"; Style: (FontSize: 11, TextColor: #bfcdd5); } }
+  Group { LayoutMode: Left; Anchor: (Right: 14); Group { Anchor: (Width: 10, Height: 10, Top: 4, Right: 5); Background: #e69a27; } Label { Text: "Mod"; Style: (FontSize: 11, TextColor: #bfcdd5); } }
+  Group { LayoutMode: Left; Anchor: (Right: 14); Group { Anchor: (Width: 10, Height: 10, Top: 4, Right: 5); Background: #777b85; } Label { Text: "JDK"; Style: (FontSize: 11, TextColor: #bfcdd5); } }
+}

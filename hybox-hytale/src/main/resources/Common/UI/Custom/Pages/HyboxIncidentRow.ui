@@ -1,0 +1,22 @@
+$C = "../Common.ui";
+Group {
+  LayoutMode: Top;
+  Anchor: (Bottom: 2);
+  Padding: (Top: 3, Bottom: 4);
+  Group {
+    LayoutMode: Left;
+    Label #Key {
+      Anchor: (Width: 220, Right: 12);
+      Style: (FontSize: 12, TextColor: #96a9be, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9);
+    }
+    Label #Value {
+      FlexWeight: 1;
+      Style: (FontSize: 13, TextColor: #ffffff(0.92), Wrap: true);
+      TextTooltipStyle: $C.@DefaultTextTooltipStyle;
+    }
+  }
+  $C.@ProgressBar #Share {
+    Anchor: (Left: 232, Height: 6, Top: 4);
+    Visible: false;
+  }
+}

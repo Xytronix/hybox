@@ -144,13 +144,24 @@ public final class BundleBuilder {
 
     private void writeReportHtml(IncidentReport report, Path recordingJfr, ZipOutputStream zip) throws IOException {
         JfrTimeline timeline = null;
+        String unavailableReason = null;
         try {
-            timeline = JfrTimeline.parse(recordingJfr);
+            if (!Files.isRegularFile(recordingJfr)) {
+                unavailableReason = "recording file is missing";
+            } else if (Files.size(recordingJfr) == 0) {
+                unavailableReason = "recording file is empty";
+            } else {
+                timeline = JfrTimeline.parse(recordingJfr);
+                if (timeline == null) {
+                    unavailableReason = "recording is empty, unreadable, or contains no usable events";
+                }
+            }
         } catch (Exception e) {
+            unavailableReason = "recording could not be read: " + e.getMessage();
             logger.log(System.Logger.Level.WARNING, "JFR timeline parse failed; report renders without series.", e);
         }
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        ReportHtml.write(report, timeline, buffer);
+        ReportHtml.write(report, timeline, unavailableReason, buffer);
         ZipEntry entry = zipEntry("report.html");
         zip.putNextEntry(entry);
         zip.write(maybeRedact(buffer.toByteArray()));

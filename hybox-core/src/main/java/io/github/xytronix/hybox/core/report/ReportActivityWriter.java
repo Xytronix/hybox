@@ -173,54 +173,52 @@ final class ReportActivityWriter {
         json.endArray();
     }
 
-    static void writeModCpu(JsonWriter json, JfrTimeline timeline, Map<String, String> modCpu)
-        throws IOException {
-        if (timeline != null && !timeline.cpuByMod().isEmpty()) {
-            json.name("modCpu").beginArray();
-            for (JfrTimeline.ModCpu mod : timeline.cpuByMod()) {
-                json.beginArray();
-                json.value(mod.id());
-                json.value(mod.samples());
-                json.value(mod.method());
-                json.beginArray();
-                for (JfrTimeline.ThreadShare ts : mod.threads()) {
-                    json.beginArray();
-                    json.value(ts.thread());
-                    json.value(ts.samples());
-                    json.endArray();
+    static void writeModCpu(JsonWriter json, JfrTimeline timeline, Map<String, String> modCpu,
+                            ReportAttribution attribution) throws IOException {
+        boolean detailed = timeline != null && !timeline.cpuByMod().isEmpty();
+        List<JfrTimeline.ModCpu> rows;
+        if (detailed) {
+            rows = timeline.cpuByMod();
+        } else {
+            rows = new ArrayList<>();
+            for (Map.Entry<String, String> entry : modCpu == null ? Map.<String, String>of().entrySet()
+                : modCpu.entrySet()) {
+                String value = entry.getValue();
+                long samples = 0;
+                String method = value;
+                int idx = value.indexOf(" samples · ");
+                if (idx > 0) {
+                    try {
+                        samples = Long.parseLong(value.substring(0, idx).trim());
+                        method = value.substring(idx + " samples · ".length()).trim();
+                    } catch (NumberFormatException ignored) {
+                    }
                 }
-                json.endArray();
-                json.endArray();
+                rows.add(new JfrTimeline.ModCpu(entry.getKey(), samples, method, List.of()));
             }
-            json.endArray();
-            return;
+            attribution = new ReportAttribution(rows);
         }
-        if (modCpu == null || modCpu.isEmpty()) {
+        rows = attribution.cpu(rows);
+        if (rows.isEmpty()) {
             json.name("modCpu").nullValue();
             return;
         }
-        List<Object[]> rows = new ArrayList<>();
-        for (Map.Entry<String, String> e : modCpu.entrySet()) {
-            String value = e.getValue();
-            long samples = 0;
-            String method = value;
-            int idx = value.indexOf(" samples · ");
-            if (idx > 0) {
-                try {
-                    samples = Long.parseLong(value.substring(0, idx).trim());
-                    method = value.substring(idx + " samples · ".length()).trim();
-                } catch (NumberFormatException ignored) {
-                }
-            }
-            rows.add(new Object[] {e.getKey(), samples, method});
-        }
-        rows.sort((a, b) -> Long.compare((long) b[1], (long) a[1]));
         json.name("modCpu").beginArray();
-        for (Object[] row : rows) {
+        for (JfrTimeline.ModCpu row : rows) {
             json.beginArray();
-            json.value((String) row[0]);
-            json.value((long) row[1]);
-            json.value((String) row[2]);
+            json.value(row.id());
+            json.value(row.samples());
+            json.value(row.method());
+            if (detailed) {
+                json.beginArray();
+                for (JfrTimeline.ThreadShare thread : row.threads()) {
+                    json.beginArray();
+                    json.value(thread.thread());
+                    json.value(thread.samples());
+                    json.endArray();
+                }
+                json.endArray();
+            }
             json.endArray();
         }
         json.endArray();
@@ -421,12 +419,12 @@ final class ReportActivityWriter {
         json.endArray();
     }
 
-    private static String worldKey(String world) {
+    static String worldKey(String world) {
         String s = ReportHtml.worldShort(world);
         return s == null ? null : s.toLowerCase(Locale.ROOT);
     }
 
-    private static Long samplesForWorld(Map<String, Long> samples, String name) {
+    static Long samplesForWorld(Map<String, Long> samples, String name) {
         Long exact = samples.get(name);
         if (exact != null) {
             return exact;
@@ -491,7 +489,8 @@ final class ReportActivityWriter {
         json.endArray();
     }
 
-    static void writeCpuByWorld(JsonWriter json, JfrTimeline timeline) throws IOException {
+    static void writeCpuByWorld(JsonWriter json, JfrTimeline timeline, ReportAttribution attribution)
+        throws IOException {
         List<JfrTimeline.WorldCpu> worlds = timeline == null ? List.of() : timeline.cpuByWorld();
         if (worlds.isEmpty()) {
             json.name("cpuByWorld").nullValue();
@@ -511,7 +510,7 @@ final class ReportActivityWriter {
             }
             json.endArray();
             json.name("mods").beginArray();
-            for (Map.Entry<String, Long> e : w.mods().entrySet()) {
+            for (Map.Entry<String, Long> e : attribution.counts(w.mods()).entrySet()) {
                 json.beginArray();
                 json.value(e.getKey());
                 json.value(e.getValue());

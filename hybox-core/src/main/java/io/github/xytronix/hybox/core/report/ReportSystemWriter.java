@@ -222,7 +222,7 @@ final class ReportSystemWriter {
         json.endObject();
     }
 
-    private static Long heapMax(HealthSnapshot snapshot, JfrTimeline timeline) {
+    static Long heapMax(HealthSnapshot snapshot, JfrTimeline timeline) {
         if (timeline != null && timeline.heapMax() > 0) {
             return timeline.heapMax();
         }
@@ -296,7 +296,7 @@ final class ReportSystemWriter {
         json.endObject();
     }
 
-    static void writeAlloc(JsonWriter json, JfrTimeline timeline) throws IOException {
+    static void writeAlloc(JsonWriter json, JfrTimeline timeline, ReportAttribution attribution) throws IOException {
         JfrTimeline.Alloc alloc = timeline == null ? null : timeline.alloc();
         if (alloc == null) {
             json.name("alloc").nullValue();
@@ -329,7 +329,7 @@ final class ReportSystemWriter {
         }
         json.endArray();
         json.name("byMod").beginArray();
-        for (Map.Entry<String, Long> e : alloc.byMod().entrySet()) {
+        for (Map.Entry<String, Long> e : attribution.counts(alloc.byMod()).entrySet()) {
             json.beginArray();
             json.value(e.getKey());
             json.value(e.getValue());
@@ -350,7 +350,7 @@ final class ReportSystemWriter {
             }
             json.endArray();
             json.name("byMod").beginArray();
-            for (Map.Entry<String, Long> e : w.byMod().entrySet()) {
+            for (Map.Entry<String, Long> e : attribution.counts(w.byMod()).entrySet()) {
                 json.beginArray();
                 json.value(e.getKey());
                 json.value(e.getValue());

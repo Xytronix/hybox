@@ -49,7 +49,8 @@ class HyboxIdentityTest {
     void embeddedResourcesUseHyboxNamespace() throws Exception {
         try (var input = getClass().getResourceAsStream("/io/github/xytronix/hybox/core/version.txt")) {
             assertNotNull(input);
-            assertEquals("1.0.0", new String(input.readAllBytes(), StandardCharsets.UTF_8).trim());
+            String version = new String(input.readAllBytes(), StandardCharsets.UTF_8).trim();
+            assertTrue(version.matches("\\d+\\.\\d+\\.\\d+"), version);
         }
     }
 

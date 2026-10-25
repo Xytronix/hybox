@@ -1,0 +1,6 @@
+@OkPill = #80c991(0.14);
+@WarnPill = #efbd62(0.14);
+@ErrorPill = #ef8181(0.14);
+@OkBanner = #80c991(0.10);
+@WarnBanner = #efbd62(0.10);
+@ErrorBanner = #ef8181(0.10);
