@@ -718,7 +718,7 @@ class HytaleHyboxConfigTest {
               "Capture": {
                 "HeapHistogram": false, "AllowPluginExtras": true, "LogTailLines": 500,
                 "IncludeServerLog": false, "IncludeServerConfig": false, "IncludeModConfigs": false,
-                "AllowModConfigOptIn": true, "SanitizeLog": true,
+                "AllowModConfigOptIn": true,
                 "Artifacts": ["jfr", "report", "env", "threads", "serverLog", "plugins", "worlds", "heartbeats", "server", "metrics"]
               },
               "Retention": {

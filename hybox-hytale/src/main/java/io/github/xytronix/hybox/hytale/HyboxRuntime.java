@@ -302,8 +302,7 @@ final class HyboxRuntime implements AutoCloseable {
             () -> ThreadDumpProgress.appendTo(HytaleAssetPacks.appendTo(HytaleServerSettings.appendTo(HytaleModConfigs.appendTo(HytaleMixins.appendTo(HytalePlugins.appendTo(
                 HytaleEntities.appendTo(HytaleTickSystems.appendTo(HytaleHeartbeats.appendTo(HytaleServerLog.appendTo(
                     HyboxApi.collectDiagnostics(), config.capturePolicy().includeServerLog(),
-                    config.capturePolicy().logTailLines(), nameMasker,
-                    config.capturePolicy().sanitizeLog()), heartbeatRegistry, clock))))),
+                    config.capturePolicy().logTailLines(), nameMasker), heartbeatRegistry, clock))))),
                 config.capturePolicy().includeModConfigs(), HyboxApi.registeredConfigPaths()), config.capturePolicy().includeServerConfig())), lastSpacedDumps.get()),
             postIncidentWaiter,
             incidentDir,

@@ -22,7 +22,6 @@ public record CapturePolicy(
     boolean includeServerConfig,
     boolean includeModConfigs,
     boolean allowModConfigOptIn,
-    boolean sanitizeLog,
     List<String> frameworkPrefixes
 ) {
     public CapturePolicy {
@@ -40,7 +39,7 @@ public record CapturePolicy(
                          int logTailLines, List<String> redactPatterns, Set<String> artifacts,
                          boolean heapHistogram) {
         this(retention, enabled, allowPluginExtras, logTailLines, redactPatterns, artifacts, heapHistogram,
-            false, false, false, true, true, List.of());
+            false, false, false, true, List.of());
     }
 
     public CapturePolicy(RetentionPolicy retention, boolean enabled, boolean allowPluginExtras,
@@ -63,8 +62,7 @@ public record CapturePolicy(
 
     public CapturePolicy withFrameworkPrefixes(List<String> prefixes) {
         return new CapturePolicy(retention, enabled, allowPluginExtras, logTailLines, redactPatterns, artifacts,
-            heapHistogram, includeServerLog, includeServerConfig, includeModConfigs, allowModConfigOptIn,
-            sanitizeLog, prefixes);
+            heapHistogram, includeServerLog, includeServerConfig, includeModConfigs, allowModConfigOptIn, prefixes);
     }
 }
 
