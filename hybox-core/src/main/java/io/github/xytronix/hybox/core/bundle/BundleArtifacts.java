@@ -12,9 +12,10 @@ public final class BundleArtifacts {
     public static final String WORLDS = "worlds";
     public static final String HEARTBEATS = "heartbeats";
     public static final String SERVER = "server";
+    public static final String METRICS = "metrics";
 
     public static final Set<String> ALL = Set.of(
-        JFR, REPORT, ENV, THREADS, SERVER_LOG, PLUGINS, WORLDS, HEARTBEATS, SERVER);
+        JFR, REPORT, ENV, THREADS, SERVER_LOG, PLUGINS, WORLDS, HEARTBEATS, SERVER, METRICS);
 
     private BundleArtifacts() {
     }
@@ -29,7 +30,8 @@ public final class BundleArtifacts {
         if (zipPath.startsWith("env/")) {
             return ENV;
         }
-        if (zipPath.equals("extras/threads.txt")) {
+        if (zipPath.equals("extras/threads.txt")
+            || (zipPath.startsWith("extras/threads-") && zipPath.endsWith(".txt"))) {
             return THREADS;
         }
         if (zipPath.equals("extras/server-log.txt")) {
@@ -46,6 +48,9 @@ public final class BundleArtifacts {
         }
         if (zipPath.equals("extras/server.txt")) {
             return SERVER;
+        }
+        if (zipPath.startsWith("extras/metrics/")) {
+            return METRICS;
         }
         return null;
     }
