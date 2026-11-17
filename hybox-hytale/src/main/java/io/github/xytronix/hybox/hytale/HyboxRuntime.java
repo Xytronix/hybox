@@ -1058,6 +1058,10 @@ final class HyboxRuntime implements AutoCloseable {
         return extrasRegistry;
     }
 
+    System.Logger logger() {
+        return logger;
+    }
+
     ExecutorService worker() {
         return worker;
     }
