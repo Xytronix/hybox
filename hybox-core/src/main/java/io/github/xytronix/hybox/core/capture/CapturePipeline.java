@@ -575,14 +575,10 @@ public final class CapturePipeline {
         }
     }
 
-    private static final java.util.Set<String> TEXT_EXTENSIONS = java.util.Set.of(
-        ".txt", ".json", ".html", ".log", ".properties", ".xml", ".yaml", ".yml", ".cfg"
-    );
-
     private List<BundleAttachment> redactExtras(List<BundleAttachment> extras) {
         List<BundleAttachment> result = new ArrayList<>(extras.size());
         for (BundleAttachment extra : extras) {
-            if (isTextPath(extra.pathInZip())) {
+            if (extra.isText()) {
                 result.add(new BundleAttachment(extra.pathInZip(), redactor.redact(extra.data())));
             } else {
                 result.add(extra);
@@ -610,13 +606,5 @@ public final class CapturePipeline {
             redacted.put(entry.getKey(), redactor.redact(entry.getValue()));
         }
         return redacted;
-    }
-
-    private static boolean isTextPath(String path) {
-        int dot = path.lastIndexOf('.');
-        if (dot < 0) {
-            return false;
-        }
-        return TEXT_EXTENSIONS.contains(path.substring(dot).toLowerCase(java.util.Locale.ROOT));
     }
 }

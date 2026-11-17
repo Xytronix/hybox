@@ -49,9 +49,14 @@ final class HyboxCommand extends AbstractAsyncCommand {
             }
             return HyboxDashboardPage.open(context, runtime, this);
         }
-        send(context, Tone.OK, "Usage: /hybox ui|settings|incident [id]|status [--verbose]|list [--count=5] [--details]"
-            + "|triggers [--details]|dump|histogram|profile [stop|cancel]|trend|reload");
+        send(context, Tone.OK, usage());
         return CompletableFuture.completedFuture(null);
+    }
+
+    static String usage() {
+        return "Usage: /hybox ui|settings|incident [id]|status [--verbose]|list [--count=5] [--details]"
+            + "|triggers [--details]|dump|histogram|profile [--" + ProfileCommand.MINUTES + "=" + ProfileCommand.DEFAULT_MINUTES
+            + "] [--" + ProfileCommand.KEEP_BUFFER + "=" + ProfileCommand.DEFAULT_KEEP_BUFFER + "] [stop|cancel]|trend|reload";
     }
 
     private static void send(CommandContext context, Tone tone, String text) {
@@ -297,11 +302,16 @@ final class HyboxCommand extends AbstractAsyncCommand {
     }
 
     private static final class ProfileCommand extends RuntimeAsyncCommand {
-        private final DefaultArg<Integer> minutesArg =
-            withDefaultArg("minutes", "Profiling duration in minutes (1-30)", ArgTypes.INTEGER, 5, "5");
+        private static final String MINUTES = "minutes";
+        private static final int DEFAULT_MINUTES = 5;
+        private static final String KEEP_BUFFER = "keep-buffer";
+        private static final boolean DEFAULT_KEEP_BUFFER = true;
+
+        private final DefaultArg<Integer> minutesArg = withDefaultArg(MINUTES, "Profiling duration in minutes (1-30)",
+            ArgTypes.INTEGER, DEFAULT_MINUTES, Integer.toString(DEFAULT_MINUTES));
         private final DefaultArg<Boolean> keepBufferArg =
-            withDefaultArg("keep-buffer", "Keep the rolling buffer so one bundle spans before + after (default)",
-                ArgTypes.BOOLEAN, true, "true");
+            withDefaultArg(KEEP_BUFFER, "Keep the rolling buffer so one bundle spans before + after (default)",
+                ArgTypes.BOOLEAN, DEFAULT_KEEP_BUFFER, Boolean.toString(DEFAULT_KEEP_BUFFER));
 
         private ProfileCommand(HyboxRuntime runtime) {
             super("profile", "Record a high-fidelity bundle (keep-buffer=false starts a fresh recording)", runtime);
@@ -312,7 +322,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
         @Override
         protected CompletableFuture<Void> executeAsync(CommandContext context) {
             Integer requested = context.get(minutesArg);
-            int minutes = Math.max(1, Math.min(30, requested == null ? 5 : requested));
+            int minutes = Math.max(1, Math.min(30, requested == null ? DEFAULT_MINUTES : requested));
             boolean keepBuffer = Boolean.TRUE.equals(context.get(keepBufferArg));
             return runtime.startProfileSession(minutes, keepBuffer, context.isPlayer()
                 ? context.senderAs(com.hypixel.hytale.server.core.universe.PlayerRef.class) : null).thenAccept(error -> {

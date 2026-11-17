@@ -132,10 +132,16 @@ class CapturePipelineTest {
             new BundleBuilder(clock),
             new RetentionManager(clock, System.getLogger("retention-test"), FileDeleter.defaultDeleter()),
             IncidentNotifier.noop(),
-            (report, event) -> List.of(new BundleAttachment(
-                "extras/server-log.txt",
-                "password=hunter2 ip=192.168.10.20 custom=CUSTOM_SECRET_ABC123".getBytes(StandardCharsets.UTF_8)
-            )),
+            (report, event) -> List.of(
+                new BundleAttachment(
+                    "extras/server-log.txt",
+                    "password=hunter2 ip=192.168.10.20 custom=CUSTOM_SECRET_ABC123".getBytes(StandardCharsets.UTF_8)
+                ),
+                new BundleAttachment(
+                    "extras/metrics/plugin.csv",
+                    "ts,custom\n1,CUSTOM_SECRET_ABC123\n".getBytes(StandardCharsets.UTF_8)
+                )
+            ),
             incidentDir,
             tempRecordings,
             new CapturePolicy(
@@ -174,6 +180,10 @@ class CapturePipelineTest {
         assertTrue(logTail.contains("hunter2"));
         assertFalse(logTail.contains("192.168.10.20"));
         assertFalse(logTail.contains("CUSTOM_SECRET_ABC123"));
+
+        String csv = readEntry(zipPath, "extras/metrics/plugin.csv");
+        assertTrue(csv.contains("[REDACTED]"));
+        assertFalse(csv.contains("CUSTOM_SECRET_ABC123"));
     }
 
     @Test
