@@ -129,11 +129,6 @@ public final class RetentionManager {
                 } else {
                     deleteFailures++;
                 }
-                if (currentCount <= 1) {
-                    logger.log(System.Logger.Level.WARNING,
-                        "Retention would remove newest incident; stopping deletions.");
-                    break;
-                }
             }
         }
 
@@ -154,7 +149,7 @@ public final class RetentionManager {
                 } else {
                     deleteFailures++;
                 }
-                if (currentCount <= 1) {
+                if (currentCount <= 1 && currentBytes > policy.maxTotalBytes()) {
                     logger.log(System.Logger.Level.WARNING,
                         "Retention would remove newest incident; stopping deletions.");
                     break;
