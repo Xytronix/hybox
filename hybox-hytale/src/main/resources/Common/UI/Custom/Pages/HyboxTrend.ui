@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 
 $C.@PageOverlay {}
 
@@ -25,7 +26,7 @@ $C.@Container {
       Label #EmptyState { Anchor: (Height: 56, Bottom: 8); Padding: (Full: 10); Background: #ffffff(0.04); Style: (FontSize: 13, TextColor: #bfcdd5, Wrap: true, WrapMaxLines: 2, VerticalAlignment: Center); Visible: false; }
       Group #Charts { LayoutMode: Top; }
     }
-    Label #Feedback { Anchor: (Height: 22, Top: 6); Style: (FontSize: 12, TextColor: #b7cedd, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9, VerticalAlignment: Center); TextTooltipStyle: $C.@DefaultTextTooltipStyle; }
+    Label #Feedback { Anchor: (Height: 22, Top: 6); Style: (FontSize: 12, TextColor: #b7cedd, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9, VerticalAlignment: Center); TextTooltipStyle: $H.@TooltipStyle; }
     Group {
       LayoutMode: Left;
       Anchor: (Height: 40, Top: 8);

@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 Group {
   LayoutMode: Top;
   Anchor: (Bottom: 2);
@@ -12,7 +13,7 @@ Group {
     Label #Value {
       FlexWeight: 1;
       Style: (FontSize: 13, TextColor: #ffffff(0.92), Wrap: true);
-      TextTooltipStyle: $C.@DefaultTextTooltipStyle;
+      TextTooltipStyle: $H.@TooltipStyle;
     }
   }
   $C.@ProgressBar #Share {

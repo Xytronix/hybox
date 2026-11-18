@@ -21,4 +21,7 @@ public final class HyboxPluginMetricEvent extends Event {
 
     @Label("Counter")
     public boolean counter;
+
+    @Label("Total")
+    public double total;
 }

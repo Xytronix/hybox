@@ -82,7 +82,7 @@ $C.@Container {
       }
       Label #CaptureHint {
         FlexWeight: 1;
-        Text: "Saves the last 15 minutes of recording, thread dumps, server log and config as an incident bundle.";
+        Text: "Saves the last 15 minutes of recording and thread dumps as an incident bundle.";
         Style: (FontSize: 12, TextColor: #96a9be, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 3);
       }
       $C.@SecondaryTextButton #TrendsButton {
