@@ -38,21 +38,21 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
     private final java.util.function.IntSupplier logTailLines;
     private final java.util.function.BooleanSupplier includeServerLog;
     private final Path metricsDir;
-    private final PlayerNameMasker nameMasker;
+    private final ServerLogMasker logMasker;
     private final java.util.function.Supplier<List<String>> spacedDumps;
     private final java.util.function.BooleanSupplier liveDumpAllowed;
 
     HytaleBundleExtrasProvider(HeartbeatRegistry heartbeatRegistry,
                                java.util.function.IntSupplier logTailLines,
                                java.util.function.BooleanSupplier includeServerLog, Path metricsDir,
-                               PlayerNameMasker nameMasker,
+                               ServerLogMasker logMasker,
                                java.util.function.Supplier<List<String>> spacedDumps,
                                java.util.function.BooleanSupplier liveDumpAllowed) {
         this.heartbeatRegistry = heartbeatRegistry;
         this.logTailLines = logTailLines;
         this.includeServerLog = includeServerLog;
         this.metricsDir = metricsDir;
-        this.nameMasker = nameMasker;
+        this.logMasker = logMasker;
         this.spacedDumps = spacedDumps;
         this.liveDumpAllowed = liveDumpAllowed;
     }
@@ -66,9 +66,13 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
         extras.add(new BundleAttachment("extras/heartbeats.txt",
             buildHeartbeatsText().getBytes(StandardCharsets.UTF_8)));
         extras.addAll(threadDumpAttachments(spacedDumps.get(), liveDumpAllowed.getAsBoolean()));
+        String mixins = HytaleMixins.methodMapText();
+        if (mixins != null) {
+            extras.add(new BundleAttachment("extras/mixins.txt", mixins.getBytes(StandardCharsets.UTF_8)));
+        }
 
         if (includeServerLog.getAsBoolean() && logTailLines.getAsInt() > 0) {
-            String logTail = nameMasker.maskText(buildServerLogTail(report));
+            String logTail = logMasker.mask(buildServerLogTail(report));
             if (!logTail.isEmpty()) {
                 extras.add(new BundleAttachment("extras/server-log.txt",
                     logTail.getBytes(StandardCharsets.UTF_8)));

@@ -29,6 +29,10 @@ public record BundleAttachment(String pathInZip, byte[] data) {
         }
     }
     public boolean isText() {
+        return isText(pathInZip);
+    }
+
+    public static boolean isText(String pathInZip) {
         int dot = pathInZip.lastIndexOf('.');
         return dot >= 0 && java.util.Set.of(".txt", ".json", ".html", ".log", ".properties",
             ".xml", ".yaml", ".yml", ".cfg", ".csv")

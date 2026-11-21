@@ -5,14 +5,17 @@ import static org.junit.jupiter.api.Assertions.*;
 import io.github.xytronix.hybox.core.capture.CaptureResult;
 import io.github.xytronix.hybox.core.incident.IncidentId;
 import io.github.xytronix.hybox.core.jfr.JfrController;
+import io.github.xytronix.hybox.core.jfr.ProfileMode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import jdk.jfr.FlightRecorder;
 import org.junit.jupiter.api.Test;
 
 class ProfileSessionControllerTest {
@@ -26,12 +29,12 @@ class ProfileSessionControllerTest {
             event -> CompletableFuture.completedFuture(CaptureResult.captured(new IncidentId("final"))), result -> {});
         try {
             recorder.start();
-            assertNull(profiles.start(0, true, "Operator", result -> {}));
+            assertNull(profiles.start(ProfileMode.LAG, 0, true, "Operator", result -> {}));
             assertEquals(now, profiles.startedAt());
             assertEquals(Duration.ofMinutes(1), profiles.totalDuration());
             assertEquals(60, profiles.remainingSeconds());
             assertEquals("Operator", profiles.requesterName());
-            assertNotNull(profiles.start(1, true, "Other player", result -> {}));
+            assertNotNull(profiles.start(ProfileMode.LAG, 1, true, "Other player", result -> {}));
             assertEquals("Operator", profiles.requesterName());
         } finally {
             profiles.close();
@@ -55,12 +58,12 @@ class ProfileSessionControllerTest {
             }, result -> {});
         try {
             recorder.start();
-            assertNull(profiles.start(1, true, "First", firstRequester::add));
+            assertNull(profiles.start(ProfileMode.LAG, 1, true, "First", firstRequester::add));
             finish(profiles);
             assertFalse(profiles.active());
             assertNull(profiles.requesterName());
             assertTrue(firstRequester.isEmpty());
-            assertNull(profiles.start(1, true, "Second", secondRequester::add));
+            assertNull(profiles.start(ProfileMode.LAG, 1, true, "Second", secondRequester::add));
             assertEquals("Second", profiles.requesterName());
             finish(profiles);
 
@@ -87,7 +90,7 @@ class ProfileSessionControllerTest {
             event -> CompletableFuture.completedFuture(CaptureResult.captured(new IncidentId("final"))), result -> {});
         try {
             recorder.start();
-            assertNull(profiles.start(1, true, null, completion::add));
+            assertNull(profiles.start(ProfileMode.LAG, 1, true, null, completion::add));
             assertNull(profiles.requesterName());
             profiles.close();
             assertNull(profiles.requesterName());
@@ -113,7 +116,7 @@ class ProfileSessionControllerTest {
             }, result -> {});
         try {
             recorder.start();
-            assertNull(profiles.start(5, true, null, completion::add));
+            assertNull(profiles.start(ProfileMode.LAG, 5, true, null, completion::add));
             assertNull(profiles.finishNow());
             assertFalse(profiles.active());
             assertEquals(List.of("profile session"), finalCaptures);
@@ -141,16 +144,52 @@ class ProfileSessionControllerTest {
             }, result -> {});
         try {
             recorder.start();
-            assertNull(profiles.start(5, true, null, completion::add));
-            assertNull(profiles.cancel());
+            assertNull(profiles.start(ProfileMode.MEMORY, 5, true, "Operator", completion::add));
+            assertEquals(new ProfileSessionController.Owner(ProfileMode.MEMORY, "Operator"), profiles.cancelRunning());
             assertFalse(profiles.active());
             finish(profiles);
             assertTrue(finalCaptures.isEmpty(), "Cancel saves no bundle");
             assertEquals(1, completion.size());
             assertEquals(CaptureResult.Status.CANCELLED, completion.getFirst().status());
-            assertEquals("No profile session is running.", profiles.cancel());
-            assertNull(profiles.start(5, true, null, result -> {}));
+            assertNull(profiles.cancelRunning());
+            assertNull(profiles.start(ProfileMode.LAG, 5, true, null, result -> {}));
         } finally {
+            scheduler.shutdownNow();
+            recorder.close();
+        }
+    }
+
+    @Test
+    void finalBundleNamesTheModeAndMemorySettingsStayUntilItIsWritten() throws Exception {
+        var scheduler = Executors.newSingleThreadScheduledExecutor();
+        String name = "hybox-profile-mode-final";
+        var recorder = new JfrController(Duration.ofMinutes(1), 1024 * 1024, name);
+        CompletableFuture<CaptureResult> capture = new CompletableFuture<>();
+        List<Map<String, String>> finalEvents = new ArrayList<>();
+        var profiles = new ProfileSessionController(Clock.systemUTC(), System.getLogger("dashboard-test"), scheduler,
+            recorder, event -> CaptureResult.captured(new IncidentId("lead-up")), event -> {
+                finalEvents.add(event.attrs());
+                return capture;
+            }, result -> {});
+        try {
+            recorder.start();
+            var recording = FlightRecorder.getFlightRecorder().getRecordings().stream()
+                .filter(candidate -> name.equals(candidate.getName())).findFirst().orElseThrow();
+            var normal = recording.getSettings();
+            assertNull(profiles.start(ProfileMode.MEMORY, 5, true, "Operator", result -> {}));
+            assertEquals(ProfileMode.MEMORY, profiles.mode());
+            assertEquals("1 s", recording.getSettings().get("jdk.OldObjectSample#cutoff"));
+            assertNull(profiles.finishNow());
+            assertEquals("memory", finalEvents.getFirst().get(ProfileMode.CONTEXT_KEY));
+            assertTrue(profiles.finishing());
+            assertEquals(new ProfileSessionController.Owner(ProfileMode.MEMORY, "Operator"), profiles.finishingOwner());
+            assertEquals("1 s", recording.getSettings().get("jdk.OldObjectSample#cutoff"),
+                "The root search must still be on when the final bundle is dumped");
+            capture.complete(CaptureResult.captured(new IncidentId("final")));
+            assertFalse(profiles.finishing());
+            assertEquals(normal, recording.getSettings());
+        } finally {
+            profiles.close();
             scheduler.shutdownNow();
             recorder.close();
         }

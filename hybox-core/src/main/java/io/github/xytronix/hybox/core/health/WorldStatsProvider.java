@@ -6,13 +6,14 @@ import java.util.List;
 public interface WorldStatsProvider {
     Worlds worlds();
 
-    record Worlds(int targetTps, List<HealthSnapshot.World> worlds) {
+    record Worlds(int targetTps, int maxViewRadius, int onlinePlayers, List<HealthSnapshot.World> worlds,
+                  HealthSnapshot.Radius allPlayers) {
         public Worlds {
             worlds = worlds == null ? List.of() : List.copyOf(worlds);
         }
     }
 
     static WorldStatsProvider none() {
-        return () -> new Worlds(0, List.of());
+        return () -> new Worlds(0, -1, -1, List.of(), null);
     }
 }

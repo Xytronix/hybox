@@ -1,0 +1,8 @@
+$C = "../Common.ui";
+$H = "HyboxTones.ui";
+$C.@SecondaryTextButton #Button {
+  @Text = "";
+  Anchor: (Height: 21, Bottom: 1);
+  Padding: (Horizontal: 10);
+  TextTooltipStyle: $H.@TooltipStyle;
+}

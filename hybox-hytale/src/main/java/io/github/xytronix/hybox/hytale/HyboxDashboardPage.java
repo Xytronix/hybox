@@ -6,6 +6,8 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.protocol.packets.interface_.CustomPageLifetime;
+import com.hypixel.hytale.protocol.packets.interface_.CustomUICommand;
+import com.hypixel.hytale.protocol.packets.interface_.CustomUICommandType;
 import com.hypixel.hytale.server.core.command.system.AbstractCommand;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
 import com.hypixel.hytale.server.core.entity.entities.Player;
@@ -16,9 +18,16 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import io.github.xytronix.hybox.core.capture.CaptureResult;
+import io.github.xytronix.hybox.core.jfr.ProfileMode;
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,19 +49,17 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
     private volatile boolean dismissed;
     private boolean capturing;
     private boolean profileSaving;
-    private boolean openLastAvailable;
-    private String completedIncident;
+    private boolean cancelConfirming;
+    private boolean showManual;
+    private boolean opening;
     private boolean wasCapturing;
     private CaptureResult observedOutcome;
-    private boolean wasRunning;
     private String observedIncident;
     private int incidentRequest;
     private List<HyboxIncidents.Incident> incidents = List.of();
-    private String incidentsMessage = "Loading recent incidents…";
-    private ScheduledFuture<?> refresh;
-    private String shownShape;
-    private String shownTimer;
-    private List<String> shownValues = List.of();
+    private String incidentsMessage = "Loading recent incidents...";
+    private volatile ScheduledFuture<?> refresh;
+    private volatile State state;
     private int profileMinutes = 5;
     private boolean profileKeepBuffer = true;
     private boolean profileStarting;
@@ -61,7 +68,7 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
     private String heapMessage;
     private HyboxRuntime.HeapView heapView;
 
-    private HyboxDashboardPage(HyboxRuntime runtime, PlayerRef playerRef, World world, AbstractCommand rootCommand, String tab) {
+    private HyboxDashboardPage(HyboxRuntime runtime, PlayerRef playerRef, World world, AbstractCommand rootCommand, String tab, boolean showManual) {
         super(playerRef, CustomPageLifetime.CanDismiss, PageData.CODEC);
         this.runtime = runtime;
         this.world = world;
@@ -76,6 +83,7 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
         this.tab = tab;
         this.heapView = runtime.lastHeap();
         this.heapConfirming = tab.equals("heap") && histogramCommand.hasPermission(playerRef);
+        this.showManual = showManual;
     }
 
     static CompletableFuture<Void> open(CommandContext context, HyboxRuntime runtime, AbstractCommand rootCommand) {
@@ -85,7 +93,7 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
     static CompletableFuture<Void> open(CommandContext context, HyboxRuntime runtime, AbstractCommand rootCommand, String tab) {
         if (!context.isPlayer()) {
             context.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN,
-                "The dashboard needs a player; use /hybox status or /hybox status --verbose."));
+                "The dashboard opens in game only. From the console, use /hybox status or /hybox status --verbose."));
             return CompletableFuture.completedFuture(null);
         }
         try {
@@ -97,7 +105,7 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
             Store<EntityStore> store = ref.getStore();
             World world = store.getExternalData().getWorld();
             return CompletableFuture.runAsync(() -> {
-                if (!open(runtime, ref, store, world, rootCommand, tab)) fallback(context, runtime);
+                if (!open(runtime, ref, store, world, rootCommand, tab, false)) fallback(context, runtime);
             }, world).exceptionally(failure -> {
                 fallback(context, runtime);
                 return null;
@@ -109,7 +117,7 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
     }
 
     private static boolean open(HyboxRuntime runtime, Ref<EntityStore> ref, Store<EntityStore> store, World world,
-                                AbstractCommand rootCommand, String tab) {
+                                AbstractCommand rootCommand, String tab, boolean showManual) {
         if (!ref.isValid() || ref.getStore() != store) return false;
         Player player = store.getComponent(ref, Player.getComponentType());
         PlayerRef playerRef = store.getComponent(ref, PlayerRef.getComponentType());
@@ -120,7 +128,7 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
             player.getPageManager().closePage(ref, store);
             return true;
         }
-        HyboxDashboardPage page = new HyboxDashboardPage(runtime, playerRef, world, rootCommand, tab);
+        HyboxDashboardPage page = new HyboxDashboardPage(runtime, playerRef, world, rootCommand, tab, showManual);
         try {
             player.getPageManager().openCustomPage(ref, store, page);
             return true;
@@ -139,8 +147,8 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
 
     private static void fallback(CommandContext context, HyboxRuntime runtime) {
         context.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN,
-            "Dashboard unavailable; chat commands remain available (/hybox status --verbose)."));
-        HyboxChatFormatter.statusMessages(runtime.health(), Instant.now(),
+            "The dashboard could not open. Use /hybox status."));
+        HyboxChatFormatter.statusMessages(runtime.health(), runtime.liveStatus(), Instant.now(),
             runtime.profileActive() ? runtime.profileRemainingSeconds() : 0).forEach(context::sendMessage);
     }
 
@@ -149,46 +157,89 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
                       Store<EntityStore> store) {
         commands.append("Pages/HyboxDashboard.ui");
         HyboxDashboardRenderer.bindNavigation(events);
-        DashboardModel model = model();
+        Inputs inputs = inputs();
+        DashboardModel model = model(inputs, Instant.now());
         HyboxDashboardRenderer.render(model, tab, commands, events);
-        remember(model);
+        state = new State(inputs, shown(model, tab));
         loadIncidents(ref, store);
         var initialHealth = runtime.health();
         observedIncident = initialHealth.lastIncident();
         observedOutcome = initialHealth.lastOutcome();
         wasCapturing = initialHealth.captureBusy();
-        wasRunning = runtime.profileActive() || wasCapturing;
-        if (refresh == null) {
-            refresh = runtime.scheduleDashboardRefresh(() -> {
-                if (dismissed || !refreshQueued.compareAndSet(false, true)) return;
-                if (!onWorld(() -> {
-                    refreshQueued.set(false);
-                    Ref<EntityStore> liveRef = playerRef.getReference();
-                    if (liveRef == null || !liveRef.isValid()) return;
-                    Store<EntityStore> liveStore = liveRef.getStore();
-                    if (!active(liveRef, liveStore)) {
-                        if (dismissed || !playerRef.isValid()) stopRefreshing();
-                        return;
-                    }
-                    var health = runtime.health();
-                    boolean running = runtime.profileActive() || health.captureBusy();
-                    boolean newIncident = !java.util.Objects.equals(observedIncident, health.lastIncident());
-                    boolean newOutcome = !java.util.Objects.equals(observedOutcome, health.lastOutcome());
-                    boolean captureFinished = !health.captureBusy() && (wasCapturing || newOutcome || newIncident);
-                    if (captureFinished && health.lastOutcome() != null) {
-                        completedIncident = health.lastOutcome().captured() ? health.lastOutcome().incidentId().value() : null;
-                        openLastAvailable = false;
-                        feedback = DashboardModel.captureFeedback(health.lastOutcome(), runtime.incidentDir());
-                    }
-                    if (newOutcome || (wasCapturing && !health.captureBusy())) profileSaving = false;
-                    update();
-                    if (captureFinished || newIncident) loadIncidents(liveRef, liveStore);
-                    observedIncident = health.lastIncident();
-                    observedOutcome = health.lastOutcome();
-                    wasCapturing = health.captureBusy();
-                    wasRunning = running;
-                })) refreshQueued.set(false);
-            });
+        if (refresh == null) refresh = runtime.scheduleDashboardRefresh(this::tick);
+    }
+
+    private void tick() {
+        if (dismissed || !playerRef.getPacketHandler().stillActive()) {
+            stopRefreshing();
+            return;
+        }
+        if (!refreshQueued.compareAndSet(false, true)) return;
+        if (!runtime.offerWorker(this::refreshOffWorld)) refreshQueued.set(false);
+    }
+
+    private void refreshOffWorld() {
+        boolean handedOff = false;
+        try {
+            if (dismissed) return;
+            var health = runtime.health();
+            boolean busy = health.captureBusy();
+            boolean newIncident = !Objects.equals(observedIncident, health.lastIncident());
+            boolean newOutcome = !Objects.equals(observedOutcome, health.lastOutcome());
+            State current = state;
+            if (newIncident || newOutcome || (wasCapturing && !busy)
+                || (current.inputs().cancelConfirming() && !profileHoldsData())) {
+                handedOff = onWorld(() -> settle(health));
+                return;
+            }
+            wasCapturing = busy;
+            Frame frame = frame(current.inputs(), current.shown(), Instant.now());
+            if (frame != null) handedOff = onWorld(() -> apply(current, frame));
+        } finally {
+            if (!handedOff) refreshQueued.set(false);
+        }
+    }
+
+    private void settle(HyboxRuntime.Health health) {
+        try {
+            Ref<EntityStore> liveRef = playerRef.getReference();
+            if (liveRef == null || !liveRef.isValid()) return;
+            Store<EntityStore> liveStore = liveRef.getStore();
+            if (!active(liveRef, liveStore)) {
+                if (dismissed) stopRefreshing();
+                return;
+            }
+            boolean newIncident = !Objects.equals(observedIncident, health.lastIncident());
+            boolean newOutcome = !Objects.equals(observedOutcome, health.lastOutcome());
+            boolean captureFinished = !health.captureBusy() && (wasCapturing || newOutcome || newIncident);
+            if (captureFinished && health.lastOutcome() != null) {
+                feedback = DashboardModel.captureFeedback(health.lastOutcome(), runtime.incidentDir());
+            }
+            if (newOutcome || (wasCapturing && !health.captureBusy())) profileSaving = false;
+            if (!profileHoldsData()) cancelConfirming = false;
+            update();
+            if (captureFinished || newIncident) loadIncidents(liveRef, liveStore);
+            observedIncident = health.lastIncident();
+            observedOutcome = health.lastOutcome();
+            wasCapturing = health.captureBusy();
+        } finally {
+            refreshQueued.set(false);
+        }
+    }
+
+    private void apply(State expected, Frame frame) {
+        try {
+            Ref<EntityStore> liveRef = playerRef.getReference();
+            if (liveRef == null || !liveRef.isValid()) return;
+            if (!active(liveRef, liveRef.getStore())) {
+                if (dismissed) stopRefreshing();
+                return;
+            }
+            if (state != expected) return;
+            state = new State(expected.inputs(), frame.shown());
+            send(frame);
+        } finally {
+            refreshQueued.set(false);
         }
     }
 
@@ -206,11 +257,24 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
                 update();
                 if (tab.equals("incidents")) loadIncidents(ref, store);
             }
+            case "incidents:manual" -> {
+                showManual = !showManual;
+                update();
+            }
             case "capture" -> capture(ref, store);
             case "capture:skip" -> skipWait();
             case "profile:stop" -> stopProfile(true);
-            case "profile:cancel" -> stopProfile(false);
-            case "profile:start" -> startProfile(data.keepBuffer);
+            case "profile:cancel" -> askCancel();
+            case "profile:cancel:yes" -> {
+                cancelConfirming = false;
+                stopProfile(false);
+            }
+            case "profile:cancel:no" -> {
+                cancelConfirming = false;
+                update();
+            }
+            case "profile:start:lag" -> startProfile(ProfileMode.LAG, data.keepBuffer);
+            case "profile:start:memory" -> startProfile(ProfileMode.MEMORY, data.keepBuffer);
             case "profile:keep" -> {
                 if (data.keepBuffer != null && !profileStarting) profileKeepBuffer = data.keepBuffer;
                 update();
@@ -230,49 +294,115 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
         }
     }
 
-    private DashboardModel model() {
-        return DashboardModel.snapshot(runtime, Instant.now(), incidents, incidentsMessage, feedback,
-            !capturing && captureCommand.hasPermission(playerRef), openLastAvailable && incidentCommand.hasPermission(playerRef),
-            profileCommand.getSubCommand("stop").hasPermission(playerRef),
-            profileCommand.getSubCommand("cancel").hasPermission(playerRef), profileSaving, trendCommand.hasPermission(playerRef),
-            new DashboardModel.ProfileForm(profileCommand.hasPermission(playerRef), profileMinutes, profileKeepBuffer, profileStarting),
-            new DashboardModel.Heap(histogramCommand.hasPermission(playerRef), heapConfirming, heapWalking,
-                heapView == null ? null : heapView.snapshot(), heapView == null ? null : heapView.takenAt(), heapMessage));
+    private Inputs inputs() {
+        return new Inputs(tab, incidents, incidentsMessage, feedback, capturing, profileSaving, profileMinutes, profileKeepBuffer,
+            profileStarting, heapConfirming, heapWalking, heapMessage, heapView, cancelConfirming, showManual);
     }
 
-    private void remember(DashboardModel model) {
-        shownShape = HyboxDashboardRenderer.shape(model, tab);
-        shownTimer = HyboxDashboardRenderer.timerKey(model);
+    private DashboardModel model(Inputs in, Instant now) {
+        HyboxRuntime.HeapView view = in.heapView();
+        return DashboardModel.snapshot(runtime, now, in.incidents(), in.incidentsMessage(), in.feedback(),
+            !in.capturing() && captureCommand.hasPermission(playerRef), incidentCommand.hasPermission(playerRef),
+            profileCommand.getSubCommand("stop").hasPermission(playerRef),
+            profileCommand.getSubCommand("cancel").hasPermission(playerRef), in.profileSaving(), trendCommand.hasPermission(playerRef),
+            new DashboardModel.ProfileForm(profileCommand.hasPermission(playerRef), in.profileMinutes(), in.profileKeepBuffer(),
+                in.profileStarting()),
+            new DashboardModel.Heap(histogramCommand.hasPermission(playerRef), in.heapConfirming(), in.heapWalking(),
+                view == null ? null : view.snapshot(), view == null ? null : view.takenAt(), in.heapMessage()),
+            in.cancelConfirming(), in.showManual());
+    }
+
+    private Frame frame(Inputs in, Shown shown, Instant now) {
+        DashboardModel model = model(in, now);
+        String tab = in.tab();
+        String shape = HyboxDashboardRenderer.shape(model, tab);
+        if (!shape.equals(shown.shape())) {
+            UICommandBuilder commands = new UICommandBuilder();
+            UIEventBuilder events = new UIEventBuilder();
+            HyboxDashboardRenderer.render(model, tab, commands, events);
+            return new Frame(commands, events, shown(model, tab));
+        }
+        String timer = HyboxDashboardRenderer.timerKey(model);
+        boolean timerChanged = !timer.equals(shown.timer());
         UICommandBuilder values = new UICommandBuilder();
         HyboxDashboardRenderer.refresh(model, tab, values, false);
-        shownValues = signature(values);
+        CustomUICommand[] sets = values.getCommands();
+        Map<String, String> next = new HashMap<>(shown.values());
+        if (!remember(next, sets) && !timerChanged) return null;
+        CustomUICommand[] source = sets;
+        if (timerChanged) {
+            UICommandBuilder all = new UICommandBuilder();
+            HyboxDashboardRenderer.refresh(model, tab, all, true);
+            source = all.getCommands();
+        }
+        return new Frame(new Picked(changed(shown.values(), source)), null, new Shown(shape, timer, next));
     }
 
-    private static List<String> signature(UICommandBuilder commands) {
-        return java.util.Arrays.stream(commands.getCommands())
-            .map(command -> command.type + "|" + command.selector + "|" + command.data + "|" + command.text).toList();
+    private static Shown shown(DashboardModel model, String tab) {
+        UICommandBuilder values = new UICommandBuilder();
+        HyboxDashboardRenderer.refresh(model, tab, values, false);
+        Map<String, String> shown = new HashMap<>();
+        remember(shown, values.getCommands());
+        return new Shown(HyboxDashboardRenderer.shape(model, tab), HyboxDashboardRenderer.timerKey(model), shown);
+    }
+
+    static boolean remember(Map<String, String> shown, CustomUICommand[] commands) {
+        boolean changed = false;
+        for (CustomUICommand command : commands) {
+            if (command.type != CustomUICommandType.Set) continue;
+            if (!Objects.equals(shown.put(command.selector, command.data), command.data)) changed = true;
+        }
+        return changed;
+    }
+
+    static CustomUICommand[] changed(Map<String, String> shown, CustomUICommand[] commands) {
+        Set<String> selectors = new HashSet<>();
+        for (CustomUICommand command : commands) {
+            if (command.type == CustomUICommandType.Set && !selectors.add(command.selector)) return commands;
+        }
+        List<CustomUICommand> changed = new ArrayList<>();
+        for (CustomUICommand command : commands) {
+            if (command.type != CustomUICommandType.Set || !shown.containsKey(command.selector)
+                || !Objects.equals(shown.get(command.selector), command.data)) changed.add(command);
+        }
+        return changed.toArray(CustomUICommand[]::new);
     }
 
     private void update() {
-        DashboardModel model = model();
-        UICommandBuilder commands = new UICommandBuilder();
-        if (!HyboxDashboardRenderer.shape(model, tab).equals(shownShape)) {
-            UIEventBuilder events = new UIEventBuilder();
-            HyboxDashboardRenderer.render(model, tab, commands, events);
-            remember(model);
-            sendUpdate(commands, events, false);
-            return;
+        State current = state;
+        Inputs inputs = inputs();
+        Frame frame = frame(inputs, current.shown(), Instant.now());
+        state = new State(inputs, frame == null ? current.shown() : frame.shown());
+        if (frame != null) send(frame);
+    }
+
+    private void send(Frame frame) {
+        if (frame.events() != null) sendUpdate(frame.commands(), frame.events(), false);
+        else sendUpdate(frame.commands(), false);
+    }
+
+    private record Inputs(String tab, List<HyboxIncidents.Incident> incidents, String incidentsMessage, String feedback,
+                          boolean capturing, boolean profileSaving, int profileMinutes, boolean profileKeepBuffer,
+                          boolean profileStarting, boolean heapConfirming, boolean heapWalking, String heapMessage,
+                          HyboxRuntime.HeapView heapView, boolean cancelConfirming, boolean showManual) {}
+
+    private record Shown(String shape, String timer, Map<String, String> values) {}
+
+    private record State(Inputs inputs, Shown shown) {}
+
+    private record Frame(UICommandBuilder commands, UIEventBuilder events, Shown shown) {}
+
+    private static final class Picked extends UICommandBuilder {
+        private final CustomUICommand[] commands;
+
+        Picked(CustomUICommand[] commands) {
+            this.commands = commands;
         }
-        String timer = HyboxDashboardRenderer.timerKey(model);
-        UICommandBuilder values = new UICommandBuilder();
-        HyboxDashboardRenderer.refresh(model, tab, values, false);
-        List<String> next = signature(values);
-        boolean timerChanged = !timer.equals(shownTimer);
-        if (next.equals(shownValues) && !timerChanged) return;
-        HyboxDashboardRenderer.refresh(model, tab, commands, timerChanged);
-        shownValues = next;
-        shownTimer = timer;
-        sendUpdate(commands, false);
+
+        @Override
+        public CustomUICommand[] getCommands() {
+            return commands;
+        }
     }
 
     private void skipWait() {
@@ -280,7 +410,23 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
             feedback = "Skipping the wait requires permission to use /hybox dump.";
         } else {
             String error = runtime.skipRecoveryWait();
-            feedback = error == null ? "Skipping the post-incident wait · writing the bundle now." : error;
+            feedback = error == null ? "Skipping the recovery wait. Writing the bundle now." : error;
+        }
+        update();
+    }
+
+    private boolean profileHoldsData() {
+        return runtime.profileActive() || runtime.profileFinalQueued();
+    }
+
+    private void askCancel() {
+        if (!profileCommand.getSubCommand("cancel").hasPermission(playerRef)) {
+            feedback = "Canceling a profile requires permission to use /hybox profile cancel.";
+        } else if (profileHoldsData()) {
+            cancelConfirming = true;
+        } else if (runtime.queuedProfile() != null) {
+            stopProfile(false);
+            return;
         }
         update();
     }
@@ -288,11 +434,14 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
     private void stopProfile(boolean save) {
         if (!profileCommand.getSubCommand(save ? "stop" : "cancel").hasPermission(playerRef)) {
             feedback = save ? "Saving a profile requires permission to use /hybox profile stop."
-                : "Cancelling a profile requires permission to use /hybox profile cancel.";
+                : "Canceling a profile requires permission to use /hybox profile cancel.";
+        } else if (save) {
+            String error = runtime.finishProfileNow();
+            profileSaving = error == null;
+            cancelConfirming = false;
+            feedback = error != null ? error : "Profile stopped. Saving the bundle.";
         } else {
-            String error = save ? runtime.finishProfileNow() : runtime.cancelProfile();
-            profileSaving = save && error == null;
-            feedback = error != null ? error : save ? "Profile ended early · saving bundle." : "Profile cancelled · nothing saved.";
+            feedback = runtime.cancelProfile(playerRef).message();
         }
         update();
     }
@@ -309,7 +458,7 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
         update();
     }
 
-    private void startProfile(Boolean keepBuffer) {
+    private void startProfile(ProfileMode mode, Boolean keepBuffer) {
         if (!profileCommand.hasPermission(playerRef)) {
             feedback = "Starting a profile requires permission to use /hybox profile.";
             update();
@@ -320,16 +469,17 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
         int minutes = profileMinutes;
         boolean keep = profileKeepBuffer;
         profileStarting = true;
-        feedback = "Starting profile…";
+        feedback = "Starting profile...";
         update();
-        runtime.startProfileSession(minutes, keep, playerRef).whenComplete((error, failure) -> onWorld(() -> {
+        runtime.startProfileSession(mode, minutes, keep, playerRef).whenComplete((start, failure) -> onWorld(() -> {
             profileStarting = false;
             Ref<EntityStore> liveRef = playerRef.getReference();
             if (liveRef == null || !liveRef.isValid() || !active(liveRef, liveRef.getStore())) return;
-            feedback = failure != null ? "Profile failed to start; see the server log."
-                : error == null ? "Profile started · " + minutes + " min · "
-                    + (keep ? "rolling buffer kept" : "fresh recording") + " · captures automatically at the end."
-                : error.startsWith("Failed to switch") ? "Failed to switch to the profile preset; check the server log." : error;
+            feedback = failure != null ? "Profile failed to start. The server log has the error."
+                : start.queued() ? HyboxCommand.QUEUED_MESSAGE
+                : start.error() == null ? HyboxRuntime.startedMessage(mode, minutes)
+                : start.error().startsWith("Failed to switch") ? "Failed to switch to the profile settings. The server log has the error."
+                : start.error();
             update();
         }));
     }
@@ -364,7 +514,7 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
                 message = "Heap walk failed: " + failure.getClass().getSimpleName() + ".";
             }
             heapDone(view, message);
-        }, () -> heapDone(null, "Hybox worker is busy or stopping; try again shortly."));
+        }, () -> heapDone(null, "Hybox is busy. Try again in a moment."));
     }
 
     private void heapDone(HyboxRuntime.HeapView view, String message) {
@@ -388,25 +538,22 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
             List<HyboxIncidents.Incident> loaded;
             String message = "";
             try {
-                loaded = HyboxIncidents.recent(runtime.incidentDir(), 20);
+                loaded = HyboxIncidents.recent(runtime.incidentDir(), HyboxDashboardRenderer.ROWS);
             } catch (IOException failure) {
                 loaded = List.of();
-                message = "Unable to read recent incidents; select Incidents to retry.";
+                message = "Unable to read recent incidents. Select Incidents to retry.";
             }
             List<HyboxIncidents.Incident> result = loaded;
             String resultMessage = message;
             onWorld(() -> {
                 if (!active(ref, store) || request != incidentRequest) return;
                 incidents = result;
-                openLastAvailable = completedIncident != null && !incidents.isEmpty()
-                    && completedIncident.equals(incidents.getFirst().id());
                 incidentsMessage = resultMessage;
                 update();
             });
         }, () -> onWorld(() -> {
             if (!active(ref, store) || request != incidentRequest) return;
-            incidentsMessage = "Hybox worker is busy or stopping; select Incidents to retry.";
-            openLastAvailable = false;
+            incidentsMessage = "Hybox is busy. Try again in a moment.";
             update();
         }));
     }
@@ -428,7 +575,7 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
         Ref<EntityStore> liveRef = playerRef.getReference();
         if (liveRef == null || !liveRef.isValid()) return;
         Store<EntityStore> liveStore = liveRef.getStore();
-        open(runtime, liveRef, liveStore, liveStore.getExternalData().getWorld(), rootCommand, tab);
+        open(runtime, liveRef, liveStore, liveStore.getExternalData().getWorld(), rootCommand, tab, showManual);
     }
 
     private void openIncident(Ref<EntityStore> ref, Store<EntityStore> store, String index) {
@@ -437,16 +584,30 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
             update();
             return;
         }
-        if (!tab.equals("incidents") && !(openLastAvailable && index.equals("0"))) return;
-        int selected;
-        try {
-            selected = Integer.parseInt(index);
-        } catch (NumberFormatException invalid) {
-            return;
+        String id;
+        if (index.equals("latest")) {
+            if (incidents.isEmpty()) return;
+            id = incidents.getFirst().id();
+        } else {
+            if (!tab.equals("incidents")) return;
+            List<DashboardModel.IncidentRow> rows = DashboardModel.incidentRows(incidents, showManual);
+            int split = index.indexOf(':');
+            if (split < 0 || !index.substring(0, split).equals(DashboardModel.listVersion(rows))) return;
+            int selected;
+            try {
+                selected = Integer.parseInt(index.substring(split + 1));
+            } catch (NumberFormatException invalid) {
+                return;
+            }
+            if (selected < 0 || selected >= Math.min(HyboxDashboardRenderer.ROWS, rows.size())) return;
+            id = rows.get(selected).incident().id();
         }
-        if (selected < 0 || selected >= incidents.size()) return;
-        HyboxIncidentPage.open(runtime, ref, store, store.getExternalData().getWorld(), incidents.get(selected).id(),
-            () -> reopen("incidents"));
+        if (opening) return;
+        opening = true;
+        feedback = "Opening incident...";
+        update();
+        HyboxIncidentPage.open(runtime, ref, store, store.getExternalData().getWorld(), id,
+            () -> reopen("incidents"), this::pageError);
     }
 
     private void trends(Ref<EntityStore> ref, Store<EntityStore> store) {
@@ -455,8 +616,25 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
             update();
             return;
         }
+        if (opening) return;
+        opening = true;
+        feedback = "Opening trends...";
+        update();
         HyboxTrendPage.open(runtime, ref, store, store.getExternalData().getWorld(), 7, trendCommand, settingsCommand, uiCommand,
-            () -> reopen("overview"));
+            () -> reopen("overview"), this::pageError);
+    }
+
+    private void pageError(String message) {
+        onWorld(() -> {
+            opening = false;
+            Ref<EntityStore> liveRef = playerRef.getReference();
+            if (liveRef != null && liveRef.isValid() && active(liveRef, liveRef.getStore())) {
+                feedback = message;
+                update();
+            } else {
+                playerRef.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN, message));
+            }
+        });
     }
 
     private void settings(Ref<EntityStore> ref, Store<EntityStore> store) {
@@ -465,7 +643,8 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
             update();
             return;
         }
-        HyboxSettingsPage.open(runtime, ref, store, store.getExternalData().getWorld(), settingsCommand, () -> reopen("overview"));
+        HyboxSettingsPage.open(runtime, ref, store, store.getExternalData().getWorld(), settingsCommand, () -> reopen("overview"),
+            this::pageError);
     }
 
     private void capture(Ref<EntityStore> ref, Store<EntityStore> store) {
@@ -476,15 +655,12 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
         }
         if (capturing) return;
         capturing = true;
-        completedIncident = null;
-        openLastAvailable = false;
-        feedback = "Capturing incident…";
+        feedback = "Capturing incident...";
         update();
         runtime.captureManual(playerRef).whenComplete((result, failure) -> onWorld(() -> {
             capturing = false;
             Ref<EntityStore> liveRef = playerRef.getReference();
             if (liveRef == null || !liveRef.isValid() || !active(liveRef, liveRef.getStore())) return;
-            completedIncident = failure == null && result.captured() ? result.incidentId().value() : null;
             feedback = DashboardModel.captureFeedback(failure == null ? result
                 : CaptureResult.failed(failure.getClass().getSimpleName()), runtime.incidentDir());
             update();
@@ -499,8 +675,9 @@ final class HyboxDashboardPage extends InteractiveCustomUIPage<HyboxDashboardPag
     }
 
     private void stopRefreshing() {
-        if (refresh != null) {
-            refresh.cancel(false);
+        ScheduledFuture<?> current = refresh;
+        if (current != null) {
+            current.cancel(false);
             refresh = null;
         }
     }

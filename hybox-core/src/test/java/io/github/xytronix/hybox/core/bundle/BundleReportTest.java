@@ -1,5 +1,6 @@
 package io.github.xytronix.hybox.core.bundle;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +15,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import io.github.xytronix.hybox.core.env.TextRedactor;
@@ -44,13 +47,14 @@ class BundleReportTest {
             assertTrue(html.contains("20260111-020000.000Z-abcdef"));
             assertTrue(html.contains("DEGRADED"));
             assertTrue(html.contains("world-one"));
-            assertTrue(html.contains("2026-01-11T02:00:00Z"));
+            assertTrue(html.contains("2026-01-11 02:00:00 UTC"));
 
             assertTrue(html.contains("Quote &quot;here&quot;"));
-            assertTrue(html.contains("C:\\temp\\file<br>Line two"));
+            assertTrue(html.contains("temp\\file<br>Line two"));
 
             assertFalse(html.contains("<script src="));
-            assertFalse(html.contains("<link"));
+            assertFalse(html.matches("(?s).*<link(?![^>]*href=\"data:).*"));
+            assertTrue(html.contains("<link rel=\"icon\" href=\"data:image/svg+xml,"));
             assertFalse(html.contains("src=\"http"));
         }
     }
@@ -68,10 +72,10 @@ class BundleReportTest {
             String html = new String(zip.getInputStream(zip.getEntry("report.html")).readAllBytes(),
                 StandardCharsets.UTF_8);
             String markup = html.substring(0, html.indexOf("<script>"));
-            assertTrue(markup.contains("JFR recording unavailable: "));
+            assertTrue(markup.contains("This bundle has no usable recording: "));
             assertTrue(markup.contains("empty, unreadable, or contains no usable events"));
             assertTrue(markup.contains("Quote &quot;here&quot;"));
-            assertTrue(markup.contains("C:\\temp\\file<br>Line two"));
+            assertTrue(markup.contains("temp\\file<br>Line two"));
             assertTrue(markup.contains("world-one"));
             assertTrue(markup.contains("20260111-020000.000Z-abcdef"));
         }
@@ -111,6 +115,50 @@ class BundleReportTest {
     }
 
     @Test
+    void redactsAddressesInReportDataButKeepsTemplateSvgPaths(@TempDir Path tempDir) throws Exception {
+        Path recording = tempDir.resolve("recording.jfr");
+        Files.write(recording, new byte[] {1, 2, 3});
+        String template;
+        try (var in = BundleReportTest.class.getResourceAsStream(
+            "/io/github/xytronix/hybox/core/report/report-template.html")) {
+            assertNotNull(in);
+            template = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        Pattern ipv4 = Pattern.compile("(?<!\\d)(?:\\d{1,3}\\.){3}\\d{1,3}(?!\\d)");
+        Matcher paths = Pattern.compile("<path d=\"([^\"]+)\"").matcher(template);
+        String svgPath = null;
+        while (svgPath == null && paths.find()) {
+            if (ipv4.matcher(paths.group(1)).find()) {
+                svgPath = paths.group(1);
+            }
+        }
+        assertNotNull(svgPath, "the template should have an SVG path with an address-like number run");
+
+        Clock clock = Clock.fixed(Instant.parse("2026-01-11T02:00:00Z"), ZoneOffset.UTC);
+        IncidentMetadata meta = new IncidentMetadata(
+            new IncidentId("20260111-020000.000Z-abcdef"),
+            clock.instant(),
+            Severity.DEGRADED,
+            "Client 203.0.113.7 timed out",
+            "world-one",
+            "Stall while 203.0.113.7 was connected"
+        );
+        IncidentReport report = new IncidentReport(meta, Map.of("Remote", "203.0.113.7:5520"));
+
+        Path outputZip = tempDir.resolve("incident.zip");
+        new BundleBuilder(clock, System.getLogger("bundle-test"), new TextRedactor(List.of(TextRedactor.IPV4)))
+            .build(report, recording, outputZip, List.of());
+
+        try (ZipFile zip = new ZipFile(outputZip.toFile())) {
+            String html = new String(zip.getInputStream(zip.getEntry("report.html")).readAllBytes(),
+                StandardCharsets.UTF_8);
+            assertFalse(html.contains("203.0.113.7"), "the real address should be masked");
+            assertTrue(html.contains("[REDACTED]"), "the report should contain the redaction marker");
+            assertTrue(html.contains("<path d=\"" + svgPath + "\""), "the template SVG path should be intact");
+        }
+    }
+
+    @Test
     void masksTextArtifactsIncludingExtras(@TempDir Path tempDir) throws Exception {
         Path recording = tempDir.resolve("recording.jfr");
         Files.write(recording, new byte[] {1, 2, 3});
@@ -141,14 +189,34 @@ class BundleReportTest {
         }
     }
 
+    @Test
+    void headerShowsTheSizeOfTheWholeZip(@TempDir Path tempDir) throws Exception {
+        Path recording = tempDir.resolve("recording.jfr");
+        Files.write(recording, new byte[] {1, 2, 3});
+        Clock clock = Clock.fixed(Instant.parse("2026-01-11T02:00:00Z"), ZoneOffset.UTC);
+        byte[] blob = new byte[3 * 1024 * 1024];
+        new java.util.Random(7).nextBytes(blob);
+        Path outputZip = tempDir.resolve("incident.zip");
+        new BundleBuilder(clock).build(reportWithEscapes(clock), recording, outputZip,
+            List.of(new BundleAttachment("extras/capture.bin", blob)));
+
+        try (ZipFile zip = new ZipFile(outputZip.toFile())) {
+            String html = new String(zip.getInputStream(zip.getEntry("report.html")).readAllBytes(),
+                StandardCharsets.UTF_8);
+            Matcher shown = Pattern.compile("Bundle <b>([0-9.]+) MiB</b>").matcher(html);
+            assertTrue(shown.find(), "header should show the bundle size");
+            assertEquals(Files.size(outputZip) / (1024.0 * 1024), Double.parseDouble(shown.group(1)), 0.06);
+        }
+    }
+
     private static IncidentReport reportWithEscapes(Clock clock) {
         IncidentMetadata meta = new IncidentMetadata(
             new IncidentId("20260111-020000.000Z-abcdef"),
             clock.instant(),
             Severity.DEGRADED,
-            "Trigger: \"quoted\" and path C:\\temp\\file",
+            "Trigger: \"quoted\" and path temp\\file",
             "world-one",
-            "Quote \"here\" and backslash C:\\temp\\file\nLine two"
+            "Quote \"here\" and backslash temp\\file\nLine two"
         );
         return new IncidentReport(meta);
     }

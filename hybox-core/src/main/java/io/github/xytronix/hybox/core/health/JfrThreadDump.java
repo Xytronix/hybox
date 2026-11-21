@@ -34,7 +34,7 @@ public final class JfrThreadDump {
         } catch (Exception e) {
             return null;
         }
-        return last;
+        return FrameLabels.labelDump(last);
     }
 
     public static DiagnosticSection stuckSection(String dump, Collection<String> frameworkPrefixes) {
@@ -145,7 +145,7 @@ public final class JfrThreadDump {
             entries.put("Waiting on", lock);
         }
         if (blockedIn != null) {
-            entries.put("Blocked in", blockedIn);
+            entries.put(StalledThread.FRAME_KEY, FrameLabels.display(blockedIn));
         }
         StringBuilder stack = new StringBuilder();
         for (String line : block) {

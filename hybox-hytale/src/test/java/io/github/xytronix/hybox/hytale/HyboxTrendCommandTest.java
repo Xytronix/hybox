@@ -37,8 +37,9 @@ class HyboxTrendCommandTest {
             set(runtime, "clock", Clock.fixed(now, ZoneOffset.UTC));
             set(runtime, "dataDir", directory);
             set(runtime, "incidentDir", directory.resolve("incidents"));
+            set(runtime, "worldStats", new HytaleWorldStatsProvider(new PlayerNameMasker()));
             var log = new MetricsLog(directory.resolve("metrics"));
-            log.append(now, MetricsLog.formatRow(now, 12, 20, 4, 1000000, 2000000, 0.4, 25, -1, 2), 30);
+            log.append(now, MetricsLog.formatRow(now, 12, 20, 4, 1000000, 2000000, 0.4, 25, -1, 2, MetricsLog.Load.NONE), 30);
             var command = new HyboxCommand(runtime).getSubCommand("trend");
             List<Message> messages = new ArrayList<>();
             var sender = new Sender(messages);
@@ -48,7 +49,8 @@ class HyboxTrendCommandTest {
             Path html = directory.resolve("trend-report.html");
             assertTrue(Files.readString(html).contains("Hybox Health Trends · 7d"));
             assertEquals(1, messages.size());
-            assertTrue(plain(messages.getFirst()).contains("Trend (7d) · " + html));
+            assertTrue(plain(messages.getFirst()).contains("Trend for 7 days saved: " + html));
+            assertFalse(plain(messages.getFirst()).replace(html.toString(), "").toLowerCase(java.util.Locale.ROOT).contains("report"));
         } finally {
             worker.shutdownNow();
         }

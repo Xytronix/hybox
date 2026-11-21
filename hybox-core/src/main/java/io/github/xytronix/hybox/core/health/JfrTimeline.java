@@ -7,6 +7,8 @@ import java.util.Map;
 
 public final class JfrTimeline {
     public static final int BUCKETS = 240;
+    public static final String CAPTURE_MOD = "Hybox, this capture";
+    public static final long LOCK_WAIT_MS = 500;
 
     public record GcStats(long collections, double maxPauseMs, double totalPauseMs) {}
 
@@ -17,16 +19,18 @@ public final class JfrTimeline {
 
     public record CpuInfo(String brand, long sockets, long cores, long hwThreads) {}
 
-    public record HotMethod(String method, long samples, List<String> callers) {}
+    public record JvmInfo(String name, String release, String arch) {}
+
+    public record HotMethod(String method, long samples, List<String> callers, List<String> callerLabels) {}
 
     public record Alloc(long totalBytes, Map<String, Long> bySubsystem, Map<String, Long> byThread,
-                        Map<String, Long> byClass, Map<String, Long> byMod, List<WorldAlloc> byWorld) {}
+                        Map<String, Long> byClass, Map<String, ModShare> byMod, List<WorldAlloc> byWorld, long samples) {}
 
-    public record WorldCpu(String world, long samples, Map<String, Long> subsystems, Map<String, Long> mods) {}
+    public record WorldCpu(String world, long samples, Map<String, Long> subsystems, Map<String, ModShare> mods) {}
 
-    public record WorldAlloc(String world, long bytes, Map<String, Long> bySubsystem, Map<String, Long> byMod) {}
+    public record WorldAlloc(String world, long bytes, Map<String, Long> bySubsystem, Map<String, ModShare> byMod) {}
 
-    public record WorldTicks(double[] tps, double[] mspt) {}
+    public record WorldTicks(double[] tps, double[] mspt, double[] worst) {}
 
     public record ExplicitGc(String caller, long count) {}
 
@@ -37,9 +41,20 @@ public final class JfrTimeline {
     public record ConnEvent(long timeMs, String player, String phase, String detail) {}
 
     public record PluginMetric(String name, String kind, double[] series, double[] amounts, double bucketSeconds, int events,
-                               double total, double cumulative, String uncharted) {}
+                               double total, double cumulative, String uncharted, String mod) {}
 
-    public record Retained(String className, long count, String allocSite) {}
+    public record ModAction(long timeMs, String mod, String category, String message) {}
+
+    public record ModSettings(String mod, Map<String, String> values) {}
+
+    public record Retained(String className, long count, String allocSite, String allocMod, RetainedChain chain) {}
+
+    public record RetainedChain(List<Holder> holders, String rootDescription, String rootSystem, String rootType,
+                                String mod, long samples, long withPath) {}
+
+    public record Holder(String type, String field, boolean array, boolean isStatic, int skip, String mod) {}
+
+    public record IncidentMarker(long timeMs, String id, String severity, String headline) {}
 
     public record SystemTick(String name, double[] series) {}
 
@@ -52,17 +67,33 @@ public final class JfrTimeline {
 
     public record GcCause(String cause, long count, double totalPauseMs) {}
 
-    public record Flame(String name, long samples, List<Flame> children, int owner) {}
+    public record GcPause(long startMs, long endMs, double pauseMs, String cause) {}
+
+    public record Swap(long inBytes, long outBytes, long growthBytes) {}
+
+    public record Flame(String name, long samples, List<Flame> children, int owner, String label) {}
 
     public record ThreadLane(String name, int[] states) {}
 
     public record ThreadShare(String thread, long samples) {}
 
-    public record ModCpu(String id, long samples, String method, List<ThreadShare> threads) {}
+    public record ModCpu(String id, long samples, String method, List<ThreadShare> threads,
+                         long self, long total, String selfMethod, List<ThreadShare> selfThreads, String totalMethod) {}
+
+    public record ModShare(long samples, long self, long total) {}
 
     public record NetIface(String iface, double inAvg, double inPeak, double outAvg, double outPeak) {}
 
-    private final int buckets;
+    public record SliceFrame(String method, String mod) {}
+
+    public record Slices(double seconds, int minSamples, List<SliceFrame> frames, List<String> threads,
+                         int[][] buckets) {}
+
+    public record LockWait(String thread, String group, String lock, boolean monitor, long startMs, long endMs,
+                           String frame, String mod, String owner) {
+        public long durationMs() { return endMs - startMs; }
+    }
+
     private final Instant start;
     private final Instant end;
     private final long totalSamples;
@@ -76,6 +107,7 @@ public final class JfrTimeline {
     private final double[] netOutSeries;
     private final long[] threadSeries;
     private final double[] gcPauseSeries;
+    private final double[] gcTimeSeries;
     private final GcStats gc;
     private final GcConfig gcConfig;
     private final List<ExplicitGc> explicitGcs;
@@ -96,6 +128,7 @@ public final class JfrTimeline {
     private final long[] explicitGcTimes;
     private final String jvmArgs;
     private final String javaArgs;
+    private final JvmInfo jvmInfo;
     private final Container container;
     private final double[] pingSeries;
     private final List<PluginEvent> pluginEvents;
@@ -118,6 +151,7 @@ public final class JfrTimeline {
     private final double[] diskReadSeries;
     private final double[] diskWriteSeries;
     private final List<SlowIo> slowIo;
+    private final long slowIoThresholdMs;
     private final double[] entitiesSeries;
     private final double[] chunksSeries;
     private final Map<String, long[]> chunkChurnByWorld;
@@ -128,17 +162,27 @@ public final class JfrTimeline {
     private final long swapFree;
     private final long swapTotal;
     private final List<NetIface> netOthers;
+    private final List<ModAction> modActions;
+    private final List<ModSettings> modSettings;
+    private final Map<String, Integer> threadGroupSizes;
+    private final Slices slices;
+    private final List<GcPause> gcPauses;
+    private final Swap swap;
+    private final List<LockWait> lockWaits;
+    private final List<IncidentMarker> incidentMarkers;
+    private final JfrSamples samples;
+    private final long[] postGcHeap;
 
-    JfrTimeline(int buckets, Instant start, Instant end, long totalSamples, CpuStats cpu,
+    JfrTimeline(Instant start, Instant end, long totalSamples, CpuStats cpu,
                 double[] cpuMachineSeries, double[] cpuJvmSeries, long[] heapSeries, long[] rssSeries,
                 String netInterface, double[] netInSeries, double[] netOutSeries, long[] threadSeries,
-                double[] gcPauseSeries, GcStats gc, GcConfig gcConfig, List<ExplicitGc> explicitGcs,
+                double[] gcPauseSeries, double[] gcTimeSeries, GcStats gc, GcConfig gcConfig, List<ExplicitGc> explicitGcs,
                 long nmtCommitted, CpuInfo cpuInfo, Map<String, String> sysProps, long heapMax,
                 List<HotMethod> hotMethods, Map<String, Long> worldSamples, Map<String, Long> subsystems,
                 List<WorldCpu> cpuByWorld,
                 Map<String, String> threadStates, Map<String, WorldTicks> ticks, double[] playersSeries,
                 String osName, Alloc alloc, double[] exceptionsSeries,
-                long[] explicitGcTimes, String jvmArgs, String javaArgs,
+                long[] explicitGcTimes, String jvmArgs, String javaArgs, JvmInfo jvmInfo,
                 Container container, double[] pingSeries, List<PluginEvent> pluginEvents,
                 List<ConnEvent> connEvents,
                 double[] connectsSeries, double[] joinsSeries, double[] leavesSeries,
@@ -146,14 +190,15 @@ public final class JfrTimeline {
                 List<SystemTick> tickSeries, List<GcCause> gcCauses, int[] gcOverlapBuckets,
                 Flame flame, List<ThreadLane> threadTimeline, List<ModCpu> cpuByMod,
                 long[] diskFreeSeries, long diskTotal,
-                double[] diskReadSeries, double[] diskWriteSeries, List<SlowIo> slowIo,
+                double[] diskReadSeries, double[] diskWriteSeries, List<SlowIo> slowIo, long slowIoThresholdMs,
                 double[] entitiesSeries, double[] chunksSeries,
                 Map<String, long[]> chunkChurnByWorld,
                 double[] chunksGeneratedSeries, double[] chunksLoadedSeries,
                 long[] heapCommittedSeries, long[] hostMemSeries,
                 long swapFree, long swapTotal, List<NetIface> netOthers,
-                HostCpu hostCpu, Safepoint safepoint) {
-        this.buckets = buckets;
+                HostCpu hostCpu, Safepoint safepoint, List<ModAction> modActions, List<ModSettings> modSettings,
+                Map<String, Integer> threadGroupSizes, Slices slices, List<GcPause> gcPauses, Swap swap,
+                List<LockWait> lockWaits, List<IncidentMarker> incidentMarkers, JfrSamples samples, long[] postGcHeap) {
         this.start = start;
         this.end = end;
         this.totalSamples = totalSamples;
@@ -167,6 +212,7 @@ public final class JfrTimeline {
         this.netOutSeries = netOutSeries;
         this.threadSeries = threadSeries;
         this.gcPauseSeries = gcPauseSeries;
+        this.gcTimeSeries = gcTimeSeries;
         this.gc = gc;
         this.gcConfig = gcConfig;
         this.explicitGcs = explicitGcs;
@@ -187,6 +233,7 @@ public final class JfrTimeline {
         this.explicitGcTimes = explicitGcTimes;
         this.jvmArgs = jvmArgs;
         this.javaArgs = javaArgs;
+        this.jvmInfo = jvmInfo;
         this.container = container;
         this.pingSeries = pingSeries;
         this.pluginEvents = pluginEvents;
@@ -206,6 +253,7 @@ public final class JfrTimeline {
         this.diskReadSeries = diskReadSeries;
         this.diskWriteSeries = diskWriteSeries;
         this.slowIo = slowIo;
+        this.slowIoThresholdMs = slowIoThresholdMs;
         this.diskTotal = diskTotal;
         this.entitiesSeries = entitiesSeries;
         this.chunksSeries = chunksSeries;
@@ -219,13 +267,26 @@ public final class JfrTimeline {
         this.netOthers = netOthers;
         this.hostCpu = hostCpu;
         this.safepoint = safepoint;
+        this.modActions = modActions;
+        this.modSettings = modSettings;
+        this.threadGroupSizes = threadGroupSizes;
+        this.slices = slices;
+        this.gcPauses = gcPauses;
+        this.swap = swap;
+        this.lockWaits = lockWaits;
+        this.incidentMarkers = incidentMarkers;
+        this.samples = samples;
+        this.postGcHeap = postGcHeap;
     }
 
     public static JfrTimeline parse(Path recording) {
         return JfrTimelineParser.parse(recording);
     }
 
-    public int buckets() { return buckets; }
+    public static boolean isRunLoop(String method) {
+        return JfrModAttribution.entryFrame(method);
+    }
+
     public Instant start() { return start; }
     public Instant end() { return end; }
     public long totalSamples() { return totalSamples; }
@@ -239,6 +300,7 @@ public final class JfrTimeline {
     public double[] netOutSeries() { return netOutSeries; }
     public long[] threadSeries() { return threadSeries; }
     public double[] gcPauseSeries() { return gcPauseSeries; }
+    public double[] gcTimeSeries() { return gcTimeSeries; }
     public GcStats gc() { return gc; }
     public GcConfig gcConfig() { return gcConfig; }
     public List<ExplicitGc> explicitGcs() { return explicitGcs; }
@@ -259,6 +321,7 @@ public final class JfrTimeline {
     public long[] explicitGcTimes() { return explicitGcTimes; }
     public String jvmArgs() { return jvmArgs; }
     public String javaArgs() { return javaArgs; }
+    public JvmInfo jvmInfo() { return jvmInfo; }
     public Container container() { return container; }
     public double[] pingSeries() { return pingSeries; }
     public long[] diskFreeSeries() { return diskFreeSeries; }
@@ -266,6 +329,7 @@ public final class JfrTimeline {
     public double[] diskReadSeries() { return diskReadSeries; }
     public double[] diskWriteSeries() { return diskWriteSeries; }
     public List<SlowIo> slowIo() { return slowIo; }
+    public long slowIoThresholdMs() { return slowIoThresholdMs; }
     public List<PluginEvent> pluginEvents() { return pluginEvents; }
     public List<ConnEvent> connectionEvents() { return connEvents; }
     public double[] connectsSeries() { return connectsSeries; }
@@ -291,4 +355,14 @@ public final class JfrTimeline {
     public long swapFree() { return swapFree; }
     public long swapTotal() { return swapTotal; }
     public List<NetIface> netOthers() { return netOthers; }
+    public List<ModAction> modActions() { return modActions; }
+    public List<ModSettings> modSettings() { return modSettings; }
+    public Map<String, Integer> threadGroupSizes() { return threadGroupSizes; }
+    public Slices slices() { return slices; }
+    public List<GcPause> gcPauses() { return gcPauses; }
+    public Swap swap() { return swap; }
+    public List<LockWait> lockWaits() { return lockWaits; }
+    public List<IncidentMarker> incidentMarkers() { return incidentMarkers; }
+    public JfrSamples samples() { return samples; }
+    public long[] postGcHeap() { return postGcHeap; }
 }

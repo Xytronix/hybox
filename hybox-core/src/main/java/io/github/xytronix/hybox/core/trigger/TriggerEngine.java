@@ -3,14 +3,17 @@ package io.github.xytronix.hybox.core.trigger;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import io.github.xytronix.hybox.core.incident.Severity;
+import io.github.xytronix.hybox.core.text.Units;
 
 /**
  * Applies cooldown and debounce policies to trigger events.
  */
 public final class TriggerEngine {
+    public static final String PROFILE_LEAD_UP = "profile lead-up";
     private final Clock clock;
     private final TriggerPolicy policy;
     private final Map<String, Instant> lastAcceptedByKey = new HashMap<>();
@@ -25,22 +28,23 @@ public final class TriggerEngine {
         Objects.requireNonNull(event, "event");
         Instant now = event.at() == null ? clock.instant() : event.at();
 
-        boolean profileCompletion = event.kind() == TriggerKind.MANUAL && event.attrs().containsKey("profileStartMs");
-        if (!profileCompletion && lastAcceptedAt != null && !policy.cooldownExemptKinds().contains(event.kind())) {
+        boolean profileCapture = event.kind() == TriggerKind.MANUAL && (event.attrs().containsKey("profileStartMs")
+            || PROFILE_LEAD_UP.equals(event.attrs().get("reason")));
+        if (!profileCapture && lastAcceptedAt != null && !policy.cooldownExemptKinds().contains(event.kind())) {
             Instant cooldownUntil = lastAcceptedAt.plus(policy.cooldown());
             if (now.isBefore(cooldownUntil)) {
                 return new TriggerResult(TriggerDecision.COOLDOWN, Severity.INFO,
-                    "Rejected: cooldown active");
+                    "Capture skipped. Another capture ran less than " + Units.elapsed(policy.cooldown().toMillis()) + " ago.");
             }
         }
 
         String key = event.kind() + "|" + event.scope();
         Instant lastForKey = lastAcceptedByKey.get(key);
-        if (!profileCompletion && lastForKey != null) {
+        if (!profileCapture && lastForKey != null) {
             Instant debounceUntil = lastForKey.plus(policy.debounce());
             if (now.isBefore(debounceUntil)) {
                 return new TriggerResult(TriggerDecision.DEBOUNCE, Severity.INFO,
-                    "Rejected: debounce active");
+                    "Capture skipped. The same trigger fired less than " + Units.elapsed(policy.debounce().toMillis()) + " ago.");
             }
         }
 
@@ -48,6 +52,10 @@ public final class TriggerEngine {
         lastAcceptedAt = lastAcceptedAt != null && lastAcceptedAt.isAfter(now) ? lastAcceptedAt : now;
         lastAcceptedByKey.merge(key, now, (previous, current) -> previous.isAfter(current) ? previous : current);
         return accepted;
+    }
+
+    public TriggerResult describe(TriggerEvent event) {
+        return decideAccepted(Objects.requireNonNull(event, "event"));
     }
 
     private TriggerResult decideAccepted(TriggerEvent event) {
@@ -66,68 +74,75 @@ public final class TriggerEngine {
             } else if (stallMs >= policy.stallDegradedMs()) {
                 severity = Severity.DEGRADED;
             }
-            String headline = "Heartbeat stalled " + event.scope() + " (" + stallMs + "ms)";
+            String headline = "World " + event.scope() + " stopped responding for " + Units.elapsed(stallMs)
+                + ("true".equals(event.attrs().get("frozen")) ? " and was still frozen when the bundle was saved" : "");
             return new TriggerResult(TriggerDecision.ACCEPT, severity, headline);
         }
         if (event.kind() == TriggerKind.WORLD_FAILURE) {
             String error = event.attrs().get("error");
             String headline = error == null || error.isBlank()
-                ? "World failed " + event.scope()
-                : "World failed " + event.scope() + ": " + error;
+                ? "World " + event.scope() + " failed"
+                : "World " + event.scope() + " failed: " + error;
             return new TriggerResult(TriggerDecision.ACCEPT, Severity.CRITICAL, headline);
         }
         if (event.kind() == TriggerKind.TICK_DEGRADED) {
             long tickAvgMs = parseLong(event.attrs().get("tickAvgMs"));
+            long targetTps = parseLong(event.attrs().get("targetTps"));
+            double target = targetTps > 0 ? targetTps : TriggerPolicy.DEFAULT_TARGET_TPS;
             Severity severity = Severity.INFO;
-            if (tickAvgMs >= policy.tickAvgCriticalMs()) {
+            if (tickAvgMs >= policy.tickCriticalMs(target)) {
                 severity = Severity.CRITICAL;
-            } else if (tickAvgMs >= policy.tickAvgDegradedMs()) {
+            } else if (tickAvgMs >= policy.tickDegradedMs(target)) {
                 severity = Severity.DEGRADED;
             }
-            String headline = "Tick average degraded " + event.scope() + " (" + tickAvgMs + "ms)";
+            String headline = "World " + event.scope() + " is slow: " + tickAvgMs + " ms per tick";
             return new TriggerResult(TriggerDecision.ACCEPT, severity, headline);
         }
         if (event.kind() == TriggerKind.DEADLOCK) {
             long threads = parseLong(event.attrs().get("threads"));
             return new TriggerResult(TriggerDecision.ACCEPT, Severity.CRITICAL,
-                "Deadlock detected (" + threads + " threads)");
+                Units.count(threads, "thread") + (threads == 1 ? " is" : " are") + " deadlocked");
         }
         if (event.kind() == TriggerKind.HEAP_PRESSURE) {
             long usedPct = parseLong(event.attrs().get("usedPct"));
             Severity severity = usedPct >= HEAP_CRITICAL_PCT ? Severity.CRITICAL : Severity.DEGRADED;
             return new TriggerResult(TriggerDecision.ACCEPT, severity,
-                "Heap pressure sustained (" + usedPct + "% after GC)");
+                "Heap " + usedPct + "% full after GC");
         }
         if (event.kind() == TriggerKind.GC_PRESSURE) {
             long gcPct = parseLong(event.attrs().get("gcPct"));
             return new TriggerResult(TriggerDecision.ACCEPT, Severity.DEGRADED,
-                "GC pressure (" + gcPct + "% of wall time in GC)");
+                gcPct + "% of the time spent in GC pauses");
         }
         if (event.kind() == TriggerKind.CPU_SATURATION) {
             long cpuPct = parseLong(event.attrs().get("cpuPct"));
             return new TriggerResult(TriggerDecision.ACCEPT, Severity.DEGRADED,
-                "Process CPU saturated (" + cpuPct + "% sustained)");
+                "Server CPU at " + cpuPct + "%");
         }
         if (event.kind() == TriggerKind.NET_SATURATION) {
-            String direction = event.attrs().getOrDefault("direction", "?");
+            String direction = event.attrs().get("direction");
             long mbps = parseLong(event.attrs().get("mbps"));
+            String traffic = "in".equals(direction) ? "Inbound traffic" : "out".equals(direction)
+                ? "Outbound traffic" : "Network traffic";
             return new TriggerResult(TriggerDecision.ACCEPT, Severity.DEGRADED,
-                "Network " + direction + "bound traffic sustained " + mbps + " Mbit/s");
+                traffic + " at " + mbps + " Mbit/s");
         }
         if (event.kind() == TriggerKind.PLAYER_DROP) {
             long before = parseLong(event.attrs().get("before"));
             long after = parseLong(event.attrs().get("after"));
             return new TriggerResult(TriggerDecision.ACCEPT, Severity.DEGRADED,
-                "Player count dropped " + before + " to " + after);
+                "Players dropped from " + before + " to " + after);
         }
         if (event.kind() == TriggerKind.LOG_ERROR) {
             String error = event.attrs().get("error");
             String headline = error == null || error.isBlank()
-                ? "Server error logged (" + event.scope() + ")"
+                ? "Server error logged"
                 : "Server error: " + error;
             return new TriggerResult(TriggerDecision.ACCEPT, Severity.DEGRADED, headline);
         }
-        return new TriggerResult(TriggerDecision.ACCEPT, Severity.INFO, "Capture triggered");
+        String kind = event.kind().name().replace('_', ' ').toLowerCase(Locale.ROOT);
+        return new TriggerResult(TriggerDecision.ACCEPT, Severity.INFO,
+            Character.toUpperCase(kind.charAt(0)) + kind.substring(1));
     }
 
     private static final long HEAP_CRITICAL_PCT = 97;

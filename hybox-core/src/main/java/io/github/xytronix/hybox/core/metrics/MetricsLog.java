@@ -18,7 +18,13 @@ import java.util.stream.Stream;
 public final class MetricsLog {
 
     public static final String HEADER =
-        "timestamp,tickAvgMs,tps,players,heapUsedBytes,rssBytes,gcPct,cpuPct,allocMbPerSec,queuedPackets";
+        "timestamp,tickAvgMs,tps,players,heapUsedBytes,rssBytes,gcPct,cpuPct,allocMbPerSec,queuedPackets,"
+            + "targetTps,maxViewRadius,viewRadiusMedian,hotRadiusMedian,loadedSections";
+
+    public record Load(double targetTps, int maxViewRadius, double viewRadiusMedian, double hotRadiusMedian,
+                       long loadedSections) {
+        public static final Load NONE = new Load(-1, -1, -1, -1, -1);
+    }
 
     private static final DateTimeFormatter DAY =
         DateTimeFormatter.ofPattern("yyyyMMdd", Locale.ROOT).withZone(ZoneOffset.UTC);
@@ -33,7 +39,8 @@ public final class MetricsLog {
 
     public static String formatRow(Instant when, double tickAvgMs, double tps, int players,
                                    long heapUsedBytes, long rssBytes, double gcPct,
-                                   double cpuPct, double allocMbPerSec, long queuedPackets) {
+                                   double cpuPct, double allocMbPerSec, long queuedPackets, Load load) {
+        Load extra = load == null ? Load.NONE : load;
         return when.toString()
             + "," + number(tickAvgMs)
             + "," + number(tps)
@@ -43,7 +50,12 @@ public final class MetricsLog {
             + "," + number(gcPct)
             + "," + number(cpuPct)
             + "," + number(allocMbPerSec)
-            + "," + (queuedPackets < 0 ? "" : Long.toString(queuedPackets));
+            + "," + (queuedPackets < 0 ? "" : Long.toString(queuedPackets))
+            + "," + number(extra.targetTps())
+            + "," + (extra.maxViewRadius() < 0 ? "" : Integer.toString(extra.maxViewRadius()))
+            + "," + number(extra.viewRadiusMedian())
+            + "," + number(extra.hotRadiusMedian())
+            + "," + (extra.loadedSections() < 0 ? "" : Long.toString(extra.loadedSections()));
     }
 
     public void append(Instant when, String row, int retentionDays) throws IOException {
@@ -64,13 +76,14 @@ public final class MetricsLog {
             return Trend.EMPTY;
         }
         long cutoff = now.minus(Duration.ofDays(days)).toEpochMilli();
+        String firstFile = PREFIX + DAY.format(Instant.ofEpochMilli(cutoff)) + SUFFIX;
         List<double[]> rows = new ArrayList<>();
         try (Stream<Path> entries = Files.list(dir)) {
             List<Path> files = entries
                 .filter(Files::isRegularFile)
                 .filter(p -> {
                     String name = p.getFileName().toString();
-                    return name.startsWith(PREFIX) && name.endsWith(SUFFIX);
+                    return name.startsWith(PREFIX) && name.endsWith(SUFFIX) && name.compareTo(firstFile) >= 0;
                 })
                 .sorted()
                 .toList();
@@ -100,6 +113,11 @@ public final class MetricsLog {
         double[] cpuPct = new double[n];
         double[] allocMbPerSec = new double[n];
         double[] queuedPackets = new double[n];
+        double[] targetTps = new double[n];
+        double[] maxViewRadius = new double[n];
+        double[] viewRadius = new double[n];
+        double[] hotRadius = new double[n];
+        double[] loadedSections = new double[n];
         for (int i = 0; i < n; i++) {
             double[] r = rows.get(i);
             timestamps[i] = (long) r[0];
@@ -112,8 +130,14 @@ public final class MetricsLog {
             cpuPct[i] = r[7];
             allocMbPerSec[i] = r[8];
             queuedPackets[i] = r[9];
+            targetTps[i] = r[10];
+            maxViewRadius[i] = r[11];
+            viewRadius[i] = r[12];
+            hotRadius[i] = r[13];
+            loadedSections[i] = r[14];
         }
-        return new Trend(timestamps, tickAvgMs, tps, players, heapBytes, rssBytes, gcPct, cpuPct, allocMbPerSec, queuedPackets);
+        return new Trend(timestamps, tickAvgMs, tps, players, heapBytes, rssBytes, gcPct, cpuPct, allocMbPerSec,
+            queuedPackets, targetTps, maxViewRadius, viewRadius, hotRadius, loadedSections);
     }
 
     private static double[] parseRow(String line) {
@@ -128,7 +152,7 @@ public final class MetricsLog {
             return null;
         }
         return new double[]{ts, num(c, 1), num(c, 2), num(c, 3), num(c, 4), num(c, 5), num(c, 6),
-            num(c, 7), num(c, 8), num(c, 9)};
+            num(c, 7), num(c, 8), num(c, 9), num(c, 10), num(c, 11), num(c, 12), num(c, 13), num(c, 14)};
     }
 
     private static double num(String[] cols, int idx) {
@@ -148,10 +172,12 @@ public final class MetricsLog {
 
     public record Trend(long[] timestamps, double[] tickAvgMs, double[] tps, double[] players,
                         double[] heapBytes, double[] rssBytes, double[] gcPct,
-                        double[] cpuPct, double[] allocMbPerSec, double[] queuedPackets) {
+                        double[] cpuPct, double[] allocMbPerSec, double[] queuedPackets,
+                        double[] targetTps, double[] maxViewRadius, double[] viewRadiusMedian,
+                        double[] hotRadiusMedian, double[] loadedSections) {
         public static final Trend EMPTY = new Trend(new long[0], new double[0], new double[0],
             new double[0], new double[0], new double[0], new double[0], new double[0], new double[0],
-            new double[0]);
+            new double[0], new double[0], new double[0], new double[0], new double[0], new double[0]);
 
         public boolean isEmpty() {
             return timestamps.length == 0;

@@ -145,6 +145,13 @@ class HytaleHeartbeatPumpTest {
         assertEquals(Thread.currentThread().threadId(), registry.lastBeatThreadId("instance"));
     }
 
+    @Test
+    void beatPeriodStaysWellBelowTheStallThreshold() {
+        assertEquals(250, HytaleHealthScheduler.beatPeriodMillis(2_000));
+        assertEquals(125, HytaleHealthScheduler.beatPeriodMillis(500));
+        assertEquals(50, HytaleHealthScheduler.beatPeriodMillis(100));
+    }
+
     static class ImmediateWorld extends World {
         ImmediateWorld() {
             super(null, null, null);

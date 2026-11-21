@@ -39,6 +39,24 @@ class JfrRepositoryTest {
     }
 
     @Test
+    void sessionDirForPid_usesTheActiveRepositoryUnderTheBase(@TempDir Path dir) throws Exception {
+        Files.createDirectory(dir.resolve("2026_11_19_18_12_33_4242"));
+        Path active = Files.createDirectory(dir.resolve("2026_11_19_18_12_30_4242"));
+        assertEquals(active, JfrRepository.sessionDirForPid(dir, 4242, "/private" + active).orElseThrow());
+    }
+
+    @Test
+    void sessionDirForPid_scansTheBaseWhenTheActiveRepositoryDoesNotMatch(@TempDir Path dir) throws Exception {
+        Files.createDirectory(dir.resolve("2026_11_19_18_12_30_4242"));
+        Path latest = Files.createDirectory(dir.resolve("2026_11_19_18_12_33_4242"));
+        Files.createDirectory(dir.resolve("2026_11_19_18_12_40_14242"));
+        Files.writeString(dir.resolve("2026_11_19_18_12_50_4242"), "x");
+        assertEquals(latest, JfrRepository.sessionDirForPid(dir, 4242, null).orElseThrow());
+        assertEquals(latest, JfrRepository.sessionDirForPid(dir, 4242, "/elsewhere/2026_11_19_18_12_40_999").orElseThrow());
+        assertEquals(latest, JfrRepository.sessionDirForPid(dir, 4242, "/elsewhere/2026_11_19_18_12_59_4242").orElseThrow());
+    }
+
+    @Test
     void chunkFiles_returnsSortedJfrFilesOnly(@TempDir Path dir) throws Exception {
         Files.writeString(dir.resolve("2.jfr"), "b");
         Files.writeString(dir.resolve("1.jfr"), "a");

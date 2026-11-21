@@ -1,0 +1,5 @@
+$H = "HyboxTones.ui";
+Label {
+  Anchor: (Left: 0, Top: 0, Width: 56, Height: 12);
+  Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: End);
+}

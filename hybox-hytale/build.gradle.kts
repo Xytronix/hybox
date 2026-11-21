@@ -12,16 +12,24 @@ plugins {
 
 val hytaleServerVersion = providers
     .gradleProperty("hytaleServerVersion")
+val hytaleServerRange = providers
+    .gradleProperty("hytaleServerRange")
 
 repositories {
     mavenCentral()
     maven("https://maven.hytale.com/release")
     maven("https://maven.hytale.com/pre-release")
+    maven("https://repo.extendedclip.com/releases") {
+        content { includeGroup("at.helpch") }
+    }
 }
 
 dependencies {
     compileOnly("com.hypixel.hytale:Server:${hytaleServerVersion.get()}")
     implementation(project(":hybox-core"))
+    compileOnly("at.helpch:placeholderapi-hytale:1.0.8") {
+        isTransitive = false
+    }
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("com.hypixel.hytale:Server:${hytaleServerVersion.get()}")
@@ -30,9 +38,9 @@ dependencies {
 
 tasks.named<ProcessResources>("processResources") {
     inputs.property("pluginVersion", rootProject.version.toString())
-    inputs.property("hytaleVersion", hytaleServerVersion)
+    inputs.property("hytaleServerRange", hytaleServerRange)
     filesMatching("manifest.json") {
-        expand(mapOf("version" to rootProject.version.toString(), "hytaleVersion" to hytaleServerVersion.get()))
+        expand(mapOf("version" to rootProject.version.toString(), "hytaleServerRange" to hytaleServerRange.get()))
     }
 }
 

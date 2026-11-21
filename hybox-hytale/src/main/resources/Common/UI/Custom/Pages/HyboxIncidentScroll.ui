@@ -1,0 +1,8 @@
+$C = "../Common.ui";
+Group #SectionScroll {
+  FlexWeight: 1;
+  LayoutMode: TopScrolling;
+  ScrollbarStyle: $C.@DefaultScrollbarStyle;
+  Group #Tiles { LayoutMode: LeftWrap; }
+  Group #SectionBody { LayoutMode: Top; }
+}

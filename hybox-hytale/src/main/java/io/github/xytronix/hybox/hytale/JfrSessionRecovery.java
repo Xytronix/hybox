@@ -128,7 +128,8 @@ final class JfrSessionRecovery {
 
     private void locateCurrentSession() {
         try {
-            currentSessionDir = JfrRepository.sessionDirForPid(repositoryBase, ProcessHandle.current().pid()).orElse(null);
+            currentSessionDir = JfrRepository.sessionDirForPid(repositoryBase, ProcessHandle.current().pid(),
+                System.getProperty("jdk.jfr.repository")).orElse(null);
         } catch (Exception e) {
             logger.log(System.Logger.Level.WARNING, "Failed to locate the active JFR repository.", e);
         }

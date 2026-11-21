@@ -7,6 +7,10 @@ public interface PostIncidentWaiter {
 
     void awaitResolution(TriggerEvent event);
 
+    default TriggerEvent settle(TriggerEvent event) {
+        return event;
+    }
+
     static PostIncidentWaiter none() {
         return event -> { };
     }

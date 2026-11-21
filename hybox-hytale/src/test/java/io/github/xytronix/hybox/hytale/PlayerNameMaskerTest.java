@@ -114,4 +114,69 @@ class PlayerNameMaskerTest {
         assertEquals("unknown", masker.maskName(null));
         assertEquals("unknown", masker.maskName("  "));
     }
+
+    @Test
+    void masksNamesInAnyCaseAndInsideWorldAndFileNames() {
+        PlayerNameMasker masker = new PlayerNameMasker();
+        String token = masker.maskName("Steve");
+
+        assertEquals(token + " " + token + " " + token, masker.maskText("steve STEVE Steve"));
+        assertEquals(token + "_home world, island_" + token + ", Steve2",
+            masker.maskText("Steve_home world, island_Steve, Steve2"));
+    }
+
+    @Test
+    void aShortNameDoesNotEatALongerNameOrDigits() {
+        PlayerNameMasker masker = new PlayerNameMasker();
+        String bob = masker.maskName("Bob");
+
+        assertEquals("Bob123 met " + bob, masker.maskText("Bob123 met Bob"));
+        String bob123 = masker.maskName("Bob123");
+        String bobSmith = masker.maskName("Bob_Smith");
+
+        assertEquals(bob123 + " met " + bobSmith + " and " + bob, masker.maskText("Bob123 met Bob_Smith and Bob"));
+    }
+
+    @Test
+    void namesThatAreCommonWordsAreMatchedOnlyInTheirOwnCase() {
+        PlayerNameMasker masker = new PlayerNameMasker();
+        String token = masker.maskName("Default");
+
+        assertEquals("{\"severity\":\"INFO\",\"world\":\"default\",\"by\":\"" + token + "\"}",
+            masker.maskText("{\"severity\":\"INFO\",\"world\":\"default\",\"by\":\"Default\"}"));
+    }
+
+    @Test
+    void masksUuidsInUpperCaseAndWithoutDashes() {
+        PlayerNameMasker masker = new PlayerNameMasker();
+        masker.remember("Steve", UUID.fromString("7d15a022-4875-44f5-9f0b-73f1f4ecbdee"));
+        String token = masker.maskName("Steve");
+
+        assertEquals(token + " " + token + " " + token + "_backup", masker.maskText(
+            "7D15A022-4875-44F5-9F0B-73F1F4ECBDEE 7d15a022487544f59f0b73f1f4ecbdee 7d15a022-4875-44f5-9f0b-73f1f4ecbdee_backup"));
+    }
+
+    @Test
+    void neverLearnsTokensOrJsonLiteralsAsNames() {
+        PlayerNameMasker masker = new PlayerNameMasker();
+        masker.learn("player-3");
+        masker.learn("true");
+        masker.learn("null");
+        masker.learn("unknown");
+
+        String text = "{\"ok\":true,\"who\":\"player-3\",\"x\":null}";
+        assertEquals(text, masker.maskText(text));
+        assertEquals("player-?", masker.maskName("true"));
+    }
+
+    @Test
+    void learnsTheOwnerFromAStartCommand() {
+        PlayerNameMasker masker = new PlayerNameMasker();
+        masker.learnFromCommand("java -jar HytaleServer.jar --owner-uuid=bd97e661-1c0e-40c8-8863-b37f97b66447 "
+            + "\"--owner-name=Steve\"");
+        String token = masker.maskName("Steve");
+
+        assertEquals("universe/players/" + token + ".json by " + token,
+            masker.maskText("universe/players/bd97e661-1c0e-40c8-8863-b37f97b66447.json by Steve"));
+    }
 }

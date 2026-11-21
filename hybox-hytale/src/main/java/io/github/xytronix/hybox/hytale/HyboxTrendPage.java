@@ -19,6 +19,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
+import io.github.xytronix.hybox.core.text.Units;
 
 final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageData> {
     private static final System.Logger LOGGER = System.getLogger(HyboxTrendPage.class.getName());
@@ -57,7 +58,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
                 Ref<EntityStore> ref = playerRef.getReference();
                 if (ref != null && ref.isValid() && active(ref, ref.getStore())) sendUpdate(commands, false);
             }
-        }, failure -> LOGGER.log(System.Logger.Level.WARNING, "Chart images unavailable; showing native charts.", failure));
+        }, failure -> LOGGER.log(System.Logger.Level.WARNING, "Chart images failed to render. Charts are shown as bars.", failure));
     }
 
     static CompletableFuture<Void> open(CommandContext context, HyboxRuntime runtime, int days, AbstractCommand rootCommand) {
@@ -69,7 +70,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
         CompletableFuture<Void> result = new CompletableFuture<>();
         world.execute(() -> open(runtime, ref, store, world, days, rootCommand.getSubCommand("trend"),
             rootCommand.getSubCommand("settings"), rootCommand.getSubCommand("ui"),
-            () -> HyboxDashboardPage.open(context, runtime, rootCommand))
+            () -> HyboxDashboardPage.open(context, runtime, rootCommand), null)
             .whenComplete((ignored, failure) -> {
                 if (failure == null) result.complete(null); else result.completeExceptionally(failure);
             }));
@@ -78,7 +79,8 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
 
     static CompletableFuture<Void> open(HyboxRuntime runtime, Ref<EntityStore> ref, Store<EntityStore> store,
                                        World world, int requestedDays, AbstractCommand trendCommand,
-                                       AbstractCommand settingsCommand, AbstractCommand uiCommand, Runnable onBack) {
+                                       AbstractCommand settingsCommand, AbstractCommand uiCommand, Runnable onBack,
+                                       java.util.function.Consumer<String> onError) {
         CompletableFuture<Void> result = new CompletableFuture<>();
         if (!ref.isValid() || ref.getStore() != store) return CompletableFuture.completedFuture(null);
         Player player = store.getComponent(ref, Player.getComponentType());
@@ -108,17 +110,20 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
                 });
             } catch (RuntimeException failure) {
                 world.execute(() -> {
-                    if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN,
-                        "Unable to open trends: " + failure.getMessage()));
+                    failed(ref, playerRef, onError, "Unable to open trends: " + failure.getMessage());
                     result.complete(null);
                 });
             }
         }, () -> world.execute(() -> {
-            if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN,
-                "Hybox worker is busy or stopping; try /hybox trend again."));
+            failed(ref, playerRef, onError, "Hybox is busy. Try again in a moment.");
             result.complete(null);
         }));
         return result;
+    }
+
+    private static void failed(Ref<EntityStore> ref, PlayerRef playerRef, java.util.function.Consumer<String> onError, String message) {
+        if (onError != null) onError.accept(message);
+        else if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN, message));
     }
 
     @Override
@@ -152,7 +157,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
             case "save" -> save(ref, store);
             case "settings" -> {
                 if (model.metricsEnabled() || loading) return;
-                HyboxSettingsPage.open(runtime, ref, store, store.getExternalData().getWorld(), settingsCommand, onBack);
+                HyboxSettingsPage.open(runtime, ref, store, store.getExternalData().getWorld(), settingsCommand, onBack, null);
             }
             default -> { }
         }
@@ -171,7 +176,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
     private void load(Ref<EntityStore> ref, Store<EntityStore> store, int requestedDays) {
         int expected = ++request;
         loading = true;
-        feedback = "Loading health metrics…";
+        feedback = "Loading health metrics...";
         render();
         runtime.submitWorker(() -> {
             try {
@@ -190,7 +195,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
             } catch (RuntimeException failure) {
                 loadFailed(ref, store, expected, "Unable to load trends: " + failure.getMessage());
             }
-        }, () -> loadFailed(ref, store, expected, "Hybox worker is busy or stopping; try /hybox trend again."));
+        }, () -> loadFailed(ref, store, expected, "Hybox is busy. Try again in a moment."));
     }
 
     private void loadFailed(Ref<EntityStore> ref, Store<EntityStore> store, int expected, String message) {
@@ -206,7 +211,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
         if (saving || loading) return;
         saving = true;
         int reportDays = model.days();
-        feedback = "Saving HTML report…";
+        feedback = "Saving the trend as HTML...";
         updateFeedback();
         runtime.submitWorker(() -> {
             String message;
@@ -215,16 +220,16 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
                     message = "Trends require permission to use /hybox trend.";
                 } else {
                     Path out = runtime.generateTrendReport(reportDays);
-                    message = out != null ? "Trend (" + reportDays + "d) · " + HyboxChatFormatter.outputPath(out, true)
-                        : !runtime.config().metricsEnabled() ? "Metrics disabled; set Metrics.Enabled=true to record trends."
-                        : "No health metrics recorded in the last " + reportDays + " day(s).";
+                    message = out != null ? "Trend for " + Units.count(reportDays, "day") + " saved: " + HyboxChatFormatter.outputPath(out, true)
+                        : !runtime.config().metricsEnabled() ? "Trends are off. Turn on Metrics history in /hybox settings."
+                        : "No health metrics recorded in the last " + Units.count(reportDays, "day") + ".";
                 }
             } catch (IOException | RuntimeException failure) {
-                LOGGER.log(System.Logger.Level.WARNING, "Trend report failed.", failure);
-                message = "Trend report failed; see server log.";
+                LOGGER.log(System.Logger.Level.WARNING, "Saving the trend failed.", failure);
+                message = "Saving the trend failed. The server log has the error.";
             }
             saved(ref, store, message);
-        }, () -> saved(ref, store, "Hybox worker is busy or stopping; try /hybox trend again."));
+        }, () -> saved(ref, store, "Hybox is busy. Try again in a moment."));
     }
 
     private void saved(Ref<EntityStore> ref, Store<EntityStore> store, String message) {

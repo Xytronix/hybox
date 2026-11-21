@@ -42,6 +42,7 @@ public final class HealthGauges {
     private volatile String version;
     private volatile Map<String, Double> pluginGauges = Map.of();
     private volatile Map<String, Double> pluginCounters = Map.of();
+    private final ModMetrics modMetrics = new ModMetrics();
 
     public void set(Sample sample) {
         this.sample = Objects.requireNonNull(sample, "sample");
@@ -157,6 +158,10 @@ public final class HealthGauges {
 
     public Map<String, Double> pluginCounters() {
         return pluginCounters;
+    }
+
+    public ModMetrics modMetrics() {
+        return modMetrics;
     }
 
     public void incrementIncident(String trigger, String severity, long epochSeconds) {

@@ -19,6 +19,9 @@ public record TriggerPolicy(
 ) {
     public static final Set<TriggerKind> DEFAULT_COOLDOWN_EXEMPT_KINDS =
         Set.of(TriggerKind.WORLD_FAILURE, TriggerKind.DEADLOCK, TriggerKind.HEARTBEAT_STALL);
+    public static final double TICK_DEGRADED_BUDGET_FACTOR = 3.0;
+    public static final double TICK_CRITICAL_BUDGET_FACTOR = 7.5;
+    public static final double DEFAULT_TARGET_TPS = 30.0;
 
     public TriggerPolicy {
         Objects.requireNonNull(cooldown, "cooldown");
@@ -39,12 +42,28 @@ public record TriggerPolicy(
         if (stallCriticalMs < stallDegradedMs) {
             throw new IllegalArgumentException("stallCriticalMs must be >= stallDegradedMs.");
         }
-        if (tickAvgDegradedMs <= 0 || tickAvgCriticalMs <= 0) {
-            throw new IllegalArgumentException("tick average thresholds must be > 0.");
+        if (tickAvgDegradedMs < 0 || tickAvgCriticalMs < 0) {
+            throw new IllegalArgumentException("tick average thresholds must be >= 0.");
         }
-        if (tickAvgCriticalMs < tickAvgDegradedMs) {
+        if (tickAvgDegradedMs > 0 && tickAvgCriticalMs > 0 && tickAvgCriticalMs < tickAvgDegradedMs) {
             throw new IllegalArgumentException("tickAvgCriticalMs must be >= tickAvgDegradedMs.");
         }
+    }
+
+    public double tickDegradedMs(double targetTps) {
+        return tickAvgDegradedMs > 0 ? tickAvgDegradedMs : budgetMultiple(TICK_DEGRADED_BUDGET_FACTOR, targetTps);
+    }
+
+    public double tickCriticalMs(double targetTps) {
+        double critical = tickAvgCriticalMs > 0
+            ? tickAvgCriticalMs
+            : budgetMultiple(TICK_CRITICAL_BUDGET_FACTOR, targetTps);
+        return Math.max(critical, tickDegradedMs(targetTps));
+    }
+
+    private static double budgetMultiple(double factor, double targetTps) {
+        double tps = Double.isFinite(targetTps) && targetTps > 0 ? targetTps : DEFAULT_TARGET_TPS;
+        return factor * 1000.0 / tps;
     }
 
     public TriggerPolicy(

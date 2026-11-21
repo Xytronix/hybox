@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import io.github.xytronix.hybox.core.incident.DiagnosticSection;
 import io.github.xytronix.hybox.core.trigger.TriggerEvent;
@@ -15,6 +16,31 @@ public final class StalledThread {
     private static final int MAX_FRAMES = 40;
 
     private StalledThread() {
+    }
+
+    public static final String FRAME_KEY = "Blocked in";
+
+    public static String frameVerb(String state) {
+        String key = state == null ? "" : state.trim().toUpperCase(Locale.ROOT);
+        return switch (key) {
+            case "BLOCKED" -> "Blocked in";
+            case "WAITING", "TIMED_WAITING" -> "Waiting in";
+            case "RUNNABLE" -> "Running in";
+            default -> "In";
+        };
+    }
+
+    public static String stateLabel(String state) {
+        String key = state == null ? "" : state.trim().toUpperCase(Locale.ROOT);
+        return switch (key) {
+            case "RUNNABLE" -> "Running";
+            case "BLOCKED" -> "Blocked";
+            case "WAITING" -> "Waiting";
+            case "TIMED_WAITING" -> "Timed waiting";
+            case "NEW" -> "New";
+            case "TERMINATED" -> "Terminated";
+            default -> state;
+        };
     }
 
     public static List<DiagnosticSection> prependTo(List<DiagnosticSection> base, TriggerEvent event,
@@ -95,7 +121,7 @@ public final class StalledThread {
         }
         String suspect = topSuspectFrame(info.getStackTrace(), frameworkPrefixes);
         if (suspect != null) {
-            entries.put("Blocked in", suspect);
+            entries.put(FRAME_KEY, FrameLabels.display(suspect));
         }
         String stallMs = event.attrs().get("stallMs");
         if (stallMs != null) {
@@ -138,7 +164,7 @@ public final class StalledThread {
     private static String renderStack(StackTraceElement[] stack) {
         StringBuilder sb = new StringBuilder();
         for (StackTraceElement frame : stack) {
-            sb.append("at ").append(frame).append('\n');
+            sb.append("at ").append(frame).append(FrameLabels.suffix(frame)).append('\n');
         }
         return sb.toString().stripTrailing();
     }

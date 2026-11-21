@@ -16,8 +16,6 @@ public final class JfrSnapshot {
     }
 
     public static HealthSnapshot parse(Path recording, int hotThreadLimit) {
-        double procLoad = 0;
-        double sysLoad = 0;
         int cores = 0;
         long heapUsed = 0;
         long heapCommitted = 0;
@@ -38,10 +36,6 @@ public final class JfrSnapshot {
                     lastEventMs = Math.max(lastEventMs, e.getEndTime().toEpochMilli());
                 }
                 switch (e.getEventType().getName()) {
-                    case "jdk.CPULoad" -> {
-                        procLoad = getD(e, "jvmUser") + getD(e, "jvmSystem");
-                        sysLoad = getD(e, "machineTotal");
-                    }
                     case "jdk.CPUInformation" -> {
                         int hw = (int) getL(e, "hwThreads");
                         if (hw > 0) {
@@ -90,7 +84,8 @@ public final class JfrSnapshot {
                         String jn = getS(e, "jvmName");
                         String jv = getS(e, "jvmVersion");
                         if (jn != null) {
-                            jvm = jv != null ? jn + " " + firstLine(jv) : jn;
+                            String release = JfrTimelineParser.jvmInfo(jn, jv).release();
+                            jvm = release != null ? jn + " " + release : jv != null ? firstLine(jv) : jn;
                         }
                         long st = getL(e, "jvmStartTime");
                         if (st > 0) {
@@ -114,21 +109,13 @@ public final class JfrSnapshot {
             gcs.add(new HealthSnapshot.Gc(en.getKey(), en.getValue()[0], en.getValue()[1]));
         }
         long uptime = jvmStart > 0 && lastEventMs > jvmStart ? lastEventMs - jvmStart : 0;
-        HealthSnapshot.Cpu cpu = new HealthSnapshot.Cpu(procLoad, sysLoad, cores);
+        HealthSnapshot.Cpu cpu = new HealthSnapshot.Cpu(cores);
         HealthSnapshot.Memory mem = new HealthSnapshot.Memory(heapUsed, heapCommitted, heapMax, nonHeapUsed);
         HealthSnapshot.Sys sys = new HealthSnapshot.Sys(
-            os == null ? "unknown" : os, jvm == null ? "unknown" : jvm, totalRam, uptime);
+            os == null ? "unknown" : os, jvm == null ? "unknown" : jvm, totalRam, uptime, -1);
         HealthSnapshot.Threads threads = new HealthSnapshot.Threads((int) threadsActive, Map.of(), List.of());
         List<HealthSnapshot.HotThread> hot = JfrHotThreads.parse(recording, hotThreadLimit);
-        return new HealthSnapshot(0, cpu, mem, gcs, sys, new HealthSnapshot.Disk(0, 0), threads, List.of(), hot);
-    }
-
-    private static double getD(RecordedObject o, String f) {
-        try {
-            return o.hasField(f) ? o.getDouble(f) : 0;
-        } catch (Exception e) {
-            return 0;
-        }
+        return new HealthSnapshot(0, -1, cpu, mem, gcs, sys, new HealthSnapshot.Disk(0, 0), threads, -1, List.of(), hot);
     }
 
     private static long getL(RecordedObject o, String f) {

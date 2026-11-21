@@ -1,9 +1,10 @@
+$H = "HyboxTones.ui";
 Group {
   LayoutMode: Top;
-  Anchor: (Width: 205, Height: 90, Right: 8, Bottom: 8);
+  Anchor: (Width: 180, Height: 100, Right: 8, Bottom: 8);
   Padding: (Full: 10);
-  Background: #ffffff(0.06);
-  Label #Key { Anchor: (Height: 18); Style: (FontSize: 11, TextColor: #96a9be, RenderUppercase: true); }
-  Label #Value { Anchor: (Height: 29); Style: (FontSize: 23, RenderBold: true, TextColor: #ffffff); }
-  Label #Sub { Anchor: (Height: 22); Style: (FontSize: 10, TextColor: #bfcdd5, Wrap: true); }
+  Background: $H.@Panel;
+  Label #Key { Anchor: (Height: 18); Style: (FontSize: 12, TextColor: $H.@Text3); }
+  Label #Value { Anchor: (Height: 29); Style: (FontSize: 21, RenderBold: true, TextColor: $H.@Text, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 15); }
+  Label #Sub { Anchor: (Height: 32); Style: (FontSize: 10, TextColor: $H.@Text2, Wrap: true); }
 }

@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 $R = "HyboxSettingsRow.ui";
 
 $C.@PageOverlay {}
@@ -7,20 +8,26 @@ $C.@Container {
   Anchor: (Width: 1180, Height: 690);
 
   #Title {
+    Background: $H.@TitleBackground;
     Group {
       LayoutMode: Center;
       Anchor: (Full: 0);
-      $C.@Title { @Text = "Hybox · Settings"; }
+      $C.@Title {
+        @Text = "Hybox settings";
+        Style: (...$C.@TitleStyle, TextColor: $H.@Text, HorizontalAlignment: Center);
+      }
     }
+    Group { Anchor: (Left: 0, Right: 0, Bottom: 0, Height: 1); Background: $H.@Border; }
   }
 
   #Content {
     LayoutMode: Top;
+    Background: $H.@PageBackground;
 
     Label {
-      Text: "Saved to hybox.json and applied immediately. Recording applies after restart. Discord, Prometheus and bundle contents stay file-only.";
+      Text: "Changes save to hybox.json and apply at once. Recording settings need a restart. Discord, Prometheus and bundle contents are set in the file.";
       Anchor: (Height: 31, Bottom: 10);
-      Style: (FontSize: 12, TextColor: #96a9be, Wrap: true, WrapMaxLines: 2);
+      Style: (FontSize: 12, TextColor: $H.@Text3, Wrap: true, WrapMaxLines: 2);
     }
 
     Group {
@@ -30,13 +37,13 @@ $C.@Container {
 
       Group {
         LayoutMode: Top;
-        Background: #ffffff(0.04);
+        Background: $H.@Panel;
         Padding: (Full: 12);
         Anchor: (Bottom: 10);
         Label {
           Text: "Automatic triggers";
           Anchor: (Height: 25, Bottom: 4);
-          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+          Style: (FontSize: 16, TextColor: $H.@Text, RenderBold: true);
         }
 
         $R.@TriggerRow #HeartbeatStall {
@@ -49,10 +56,10 @@ $C.@Container {
         }
         $R.@TriggerRow #TickDegraded {
           @Name = "Slow ticks";
-          @Description = "Capture sustained high average tick time.";
+          @Description = "Capture when ticks stay slow. Limits in ms, 0 follows the world tick budget.";
           #Thresholds {
-            $R.@NumberInput #TickAvgDegraded { @Label = "Degraded (ms)"; @Step = 10; }
-            $R.@NumberInput #TickAvgCritical { @Label = "Critical (ms)"; @Step = 10; }
+            $R.@NumberInput #TickAvgDegraded { @Label = "Degraded (0 = auto)"; @Step = 10; }
+            $R.@NumberInput #TickAvgCritical { @Label = "Critical (0 = auto)"; @Step = 10; }
           }
         }
         $R.@TriggerRow #Deadlock {
@@ -69,7 +76,7 @@ $C.@Container {
         }
         $R.@TriggerRow #GcPressure {
           @Name = "GC pressure";
-          @Description = "Capture excessive time spent collecting garbage.";
+          @Description = "Capture when GC pauses take too much time.";
           #Thresholds {
             $R.@NumberInput #GcPressurePct { @Label = "GC time (%)"; }
             $R.@NumberInput #GcPressureWindow { @Label = "Window (s)"; }
@@ -85,7 +92,7 @@ $C.@Container {
         }
         $R.@TriggerRow #NetSaturation {
           @Name = "Network saturation";
-          @Description = "Idle while both limits are 0.";
+          @Description = "Off while both limits are 0.";
           #Thresholds {
             $R.@NumberInput #NetInMbps { @Label = "In (Mbit/s)"; }
             $R.@NumberInput #NetOutMbps { @Label = "Out (Mbit/s)"; }
@@ -112,13 +119,13 @@ $C.@Container {
 
       Group {
         LayoutMode: Top;
-        Background: #ffffff(0.04);
+        Background: $H.@Panel;
         Padding: (Full: 12);
         Anchor: (Bottom: 10);
         Label {
           Text: "Timing";
           Anchor: (Height: 25, Bottom: 8);
-          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+          Style: (FontSize: 16, TextColor: $H.@Text, RenderBold: true);
         }
         Group {
           LayoutMode: Left;
@@ -126,22 +133,22 @@ $C.@Container {
           $R.@NumberInput #Cooldown { @Label = "Cooldown (seconds)"; }
           $R.@NumberInput #Debounce { @Label = "Debounce (seconds)"; }
           Label {
-            Text: "0–3600 seconds.";
+            Text: "0 to 3600 seconds.";
             FlexWeight: 1;
-            Style: (FontSize: 11, TextColor: #96a9be, VerticalAlignment: Center);
+            Style: (FontSize: 11, TextColor: $H.@Text3, VerticalAlignment: Center);
           }
         }
       }
 
       Group {
         LayoutMode: Top;
-        Background: #ffffff(0.04);
+        Background: $H.@Panel;
         Padding: (Full: 12);
         Anchor: (Bottom: 10);
         Label {
           Text: "Capture and storage";
           Anchor: (Height: 25, Bottom: 4);
-          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+          Style: (FontSize: 16, TextColor: $H.@Text, RenderBold: true);
         }
         $R.@TriggerRow #CaptureEnabled {
           @Name = "Incident capture enabled";
@@ -152,17 +159,21 @@ $C.@Container {
             $R.@NumberInput #RetentionMaxAgeDays { @Label = "Age (days)"; }
           }
         }
+        Label #StorageUsage {
+          Anchor: (Height: 34, Top: 4);
+          Style: (FontSize: 11, TextColor: $H.@Text3, Wrap: true, WrapMaxLines: 2);
+        }
       }
 
       Group {
         LayoutMode: Top;
-        Background: #ffffff(0.04);
+        Background: $H.@Panel;
         Padding: (Full: 12);
         Anchor: (Bottom: 10);
         Label {
           Text: "Metrics";
           Anchor: (Height: 25, Bottom: 4);
-          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+          Style: (FontSize: 16, TextColor: $H.@Text, RenderBold: true);
         }
         $R.@TriggerRow #MetricsEnabled {
           @Name = "Metrics history";
@@ -172,24 +183,24 @@ $C.@Container {
           }
         }
         $R.@TriggerRow #MetricsCpu {
-          @Name = "CPU samples";
-          @Description = "Collect CPU samples for history and live metrics.";
+          @Name = "CPU use";
+          @Description = "Record server CPU use for trends.";
         }
         $R.@TriggerRow #MetricsAllocation {
-          @Name = "Allocation samples";
-          @Description = "Collect allocation samples; adds overhead.";
+          @Name = "Allocation rate";
+          @Description = "Record how fast memory is allocated. Costs some CPU.";
         }
       }
 
       Group {
         LayoutMode: Top;
-        Background: #ffffff(0.04);
+        Background: $H.@Panel;
         Padding: (Full: 12);
         Anchor: (Bottom: 10);
         Label {
-          Text: "Incident evidence · applies on save";
+          Text: "Incident evidence (applies on save)";
           Anchor: (Height: 25, Bottom: 8);
-          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+          Style: (FontSize: 16, TextColor: $H.@Text, RenderBold: true);
         }
         Group {
           LayoutMode: Left;
@@ -202,13 +213,13 @@ $C.@Container {
 
       Group {
         LayoutMode: Top;
-        Background: #ffffff(0.04);
+        Background: $H.@Panel;
         Padding: (Full: 12);
         Anchor: (Bottom: 4);
         Label {
-          Text: "Recording · applies after restart";
+          Text: "Recording (applies after restart)";
           Anchor: (Height: 25, Bottom: 8);
-          Style: (FontSize: 16, TextColor: #d3e3ed, RenderBold: true);
+          Style: (FontSize: 16, TextColor: $H.@Text, RenderBold: true);
         }
         Group {
           LayoutMode: Left;
@@ -224,12 +235,12 @@ $C.@Container {
           Label {
             Text: "0 = off.";
             FlexWeight: 1;
-            Style: (FontSize: 11, TextColor: #96a9be, VerticalAlignment: Center);
+            Style: (FontSize: 11, TextColor: $H.@Text3, VerticalAlignment: Center);
           }
         }
         $R.@TriggerRow #JfrOldObjectSampling {
           @Name = "Old-object sampling";
-          @Description = "Track retained objects; adds overhead.";
+          @Description = "Record long-lived objects to find leaks. Costs some CPU.";
         }
       }
     }
@@ -237,9 +248,14 @@ $C.@Container {
     Group {
       LayoutMode: Top;
       Anchor: (Top: 6);
+      Label #RestartNote {
+        Anchor: (Height: 20, Bottom: 2);
+        Style: (FontSize: 12, TextColor: $H.@Warn, Wrap: true, WrapMaxLines: 1);
+        Visible: false;
+      }
       Label #Feedback {
-        Anchor: (Height: 34, Bottom: 4);
-        Style: (FontSize: 12, TextColor: #bfcdd5, Wrap: true, WrapMaxLines: 2);
+        Anchor: (Height: 50, Bottom: 4);
+        Style: (FontSize: 12, TextColor: $H.@Text2, Wrap: true, WrapMaxLines: 3);
         Visible: false;
       }
       Group {
@@ -248,15 +264,24 @@ $C.@Container {
         $C.@TextButton #SaveButton {
           @Text = "Save and reload";
           @Anchor = (Width: 210, Right: 10);
+          Style: $H.@PrimaryButtonStyle;
+        }
+        Label #UnsavedNote {
+          Text: "Unsaved changes";
+          Anchor: (Width: 200);
+          Style: (FontSize: 12, TextColor: $H.@Warn, VerticalAlignment: Center);
+          Visible: false;
         }
         Group { FlexWeight: 1; }
         $C.@SecondaryTextButton #BackButton {
           @Text = "Back to dashboard";
           @Anchor = (Width: 230, Right: 10);
+          Style: $H.@SecondaryButtonStyle;
         }
         $C.@SecondaryTextButton #CloseButton {
           @Text = "Close";
           @Anchor = (Width: 120);
+          Style: $H.@SecondaryButtonStyle;
         }
       }
     }

@@ -7,20 +7,22 @@ import java.util.Map;
 import io.github.xytronix.hybox.core.incident.DiagnosticSection;
 
 record ReportSections(Map<String, String> mixins, Map<String, String> plugins,
+                      Map<String, String> pluginWebsites, Map<String, String> pluginClasses,
                       Map<String, String> assetPacks, String serverLog,
                       Map<String, String> environment, Map<String, String> tickSystems,
-                      Map<String, String> modCpu, Map<String, String> heapHistogram,
+                      Map<String, String> heapHistogram,
                       Map<String, String> memPools, Map<String, String> entities,
                       List<DiagnosticSection> configs, List<DiagnosticSection> generic) {
 
     static ReportSections route(List<DiagnosticSection> diagnostics) {
         Map<String, String> mixins = null;
         Map<String, String> plugins = null;
+        Map<String, String> pluginWebsites = null;
+        Map<String, String> pluginClasses = Map.of();
         Map<String, String> assetPacks = null;
         String serverLog = null;
         Map<String, String> environment = null;
         Map<String, String> tickSystems = null;
-        Map<String, String> modCpu = null;
         Map<String, String> heapHistogram = null;
         Map<String, String> memPools = null;
         Map<String, String> entities = null;
@@ -39,12 +41,14 @@ record ReportSections(Map<String, String> mixins, Map<String, String> plugins,
                 mixins = section.entries();
             } else if ("Plugins".equals(section.title())) {
                 plugins = section.entries();
+            } else if ("Plugin websites".equals(section.title())) {
+                pluginWebsites = section.entries();
+            } else if ("Plugin classes".equals(section.title())) {
+                pluginClasses = section.entries();
             } else if ("Asset packs".equals(section.title())) {
                 assetPacks = section.entries();
             } else if ("Tick systems".equals(section.title())) {
                 tickSystems = section.entries();
-            } else if ("Mod hot-path contribution (JFR)".equals(section.title())) {
-                modCpu = section.entries();
             } else if ("Heap histogram".equals(section.title())) {
                 heapHistogram = section.entries();
             } else if ("Memory pools".equals(section.title())) {
@@ -58,8 +62,8 @@ record ReportSections(Map<String, String> mixins, Map<String, String> plugins,
                 generic.add(section);
             }
         }
-        return new ReportSections(mixins, plugins, assetPacks, serverLog, environment, tickSystems, modCpu,
-            heapHistogram, memPools, entities, configs, generic);
+        return new ReportSections(mixins, plugins, pluginWebsites, pluginClasses, assetPacks, serverLog, environment,
+            tickSystems, heapHistogram, memPools, entities, configs, generic);
     }
 
     private static boolean isConfig(String title) {

@@ -76,6 +76,35 @@ class CapturePipelineTest {
     }
 
     @Test
+    void captureResultTellsThePlayerWhichOldBundlesRetentionRemoved(@TempDir Path tempDir) throws Exception {
+        Path incidentDir = tempDir.resolve("incidents");
+        Files.createDirectories(incidentDir);
+        for (int i = 1; i <= 15; i++) {
+            Files.write(incidentDir.resolve(String.format("incident-20260101-0100%02d.000Z-%06d.zip", i, i)), new byte[] {1});
+        }
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        CapturePipeline pipeline = new CapturePipeline(
+            clock,
+            new TriggerEngine(clock, new TriggerPolicy(Duration.ZERO, Duration.ZERO, 1000, 5000, 100, 250)),
+            new FakeRecordingDumper(new byte[] {1, 2, 3}),
+            new BundleBuilder(clock),
+            new RetentionManager(clock, System.getLogger("retention-test"), FileDeleter.defaultDeleter()),
+            IncidentNotifier.noop(),
+            incidentDir,
+            tempDir.resolve("temp"),
+            new CapturePolicy(new RetentionPolicy(25, 1024L * 1024 * 1024, Duration.ofHours(168))),
+            System.getLogger("capture-test")
+        );
+
+        CaptureResult first = pipeline.handle(new TriggerEvent(TriggerKind.MANUAL, "world", clock.instant(), Map.of()));
+        CaptureResult second = pipeline.handle(new TriggerEvent(TriggerKind.MANUAL, "world", clock.instant(), Map.of()));
+
+        assertEquals("Removed 15 bundles older than 7 days.", first.retention());
+        assertNull(second.retention());
+        assertEquals(2, countZips(incidentDir));
+    }
+
+    @Test
     void stallSeverityIsReflectedInIncidentJson(@TempDir Path tempDir) throws Exception {
         Path incidentDir = tempDir.resolve("incidents");
         Path tempRecordings = tempDir.resolve("temp");
@@ -177,7 +206,7 @@ class CapturePipelineTest {
 
         String logTail = readEntry(zipPath, "extras/server-log.txt");
         assertTrue(logTail.contains("[REDACTED]"));
-        assertTrue(logTail.contains("hunter2"));
+        assertFalse(logTail.contains("hunter2"));
         assertFalse(logTail.contains("192.168.10.20"));
         assertFalse(logTail.contains("CUSTOM_SECRET_ABC123"));
 
@@ -540,6 +569,127 @@ class CapturePipelineTest {
         try (Stream<Path> pending = Files.list(dir.resolve("temp/pending"))) {
             assertEquals(3, Files.size(pending.findFirst().orElseThrow()));
         }
+    }
+
+    @Test
+    void aStallThatOutlastsTheWaitIsSavedWithItsFinalLengthAsCritical(@TempDir Path dir) throws Exception {
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        TriggerEngine engine = new TriggerEngine(clock, new TriggerPolicy(Duration.ZERO, Duration.ZERO, 2000, 10000, 100, 250));
+        List<String> accepted = new java.util.ArrayList<>();
+        List<String> saved = new java.util.ArrayList<>();
+        IncidentNotifier notifier = new IncidentNotifier() {
+            @Override
+            public void onAccepted(io.github.xytronix.hybox.core.incident.IncidentMetadata meta) {
+                accepted.add(meta.severity() + " " + meta.headline());
+            }
+
+            @Override
+            public void onIncident(io.github.xytronix.hybox.core.incident.IncidentReport report, Path zip) {
+                saved.add(report.meta().severity() + " " + report.meta().headline());
+            }
+        };
+        PostIncidentWaiter waiter = new PostIncidentWaiter() {
+            @Override
+            public void awaitResolution(TriggerEvent event) {
+                clock.advance(Duration.ofSeconds(120));
+            }
+
+            @Override
+            public TriggerEvent settle(TriggerEvent event) {
+                return new TriggerEvent(event.kind(), event.scope(), event.at(),
+                    Map.of("stallMs", "122100", "frozen", "true"));
+            }
+        };
+        CapturePipeline pipeline = new CapturePipeline(clock, engine, new FakeRecordingDumper(new byte[] {1}),
+            new BundleBuilder(clock), new RetentionManager(clock, System.getLogger("retention-test"),
+            FileDeleter.defaultDeleter()), notifier, BundleExtrasProvider.none(),
+            io.github.xytronix.hybox.core.health.WorldStatsProvider.none(), DiagnosticsProvider.none(), waiter,
+            dir.resolve("incidents"), dir.resolve("temp"), new CapturePolicy(new RetentionPolicy(0, 0L, null)),
+            System.getLogger("capture-test"));
+
+        CaptureResult result = pipeline.handle(new TriggerEvent(TriggerKind.HEARTBEAT_STALL, "default", clock.instant(),
+            Map.of("stallMs", "2100")));
+
+        assertTrue(result.captured());
+        assertEquals(List.of("DEGRADED World default stopped responding for 2.1 s"), accepted);
+        assertEquals(List.of("CRITICAL World default stopped responding for 2 min 2 s and was still frozen when the "
+            + "bundle was saved"), saved);
+        String json = readSeverity(dir.resolve("incidents"), result.incidentId());
+        assertTrue(json.contains("\"severity\":\"CRITICAL\""), json);
+        assertTrue(json.contains("\"stallMs\":\"122100\""), json);
+        assertTrue(json.contains("\"frozen\":\"true\""), json);
+    }
+
+    @Test
+    void worldFailureHeadlinesLoseAbsolutePathsBeforeAnyAlert(@TempDir Path dir) throws Exception {
+        Clock clock = Clock.fixed(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        List<String> headlines = new java.util.ArrayList<>();
+        IncidentNotifier notifier = new IncidentNotifier() {
+            @Override
+            public void onAccepted(io.github.xytronix.hybox.core.incident.IncidentMetadata meta) {
+                headlines.add(meta.headline());
+            }
+
+            @Override
+            public void onIncident(io.github.xytronix.hybox.core.incident.IncidentReport report, Path zip) {
+                headlines.add(report.meta().headline());
+            }
+        };
+        CapturePipeline pipeline = new CapturePipeline(clock,
+            new TriggerEngine(clock, new TriggerPolicy(Duration.ZERO, Duration.ZERO, 2000, 10000, 100, 250)),
+            new FakeRecordingDumper(new byte[] {1}),
+            new BundleBuilder(clock, System.getLogger("bundle-test"), null, null,
+                new io.github.xytronix.hybox.core.env.PathMasker("/home/hytale", "/srv/hytale")),
+            new RetentionManager(clock, System.getLogger("retention-test"), FileDeleter.defaultDeleter()), notifier,
+            dir.resolve("incidents"), dir.resolve("temp"), new CapturePolicy(new RetentionPolicy(0, 0L, null)),
+            System.getLogger("capture-test"));
+
+        pipeline.handle(new TriggerEvent(TriggerKind.WORLD_FAILURE, "Bobs_World", clock.instant(), Map.of("error",
+            "AccessDeniedException: /home/bob/hytale/universe/worlds/Bobs_World/chunk.bin from 203.0.113.7:5520")));
+
+        assertEquals(2, headlines.size());
+        for (String headline : headlines) {
+            assertEquals("World Bobs_World failed: AccessDeniedException: ~/hytale/universe/worlds/Bobs_World/chunk.bin"
+                + " from [REDACTED]", headline);
+        }
+    }
+
+    @Test
+    void aCaptureThatFailsAfterItsAlertTellsTheNotifier(@TempDir Path dir) throws Exception {
+        Clock clock = Clock.fixed(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        List<String> calls = new java.util.ArrayList<>();
+        IncidentNotifier notifier = new IncidentNotifier() {
+            @Override
+            public void onAccepted(io.github.xytronix.hybox.core.incident.IncidentMetadata meta) {
+                calls.add("accepted " + meta.id().value());
+            }
+
+            @Override
+            public void onFailed(io.github.xytronix.hybox.core.incident.IncidentMetadata meta) {
+                calls.add("failed " + meta.id().value());
+            }
+
+            @Override
+            public void onIncident(io.github.xytronix.hybox.core.incident.IncidentReport report, Path zip) {
+                calls.add("saved " + report.meta().id().value());
+            }
+        };
+        CapturePipeline pipeline = new CapturePipeline(clock,
+            new TriggerEngine(clock, new TriggerPolicy(Duration.ZERO, Duration.ZERO, 2000, 10000, 100, 250)),
+            target -> {
+                throw new java.io.IOException("disk full");
+            }, new BundleBuilder(clock),
+            new RetentionManager(clock, System.getLogger("retention-test"), FileDeleter.defaultDeleter()), notifier,
+            dir.resolve("incidents"), dir.resolve("temp"), new CapturePolicy(new RetentionPolicy(0, 0L, null)),
+            System.getLogger("capture-test"));
+
+        CaptureResult result = pipeline.handle(new TriggerEvent(TriggerKind.DEADLOCK, "server", clock.instant(),
+            Map.of("threads", "2")));
+
+        assertEquals(CaptureResult.Status.FAILED, result.status());
+        assertEquals(2, calls.size(), calls.toString());
+        assertTrue(calls.get(0).startsWith("accepted "), calls.toString());
+        assertEquals("failed " + calls.get(0).substring("accepted ".length()), calls.get(1));
     }
 
     private static int countZips(Path incidentDir) throws Exception {

@@ -15,9 +15,12 @@ import io.github.xytronix.hybox.core.incident.IncidentReport;
  * Deterministic JSON writer for incident reports.
  *
  * Field order:
- * - meta: id, createdAt, severity, trigger, world, headline
+ * - meta: id, createdAt, severity, trigger, world, headline, cleaned
  */
 public final class IncidentJson {
+    public static final String CLEANED = "cleaned";
+    public static final int CLEANED_SCHEMA = 2;
+
     private IncidentJson() {
     }
 
@@ -47,6 +50,7 @@ public final class IncidentJson {
             json.value(meta.world());
         }
         json.name("headline").value(meta.headline());
+        json.name(CLEANED).value(CLEANED_SCHEMA);
         json.endObject();
     }
 

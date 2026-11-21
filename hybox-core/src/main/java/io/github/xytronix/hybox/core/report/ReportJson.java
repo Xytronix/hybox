@@ -3,6 +3,7 @@ package io.github.xytronix.hybox.core.report;
 import java.io.IOException;
 
 import io.github.xytronix.hybox.core.json.JsonWriter;
+import io.github.xytronix.hybox.core.metrics.ChartAxis;
 
 final class ReportJson {
 
@@ -27,6 +28,18 @@ final class ReportJson {
         }
     }
 
+    static void writeLogScale(JsonWriter json) throws IOException {
+        json.name("logScale").beginObject();
+        json.name("span").value((Number) ChartAxis.LOG_SPAN);
+        json.name("decades").value((Number) ChartAxis.LOG_DECADES);
+        json.name("families").beginArray();
+        for (String family : ChartAxis.logFamilies()) {
+            json.value(family);
+        }
+        json.endArray();
+        json.endObject();
+    }
+
     static void writeDoubleSeries(JsonWriter json, String name, double[] series) throws IOException {
         json.name(name);
         if (series == null) {
@@ -36,6 +49,23 @@ final class ReportJson {
         json.beginArray();
         for (double v : series) {
             json.value(round2(v));
+        }
+        json.endArray();
+    }
+
+    static void writeSparseSeries(JsonWriter json, String name, double[] series) throws IOException {
+        json.name(name);
+        if (series == null) {
+            json.nullValue();
+            return;
+        }
+        json.beginArray();
+        for (double v : series) {
+            if (Double.isNaN(v)) {
+                json.nullValue();
+            } else {
+                json.value(round2(v));
+            }
         }
         json.endArray();
     }

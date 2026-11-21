@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import io.github.xytronix.hybox.core.env.PrivateArguments;
 import io.github.xytronix.hybox.core.health.HealthSnapshot;
 import io.github.xytronix.hybox.core.health.HostCpuStats;
 import io.github.xytronix.hybox.core.health.JfrTimeline;
@@ -18,13 +19,14 @@ final class ReportSystemWriter {
     private static final Pattern INSTALLED_VERSION = Pattern.compile("installed \\((.+)\\)");
     private static final Pattern PLAYER_UUID = Pattern.compile(
         "(?<=players[/\\\\])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+    private static final Pattern TRAILING_PARENS = Pattern.compile("\\s*\\([^)]*\\)\\s*$");
 
     private ReportSystemWriter() {
     }
 
     static void writeSys(JsonWriter json, HealthSnapshot snapshot, JfrTimeline timeline,
                          String hytaleVersion, String serverName, String containerRuntime,
-                         List<String[]> loaders)
+                         List<String[]> loaders, boolean live)
         throws IOException {
         HealthSnapshot.Sys sys = snapshot == null ? null : snapshot.system();
         Map<String, String> props = timeline == null ? Map.of() : timeline.sysProps();
@@ -39,11 +41,13 @@ final class ReportSystemWriter {
         }
         json.name("sys").beginObject();
         String distro = osName != null ? osName : (sys == null ? null : sys.os());
-        String kernel = System.getProperty("os.version");
-        json.name("os").value(distro != null && kernel != null && !distro.contains(kernel)
-            ? distro + " · kernel " + kernel : distro);
-        json.name("arch").value(prop(props, "os.arch"));
-        writeRuntimeOsMetrics(json);
+        json.name("os").value(distro);
+        json.name("osShort").value(osShort(distro, props));
+        JfrTimeline.JvmInfo jvmInfo = timeline == null ? null : timeline.jvmInfo();
+        json.name("arch").value(recorded(props, "os.arch", jvmInfo == null ? null : jvmInfo.arch(), live));
+        double load = sys == null ? -1 : sys.loadAverage();
+        ReportJson.writeNullableDouble(json, "loadAvg", load >= 0 ? ReportJson.round2(load) : null);
+        writeRuntimeOsMetrics(json, live);
         JfrTimeline.HostCpu hostCpu = timeline == null ? null : timeline.hostCpu();
         ReportJson.writeNullable(json, "throttledPeriods",
             hostCpu != null && hostCpu.throttledPeriods() >= 0 ? hostCpu.throttledPeriods() : null);
@@ -60,9 +64,16 @@ final class ReportSystemWriter {
         ReportJson.writeNullableDouble(json, "safepointMs", safepoint != null && safepoint.count() > 0 ? safepoint.totalMs() : null);
         json.name("server").value(serverName);
         json.name("hytale").value(hytaleVersion);
-        json.name("jvm").value(sys == null ? null : sys.jvm());
-        json.name("javaVendor").value(props.getOrDefault("java.vendor", props.get("java.vm.vendor")));
-        json.name("javaVersion").value(prop(props, "java.runtime.version"));
+        ReportJson.writeNullable(json, "maxViewRadius",
+            snapshot != null && snapshot.maxViewRadius() > 0 ? (long) snapshot.maxViewRadius() : null);
+        String jvm = jvmInfo != null && jvmInfo.release() != null ? jvmInfo.name() + " " + jvmInfo.release()
+            : sys == null ? null : sys.jvm();
+        String javaVendor = props.getOrDefault("java.vendor", props.get("java.vm.vendor"));
+        String javaVersion = recorded(props, "java.runtime.version", jvmInfo == null ? null : jvmInfo.release(), live);
+        json.name("jvm").value(jvm);
+        json.name("javaVendor").value(javaVendor);
+        json.name("javaVersion").value(javaVersion);
+        json.name("javaShort").value(JavaRuntime.shortName(javaVendor, javaVersion, jvm));
         json.name("javaHome").value(props.get("java.home"));
         json.name("cpuBrand").value(cpuInfo == null ? null : cpuInfo.brand());
         Long cpuCores = null;
@@ -73,7 +84,7 @@ final class ReportSystemWriter {
         }
         ReportJson.writeNullable(json, "cpuCores", cpuCores);
         ReportJson.writeNullable(json, "hwThreads", cpuInfo != null && cpuInfo.hwThreads() > 0 ? cpuInfo.hwThreads() : null);
-        ReportJson.writeNullable(json, "sockets", cpuInfo != null && cpuInfo.sockets() > 0 ? cpuInfo.sockets() : null);
+        ReportJson.writeNullable(json, "sockets", plausibleSockets(cpuInfo, cpuCores));
         ReportJson.writeNullable(json, "ramTotal", sys != null && sys.totalRamBytes() > 0 ? sys.totalRamBytes() : null);
         ReportJson.writeNullable(json, "uptimeMs", sys != null && sys.uptimeMs() > 0 ? sys.uptimeMs() : null);
         HealthSnapshot.Memory memory = snapshot == null ? null : snapshot.memory();
@@ -134,10 +145,8 @@ final class ReportSystemWriter {
         json.endObject();
     }
 
-    private static void writeRuntimeOsMetrics(JsonWriter json) throws IOException {
-        java.lang.management.OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
-        double load = os == null ? -1 : os.getSystemLoadAverage();
-        ReportJson.writeNullableDouble(json, "loadAvg", load >= 0 ? ReportJson.round2(load) : null);
+    private static void writeRuntimeOsMetrics(JsonWriter json, boolean live) throws IOException {
+        java.lang.management.OperatingSystemMXBean os = live ? ManagementFactory.getOperatingSystemMXBean() : null;
         Long openFds = null;
         Long maxFds = null;
         if (os instanceof com.sun.management.UnixOperatingSystemMXBean unix) {
@@ -148,25 +157,58 @@ final class ReportSystemWriter {
         }
         ReportJson.writeNullable(json, "openFds", openFds);
         ReportJson.writeNullable(json, "maxFds", maxFds);
-        long[] mem = HostCpuStats.cgroupMemory();
+        long[] mem = live ? HostCpuStats.cgroupMemory() : null;
         ReportJson.writeNullable(json, "containerMemUsed", mem != null && mem[0] >= 0 ? mem[0] : null);
         ReportJson.writeNullable(json, "oomKills", mem != null && mem[1] >= 0 ? mem[1] : null);
-        double[] psi = HostCpuStats.psi();
+        double[] psi = live ? HostCpuStats.psi() : null;
         ReportJson.writeNullableDouble(json, "psiCpu", psi != null && psi[0] >= 0 ? ReportJson.round2(psi[0]) : null);
         ReportJson.writeNullableDouble(json, "psiIo", psi != null && psi[1] >= 0 ? ReportJson.round2(psi[1]) : null);
         ReportJson.writeNullableDouble(json, "psiMem", psi != null && psi[2] >= 0 ? ReportJson.round2(psi[2]) : null);
-        long[] swap = HostCpuStats.cgroupSwap();
+        long[] swap = live ? HostCpuStats.cgroupSwap() : null;
         ReportJson.writeNullable(json, "containerSwapUsed", swap != null && swap[0] >= 0 ? swap[0] : null);
         ReportJson.writeNullable(json, "containerSwapMax", swap != null && swap[1] >= 0 ? swap[1] : null);
-        long[] ioMax = HostCpuStats.cgroupIoMax();
+        long[] ioMax = live ? HostCpuStats.cgroupIoMax() : null;
         ReportJson.writeNullable(json, "ioReadLimit", ioMax != null && ioMax[0] >= 0 ? ioMax[0] : null);
         ReportJson.writeNullable(json, "ioWriteLimit", ioMax != null && ioMax[1] >= 0 ? ioMax[1] : null);
-        json.name("cpuset").value(HostCpuStats.cpusetCpus());
+        json.name("cpuset").value(live ? HostCpuStats.cpusetCpus() : null);
     }
 
-    private static String prop(Map<String, String> props, String key) {
+    private static String recorded(Map<String, String> props, String key, String fromJvm, boolean live) {
         String value = props.get(key);
-        return value != null ? value : System.getProperty(key);
+        if (value != null) {
+            return value;
+        }
+        return fromJvm != null || !live ? fromJvm : System.getProperty(key);
+    }
+
+    static String osShort(String distro, Map<String, String> props) {
+        String name = props.get("os.name");
+        String version = props.get("os.version");
+        String arch = props.get("os.arch");
+        String shown;
+        if (name != null && name.startsWith("Mac")) {
+            shown = version == null ? "macOS" : "macOS " + version;
+        } else if (name != null && name.startsWith("Windows")) {
+            shown = name;
+        } else if (distro != null && distro.startsWith("uname:")) {
+            String[] parts = distro.substring("uname:".length()).trim().split("\\s+");
+            shown = "Darwin".equals(parts[0]) ? "macOS" : parts.length > 1 ? parts[0] + " " + parts[1] : parts[0];
+        } else if (distro != null) {
+            shown = TRAILING_PARENS.matcher(distro).replaceFirst("");
+        } else {
+            shown = name;
+        }
+        if (shown == null || shown.isBlank()) {
+            return null;
+        }
+        return arch == null ? shown : shown + " (" + arch + ")";
+    }
+
+    private static Long plausibleSockets(JfrTimeline.CpuInfo cpuInfo, Long cores) {
+        if (cpuInfo == null || cpuInfo.sockets() <= 0) {
+            return null;
+        }
+        return cores != null && cores > 1 && cpuInfo.sockets() >= cores ? null : cpuInfo.sockets();
     }
 
     static boolean isLoaderEntry(String value) {
@@ -194,14 +236,26 @@ final class ReportSystemWriter {
         if (timeline == null || (timeline.jvmArgs() == null && timeline.javaArgs() == null)) {
             return null;
         }
-        return ("java "
+        return PrivateArguments.mask(("java "
             + (timeline.jvmArgs() == null ? "" : timeline.jvmArgs()) + " "
             + (timeline.javaArgs() == null ? "" : timeline.javaArgs()))
-            .replaceAll("\\s+", " ").trim();
+            .replaceAll("\\s+", " ").trim());
     }
 
     private static void writeDisk(JsonWriter json, HealthSnapshot snapshot, JfrTimeline timeline)
         throws IOException {
+        long[] disk = disk(snapshot, timeline);
+        if (disk == null) {
+            json.name("disk").nullValue();
+            return;
+        }
+        json.name("disk").beginObject();
+        json.name("free").value(disk[0]);
+        json.name("total").value(disk[1]);
+        json.endObject();
+    }
+
+    static long[] disk(HealthSnapshot snapshot, JfrTimeline timeline) {
         long free = -1;
         long total = -1;
         if (snapshot != null && snapshot.disk() != null && snapshot.disk().totalBytes() > 0) {
@@ -212,14 +266,7 @@ final class ReportSystemWriter {
             free = series[series.length - 1];
             total = timeline.diskTotal();
         }
-        if (free < 0 || total <= 0) {
-            json.name("disk").nullValue();
-            return;
-        }
-        json.name("disk").beginObject();
-        json.name("free").value(free);
-        json.name("total").value(total);
-        json.endObject();
+        return free < 0 || total <= 0 ? null : new long[] {free, total};
     }
 
     static Long heapMax(HealthSnapshot snapshot, JfrTimeline timeline) {
@@ -317,6 +364,7 @@ final class ReportSystemWriter {
             json.beginArray();
             json.value(e.getKey());
             json.value(e.getValue());
+            ReportActivityWriter.writeGroupSize(json, e.getKey(), timeline.threadGroupSizes());
             json.endArray();
         }
         json.endArray();
@@ -328,14 +376,8 @@ final class ReportSystemWriter {
             json.endArray();
         }
         json.endArray();
-        json.name("byMod").beginArray();
-        for (Map.Entry<String, Long> e : attribution.counts(alloc.byMod()).entrySet()) {
-            json.beginArray();
-            json.value(e.getKey());
-            json.value(e.getValue());
-            json.endArray();
-        }
-        json.endArray();
+        json.name("byMod");
+        ReportActivityWriter.writeModShares(json, attribution.shares(alloc.byMod()));
         json.name("byWorld").beginArray();
         for (JfrTimeline.WorldAlloc w : alloc.byWorld()) {
             json.beginObject();
@@ -349,14 +391,8 @@ final class ReportSystemWriter {
                 json.endArray();
             }
             json.endArray();
-            json.name("byMod").beginArray();
-            for (Map.Entry<String, Long> e : attribution.counts(w.byMod()).entrySet()) {
-                json.beginArray();
-                json.value(e.getKey());
-                json.value(e.getValue());
-                json.endArray();
-            }
-            json.endArray();
+            json.name("byMod");
+            ReportActivityWriter.writeModShares(json, attribution.shares(w.byMod()));
             json.endObject();
         }
         json.endArray();
@@ -412,7 +448,7 @@ final class ReportSystemWriter {
 
     private static String friendlyGcCaller(String caller) {
         if (caller != null && caller.startsWith("sun.rmi.")) {
-            return caller + " (JVM RMI DGC, Java standard, not the game)";
+            return caller + " (Java itself, not a mod)";
         }
         return caller;
     }
@@ -482,7 +518,7 @@ final class ReportSystemWriter {
         json.endObject();
     }
 
-    static void writeRetained(JsonWriter json, JfrTimeline timeline) throws IOException {
+    static void writeRetained(JsonWriter json, JfrTimeline timeline, ReportAttribution attribution) throws IOException {
         List<JfrTimeline.Retained> retained = timeline == null ? List.of() : timeline.retained();
         if (retained.isEmpty()) {
             json.name("retained").nullValue();
@@ -494,9 +530,46 @@ final class ReportSystemWriter {
             json.value(entry.className());
             json.value(entry.count());
             json.value(entry.allocSite());
+            json.value(entry.allocMod() == null ? null : attribution.canonical(entry.allocMod()));
+            writeChain(json, entry.chain(), attribution);
             json.endArray();
         }
         json.endArray();
+    }
+
+    private static void writeChain(JsonWriter json, JfrTimeline.RetainedChain chain, ReportAttribution attribution)
+        throws IOException {
+        if (chain == null) {
+            json.nullValue();
+            return;
+        }
+        json.beginObject();
+        json.name("holders").beginArray();
+        for (JfrTimeline.Holder holder : chain.holders()) {
+            json.beginObject();
+            json.name("type").value(holder.type());
+            json.name("field").value(holder.field());
+            json.name("ref").value(holder.isStatic() ? "static" : holder.array() ? "array"
+                : holder.field() != null ? "field" : null);
+            json.name("skip").value(holder.skip());
+            json.name("mod").value(holder.mod() == null ? null : attribution.canonical(holder.mod()));
+            json.endObject();
+        }
+        json.endArray();
+        json.name("root");
+        if (chain.rootSystem() == null && chain.rootType() == null && chain.rootDescription() == null) {
+            json.nullValue();
+        } else {
+            json.beginObject();
+            json.name("description").value(chain.rootDescription());
+            json.name("system").value(chain.rootSystem());
+            json.name("type").value(chain.rootType());
+            json.endObject();
+        }
+        json.name("mod").value(chain.mod() == null ? null : attribution.canonical(chain.mod()));
+        json.name("samples").value(chain.samples());
+        json.name("withPath").value(chain.withPath());
+        json.endObject();
     }
 
     static void writeSlowIo(JsonWriter json, JfrTimeline timeline) throws IOException {
@@ -516,9 +589,11 @@ final class ReportSystemWriter {
             json.endArray();
         }
         json.endArray();
+        ReportJson.writeNullable(json, "slowIoThresholdMs",
+            timeline.slowIoThresholdMs() >= 0 ? timeline.slowIoThresholdMs() : null);
     }
 
-    private static String maskPlayers(String path, Map<String, String> players) {
+    static String maskPlayers(String path, Map<String, String> players) {
         if (path == null) {
             return null;
         }

@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 
 Group {
   LayoutMode: Top;
@@ -7,14 +8,29 @@ Group {
     LayoutMode: Left;
     Anchor: (Height: 30, Bottom: 5);
     Padding: (Horizontal: 12);
-    Background: #7a9cc6(0.13);
-    Label { Text: "TRIGGER"; Anchor: (Width: 190); Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
-    Label { Text: "STATE"; Anchor: (Width: 118); Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
-    Label { Text: "THRESHOLD"; FlexWeight: 1; Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
+    Background: $H.@Panel2;
+    Label { Text: "Trigger"; Anchor: (Width: 190); Style: (FontSize: 12, TextColor: $H.@Text3, RenderBold: true, VerticalAlignment: Center); }
+    Label { Text: "State"; Anchor: (Width: 118); Style: (FontSize: 12, TextColor: $H.@Text3, RenderBold: true, VerticalAlignment: Center); }
+    Label { Text: "Threshold"; FlexWeight: 1; Style: (FontSize: 12, TextColor: $H.@Text3, RenderBold: true, VerticalAlignment: Center); }
+    Label { Text: "Last fired"; Anchor: (Width: 190); Style: (FontSize: 12, TextColor: $H.@Text3, RenderBold: true, VerticalAlignment: Center); }
   }
   Group #TriggerRows {
     FlexWeight: 1;
     LayoutMode: TopScrolling;
     ScrollbarStyle: $C.@DefaultScrollbarStyle;
+  }
+  Group {
+    LayoutMode: Left;
+    Anchor: (Height: 40, Top: 6);
+    Label {
+      FlexWeight: 1;
+      Text: "Turn triggers on or off and change their limits in Settings.";
+      Style: (FontSize: 12, TextColor: $H.@Text3, VerticalAlignment: Center);
+    }
+    $C.@SecondaryTextButton #TriggerSettingsButton {
+      @Text = "Change in Settings";
+      @Anchor = Anchor(Width: 210, Height: 38);
+      Style: $H.@SecondaryButtonStyle;
+    }
   }
 }

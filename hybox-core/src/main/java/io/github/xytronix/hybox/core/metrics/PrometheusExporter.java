@@ -91,6 +91,11 @@ public final class PrometheusExporter implements AutoCloseable {
         pluginMetrics(sb, gauges.pluginGauges(), "hybox_plugin_gauge", "Plugin-provided gauge metric.", "gauge");
         pluginMetrics(sb, gauges.pluginCounters(), "hybox_plugin_counter", "Plugin-provided counter metric.", "counter");
 
+        List<ModMetrics.Series> mods = gauges.modMetrics().snapshot();
+        modMetrics(sb, mods, false, "hybox_mod_gauge", "Gauge that a mod writes as a JFR event.", "gauge");
+        modMetrics(sb, mods, true, "hybox_mod_counter",
+            "Counter that a mod writes as JFR events, summed since Hybox started reading them.", "counter");
+
         Map<IncidentKey, Long> incidents = gauges.incidents();
         if (!incidents.isEmpty()) {
             sb.append("# HELP hybox_incidents_total Total incidents recorded, by trigger and severity.\n");
@@ -162,6 +167,23 @@ public final class PrometheusExporter implements AutoCloseable {
             }
             sb.append(name).append("{name=\"").append(escape(e.getKey())).append("\"} ")
                 .append(fmt(value)).append('\n');
+        }
+    }
+
+    private static void modMetrics(StringBuilder sb, List<ModMetrics.Series> series, boolean counter, String name,
+                                   String help, String type) {
+        boolean typed = false;
+        for (ModMetrics.Series s : series) {
+            if (s.counter() != counter) {
+                continue;
+            }
+            if (!typed) {
+                sb.append("# HELP ").append(name).append(' ').append(help).append('\n');
+                sb.append("# TYPE ").append(name).append(' ').append(type).append('\n');
+                typed = true;
+            }
+            sb.append(name).append("{mod=\"").append(escape(s.mod())).append("\",name=\"")
+                .append(escape(s.name())).append("\"} ").append(fmt(s.value())).append('\n');
         }
     }
 

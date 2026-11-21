@@ -7,134 +7,191 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
+import io.github.xytronix.hybox.core.json.JsonScanner;
 import io.github.xytronix.hybox.core.metrics.MetricsLog;
 
 class TrendReportTest {
-    private static final Instant START = Instant.parse("2026-06-01T00:00:00Z");
-    private static final Pattern STATISTICS = Pattern.compile(
-        "\\{\"mean\":([^,]+),\"min\":([^,]+),\"max\":([^,]+),\"last\":([^,]+),\"count\":(\\d+)}");
+    private static final Instant NOW = Instant.parse("2026-06-08T00:00:00Z");
+    private static final long WEEK_AGO = NOW.minus(Duration.ofDays(7)).toEpochMilli();
 
     @Test
-    void downsamplingPreservesSingleSpikeForDisplayedMaximumAndTrueLast() throws Exception {
-        MetricsLog.Trend trend = trend(10_080);
+    void denseDataUsesFixedTimeBucketsAndKeepsASingleSpike() throws Exception {
+        MetricsLog.Trend trend = trend(10_080, WEEK_AGO, 60_000L);
         Arrays.fill(trend.tickAvgMs(), 50);
         Arrays.fill(trend.tps(), 20);
         trend.tickAvgMs()[5043] = 3000;
         trend.tps()[5043] = 2;
         trend.tickAvgMs()[10_079] = 73.25;
-        trend.tps()[10_079] = 19.5;
 
-        String data = data(render(trend));
-        Series ticks = series(data, "tickAvgMs");
-        Series tps = series(data, "tps");
+        Map<String, Object> data = data(render(trend, 7, List.of()));
+        Map<String, Object> ticks = series(data, "tickAvgMs");
 
-        assertEquals(600, ticks.buckets().size());
-        assertStatistics(ticks.buckets().get(300), 234.375, 50, 3000, 50, 16);
-        assertStatistics(ticks.buckets().get(599), (16 * 50 + 73.25) / 17, 50, 73.25, 73.25, 17);
-        assertStatistics(ticks.observed(), (10_078 * 50 + 3000 + 73.25) / 10_080,
-            50, 3000, 73.25, 10_080);
-        assertStatistics(tps.buckets().get(300), (15 * 20 + 2.0) / 16, 2, 20, 20, 16);
-        assertEquals(2.0, tps.observed().min(), 0.000000001);
-        assertEquals(19.5, tps.observed().last(), 0.000000001);
-        assertTrue(data.contains("\"count\":10080,\"start\":" + START.toEpochMilli()
-            + ",\"end\":" + trend.timestamps()[10_079]));
+        assertEquals(false, data.get("collapsed"));
+        assertEquals(WEEK_AGO, number(data.get("start")), 0);
+        assertEquals(NOW.toEpochMilli() - 60_000L, number(data.get("end")), 0);
+        assertEquals(TrendReport.BUCKETS, list(data, "t").size());
+        assertEquals(TrendReport.BUCKETS, list(ticks, "buckets").size());
+        assertTrue(list(data, "gaps").isEmpty());
+        assertEquals(10_080, list(ticks, "buckets").stream().mapToDouble(b -> number(((Map<?, ?>) b).get("count"))).sum(), 0);
+        Map<?, ?> spike = list(ticks, "buckets").stream().map(b -> (Map<?, ?>) b)
+            .filter(b -> number(b.get("max")) == 3000).findFirst().orElseThrow();
+        assertEquals(50, number(spike.get("min")), 0);
+        assertTrue(number(spike.get("mean")) < 3000);
+        assertEquals(50, number(ticks.get("p98")), 0);
+        assertEquals(50, number(ticks.get("posMedian")), 0);
+        assertEquals(50, number(ticks.get("posMin")), 0);
+        Map<?, ?> log = (Map<?, ?>) data.get("logScale");
+        assertEquals(100, number(log.get("span")), 0);
+        assertEquals(List.of("tick", "gcPause", "alloc", "network", "heap", "loaded", "packets"), log.get("families"));
+        Map<?, ?> observed = (Map<?, ?>) ticks.get("observed");
+        assertEquals(3000, number(observed.get("max")), 0);
+        assertEquals(73.25, number(observed.get("last")), 0);
+        assertEquals(2, number(((Map<?, ?>) series(data, "tps").get("observed")).get("min")), 0);
+        assertTrue(list(ticks, "brk").isEmpty());
     }
 
     @Test
-    void missingValuesLeaveBucketGapsAndDoNotBiasObservedStatistics() throws Exception {
-        MetricsLog.Trend trend = trend(1200);
-        trend.tickAvgMs()[0] = 2;
-        trend.tickAvgMs()[1] = 6;
-        trend.tickAvgMs()[2] = Double.POSITIVE_INFINITY;
-        trend.tickAvgMs()[3] = Double.NEGATIVE_INFINITY;
-        trend.tickAvgMs()[4] = 12;
-        trend.tickAvgMs()[1198] = 100;
-
-        String data = data(render(trend));
-        Series ticks = series(data, "tickAvgMs");
-
-        assertEquals(600, ticks.buckets().size());
-        assertStatistics(ticks.buckets().get(0), 4, 2, 6, 6, 2);
-        assertMissing(ticks.buckets().get(1));
-        assertStatistics(ticks.buckets().get(2), 12, 12, 12, 12, 1);
-        assertMissing(ticks.buckets().get(3));
-        assertStatistics(ticks.buckets().get(599), 100, 100, 100, 100, 1);
-        assertStatistics(ticks.observed(), 30, 2, 100, 100, 4);
-        Series unavailable = series(data, "tps");
-        assertMissing(unavailable.observed());
-        assertTrue(unavailable.buckets().stream().allMatch(bucket -> bucket.count() == 0));
-        assertFalse(data.contains("NaN"));
-        assertFalse(data.contains("Infinity"));
-    }
-
-    @Test
-    void unevenBucketsKeepEverySampleAndFractionalMeans() throws Exception {
-        MetricsLog.Trend trend = trend(601);
-        for (int i = 0; i < trend.size(); i++) {
-            trend.players()[i] = i;
+    void sparseSessionsCollapseServerOffTimeAndBreakTheLine() throws Exception {
+        long first = NOW.minus(Duration.ofHours(20)).toEpochMilli();
+        long second = NOW.minus(Duration.ofHours(2)).toEpochMilli();
+        long[] times = new long[720];
+        for (int i = 0; i < 360; i++) {
+            times[i] = first + i * 10_000L;
+            times[360 + i] = second + i * 10_000L;
         }
+        MetricsLog.Trend trend = trend(times);
+        Arrays.fill(trend.tickAvgMs(), 4);
 
-        Series players = series(data(render(trend)), "players");
+        Map<String, Object> data = data(render(trend, 1, List.of(
+            new TrendReport.Incident(second + 600_000L, "DEGRADED", "World default is slow", "TICK_DEGRADED", "a.zip"),
+            new TrendReport.Incident(NOW.minus(Duration.ofHours(10)).toEpochMilli(), "INFO", "Manual", "MANUAL", "b.zip"))));
 
-        assertEquals(600, players.buckets().size());
-        assertEquals(601, players.buckets().stream().mapToInt(Statistics::count).sum());
-        assertStatistics(players.buckets().get(0), 0, 0, 0, 0, 1);
-        assertStatistics(players.buckets().get(599), 599.5, 599, 600, 600, 2);
-        assertStatistics(players.observed(), 300, 0, 600, 600, 601);
+        assertEquals(true, data.get("collapsed"));
+        assertEquals(10_000, number(data.get("interval")), 0);
+        assertEquals(first, number(data.get("start")), 0);
+        List<Object> gaps = list(data, "gaps");
+        assertEquals(1, gaps.size());
+        List<?> gap = (List<?>) gaps.getFirst();
+        assertEquals(times[359], number(gap.get(0)), 0);
+        assertEquals(second, number(gap.get(1)), 0);
+        double width = number(gap.get(3)) - number(gap.get(2));
+        assertTrue(width > 0 && width < 0.05, "a 16 hour gap shrinks to a divider, not " + width);
+        assertEquals(2, list(data, "sessions").size());
+        Map<String, Object> ticks = series(data, "tickAvgMs");
+        List<Object> breaks = list(ticks, "brk");
+        assertEquals(1, breaks.size());
+        int at = (int) number(breaks.getFirst());
+        assertTrue(number(list(data, "t0").get(at)) >= second);
+        assertTrue(number(list(data, "t1").get(at - 1)) <= times[359]);
+        List<Object> incidents = list(data, "incidents");
+        assertTrue(number(((Map<?, ?>) incidents.get(0)).get("x")) > number(gap.get(3)));
+        assertTrue(number(((Map<?, ?>) incidents.get(1)).get("x")) >= number(gap.get(2)));
+        assertTrue(number(((Map<?, ?>) incidents.get(1)).get("x")) <= number(gap.get(3)));
     }
 
     @Test
-    void singleSamplePreservesPrecisionUnitsAndZeros() throws Exception {
-        MetricsLog.Trend trend = trend(1);
-        trend.tickAvgMs()[0] = 12.3456789;
-        trend.heapBytes()[0] = 42.125 * 1024 * 1024;
-        trend.tps()[0] = 0;
+    void shortGapsBreakTheLineInLinearMode() throws Exception {
+        long start = NOW.minus(Duration.ofHours(23)).toEpochMilli();
+        long[] times = new long[8000];
+        for (int i = 0; i < times.length; i++) {
+            times[i] = start + i * 10_000L + (i >= 4000 ? 600_000L : 0);
+        }
+        MetricsLog.Trend trend = trend(times);
+        Arrays.fill(trend.tps(), 30);
 
-        String data = data(render(trend));
-        Series ticks = series(data, "tickAvgMs");
-        Series heap = series(data, "heapMb");
-        Series tps = series(data, "tps");
+        Map<String, Object> data = data(render(trend, 1, List.of()));
 
-        assertEquals(1, ticks.buckets().size());
-        assertStatistics(ticks.buckets().getFirst(), 12.3456789, 12.3456789, 12.3456789, 12.3456789, 1);
-        assertEquals(ticks.buckets().getFirst(), ticks.observed());
-        assertStatistics(heap.observed(), 42.125, 42.125, 42.125, 42.125, 1);
-        assertEquals(heap.observed(), heap.buckets().getFirst());
-        assertStatistics(tps.observed(), 0, 0, 0, 0, 1);
-        assertTrue(data.contains("\"t\":[" + START.toEpochMilli() + "]"));
+        assertEquals(false, data.get("collapsed"));
+        assertEquals(1, list(data, "gaps").size());
+        assertEquals(1, list(series(data, "tps"), "brk").size());
+        assertTrue(list(series(data, "tickAvgMs"), "brk").isEmpty());
     }
 
     @Test
-    void emptyTrendIncludesRealMetricsConfigurationGuidance() throws Exception {
-        String html = render(MetricsLog.Trend.EMPTY);
-        String data = data(html);
-        Series ticks = series(data, "tickAvgMs");
+    void missingValuesBreakTheLineWithoutBiasingStatistics() throws Exception {
+        MetricsLog.Trend trend = trend(10_080, WEEK_AGO, 60_000L);
+        for (int i = 0; i < trend.size(); i++) {
+            trend.gcPct()[i] = i < 3000 || i >= 6000 ? 1 : Double.NaN;
+        }
+        trend.gcPct()[0] = Double.POSITIVE_INFINITY;
 
-        assertTrue(data.contains("\"count\":0,\"start\":null,\"end\":null,\"t\":[]"));
-        assertTrue(ticks.buckets().isEmpty());
-        assertMissing(ticks.observed());
+        Map<String, Object> data = data(render(trend, 7, List.of()));
+        Map<String, Object> gc = series(data, "gcPct");
+
+        Map<?, ?> observed = (Map<?, ?>) gc.get("observed");
+        assertEquals(7079, number(observed.get("count")), 0);
+        assertEquals(1, number(observed.get("mean")), 0);
+        assertEquals(1, list(gc, "brk").size());
+        Map<String, Object> missing = series(data, "allocMbPerSec");
+        assertNull(((Map<?, ?>) missing.get("observed")).get("mean"));
+        assertNull(missing.get("p98"));
+        String html = render(trend, 7, List.of());
+        String json = html.substring(html.indexOf("const D = "), html.indexOf(";\n", html.indexOf("const D = ")));
+        assertFalse(json.contains("NaN") || json.contains("Infinity"));
+    }
+
+    @Test
+    void targetPerSampleWinsOverTheFallbackAndOldRowsKeepTheFallback() throws Exception {
+        MetricsLog.Trend old = trend(10, NOW.minusSeconds(600).toEpochMilli(), 10_000L);
+        assertEquals(30, number(data(render(old, 7, List.of())).get("tpsTarget")), 0);
+        MetricsLog.Trend recent = trend(10, NOW.minusSeconds(600).toEpochMilli(), 10_000L);
+        Arrays.fill(recent.targetTps(), 20);
+        recent.targetTps()[9] = 60;
+        assertEquals(60, number(data(render(recent, 7, List.of())).get("tpsTarget")), 0);
+    }
+
+    @Test
+    void singleSampleAndEmptyTrend() throws Exception {
+        MetricsLog.Trend one = trend(1, NOW.minusSeconds(60).toEpochMilli(), 10_000L);
+        one.tickAvgMs()[0] = 12.3456789;
+        one.heapBytes()[0] = 42.125 * 1024 * 1024;
+        Map<String, Object> data = data(render(one, 7, List.of()));
+        assertEquals(1, list(data, "t").size());
+        assertEquals(12.3456789, number(((Map<?, ?>) list(series(data, "tickAvgMs"), "buckets").getFirst()).get("mean")), 1e-9);
+        assertEquals(42.125, number(((Map<?, ?>) series(data, "heapMb").get("observed")).get("max")), 1e-9);
+
+        String html = render(MetricsLog.Trend.EMPTY, 7, List.of());
+        Map<String, Object> empty = data(html);
+        assertNull(empty.get("start"));
+        assertTrue(list(empty, "t").isEmpty());
         assertTrue(html.contains("No health metrics recorded."));
-        assertTrue(html.contains("hybox.json"));
         assertTrue(html.contains("Metrics.Enabled</code> to <code>true"));
         assertTrue(html.contains("/hybox reload"));
-        assertTrue(html.contains("/hybox trend"));
-        assertTrue(html.contains("Metrics.RetentionDays"));
     }
 
-    private static MetricsLog.Trend trend(int count) {
-        long[] timestamps = new long[count];
+    @Test
+    void incidentsCarryTimeSeverityHeadlinePlainTriggerAndBundleFile() throws Exception {
+        MetricsLog.Trend trend = trend(10, NOW.minusSeconds(600).toEpochMilli(), 60_000L);
+        Arrays.fill(trend.tps(), 30);
+        long at = NOW.minusSeconds(300).toEpochMilli();
+        String html = render(trend, 7, List.of(new TrendReport.Incident(at, "DEGRADED",
+            "World default stopped responding", "HEARTBEAT_STALL", "incident-20260601-000400.000+0000-000001.zip")));
+        Map<?, ?> incident = (Map<?, ?>) list(data(html), "incidents").getFirst();
+        assertEquals(at, number(incident.get("t")), 0);
+        assertEquals("DEGRADED", incident.get("severity"));
+        assertEquals("World default stopped responding", incident.get("headline"));
+        assertEquals("Freeze", incident.get("trigger"));
+        assertEquals("incident-20260601-000400.000+0000-000001.zip", incident.get("file"));
+    }
+
+    private static MetricsLog.Trend trend(int count, long start, long step) {
+        long[] times = new long[count];
         for (int i = 0; i < count; i++) {
-            timestamps[i] = START.toEpochMilli() + i * 60_000L;
+            times[i] = start + i * step;
         }
-        return new MetricsLog.Trend(timestamps, missing(count), missing(count), missing(count),
-            missing(count), missing(count), missing(count), missing(count), missing(count), missing(count));
+        return trend(times);
+    }
+
+    private static MetricsLog.Trend trend(long[] times) {
+        int n = times.length;
+        return new MetricsLog.Trend(times, missing(n), missing(n), missing(n), missing(n), missing(n), missing(n),
+            missing(n), missing(n), missing(n), missing(n), missing(n), missing(n), missing(n), missing(n));
     }
 
     private static double[] missing(int count) {
@@ -143,65 +200,31 @@ class TrendReportTest {
         return values;
     }
 
-    private static String render(MetricsLog.Trend trend) throws Exception {
+    private static String render(MetricsLog.Trend trend, int days, List<TrendReport.Incident> incidents) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        TrendReport.write(trend, 7, START.plusSeconds(7 * 86_400L), new long[0], out);
+        TrendReport.write(trend, days, NOW, incidents, 30, out);
         return out.toString(StandardCharsets.UTF_8);
     }
 
-    private static String data(String html) {
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> data(String html) throws Exception {
         String prefix = "const D = ";
         int start = html.indexOf(prefix);
         assertTrue(start >= 0);
-        start += prefix.length();
-        int end = html.indexOf(";\n", start);
-        assertTrue(end >= 0);
-        return html.substring(start, end);
+        return (Map<String, Object>) new JsonScanner(html, start + prefix.length()).value();
     }
 
-    private static Series series(String data, String name) {
-        Matcher series = Pattern.compile("\"" + Pattern.quote(name)
-            + "\":\\{\"buckets\":\\[(.*?)\\],\"observed\":(\\{[^}]*})}").matcher(data);
-        assertTrue(series.find(), "Missing series " + name);
-        List<Statistics> buckets = new ArrayList<>();
-        Matcher bucket = STATISTICS.matcher(series.group(1));
-        while (bucket.find()) {
-            buckets.add(statistics(bucket.group()));
-        }
-        return new Series(buckets, statistics(series.group(2)));
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> series(Map<String, Object> data, String name) {
+        return (Map<String, Object>) data.get(name);
     }
 
-    private static Statistics statistics(String data) {
-        Matcher matcher = STATISTICS.matcher(data);
-        assertTrue(matcher.matches(), "Invalid statistics " + data);
-        return new Statistics(number(matcher.group(1)), number(matcher.group(2)), number(matcher.group(3)),
-            number(matcher.group(4)), Integer.parseInt(matcher.group(5)));
+    @SuppressWarnings("unchecked")
+    private static List<Object> list(Map<?, ?> data, String name) {
+        return (List<Object>) data.get(name);
     }
 
-    private static Double number(String value) {
-        return value.equals("null") ? null : Double.valueOf(value);
-    }
-
-    private static void assertStatistics(Statistics statistics, double mean, double min,
-                                         double max, double last, int count) {
-        assertEquals(count, statistics.count());
-        assertEquals(mean, statistics.mean(), 0.000000001);
-        assertEquals(min, statistics.min(), 0.000000001);
-        assertEquals(max, statistics.max(), 0.000000001);
-        assertEquals(last, statistics.last(), 0.000000001);
-    }
-
-    private static void assertMissing(Statistics statistics) {
-        assertEquals(0, statistics.count());
-        assertNull(statistics.mean());
-        assertNull(statistics.min());
-        assertNull(statistics.max());
-        assertNull(statistics.last());
-    }
-
-    private record Statistics(Double mean, Double min, Double max, Double last, int count) {
-    }
-
-    private record Series(List<Statistics> buckets, Statistics observed) {
+    private static double number(Object value) {
+        return ((Number) value).doubleValue();
     }
 }

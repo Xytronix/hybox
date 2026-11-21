@@ -1,0 +1,20 @@
+$H = "HyboxTones.ui";
+
+Group {
+  LayoutMode: Top;
+  Anchor: (Width: 272, Height: 82, Right: 8);
+  Padding: (Horizontal: 14, Vertical: 10);
+  Background: $H.@Panel;
+  Label #StatLabel {
+    Anchor: (Height: 18);
+    Style: (FontSize: 13, TextColor: $H.@Text3, RenderBold: true);
+  }
+  Label #StatValue {
+    Anchor: (Height: 28);
+    Style: (FontSize: 21, RenderBold: true, TextColor: $H.@Text);
+  }
+  Label #StatDetail {
+    Anchor: (Height: 16);
+    Style: (FontSize: 11, TextColor: $H.@Text3);
+  }
+}

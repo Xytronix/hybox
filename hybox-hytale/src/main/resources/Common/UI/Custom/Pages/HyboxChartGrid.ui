@@ -1,0 +1,5 @@
+$H = "HyboxTones.ui";
+Group {
+  Anchor: (Left: 0, Top: 0, Width: 880, Height: 1);
+  Background: $H.@Panel2;
+}

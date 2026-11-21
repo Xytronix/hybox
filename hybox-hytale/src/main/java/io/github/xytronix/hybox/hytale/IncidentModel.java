@@ -5,14 +5,15 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.stream.JsonReader;
+import io.github.xytronix.hybox.core.health.FrameLabels;
+import io.github.xytronix.hybox.core.json.IncidentJson;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.LinkedHashSet;
-import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.zip.ZipFile;
 
@@ -21,22 +22,38 @@ final class IncidentModel {
     private static final Pattern CARD = Pattern.compile("<div class=\"kvcard\"[^>]*><div class=\"kvh\"><b>(.*?)</b></div><div class=\"kv\">(.*?)(?=<div class=\"kvcard\"|$)", Pattern.DOTALL);
     private static final Pattern ENTRY = Pattern.compile("<div class=\"row\"><span class=\"k\">(.*?)</span><span class=\"v\">(.*?)</span></div>", Pattern.DOTALL);
     private static final Pattern PRE = Pattern.compile("<pre\\b[^>]*>(.*?)</pre>", Pattern.DOTALL);
+    private static final Pattern BLOCKED = Pattern.compile("Blocked in <code>(.*?)</code>(, [^<]*)?", Pattern.DOTALL);
+    private static final String WRAPPED = "$mixinextras$wrapped$";
     private final Path bundle;
-    private final JsonObject metadata;
     private final JsonObject data;
+    private final String headline;
+    private final boolean cleaned;
+    private final boolean frozen;
 
     IncidentModel(Path bundle, JsonObject metadata, JsonObject data) {
         this.bundle = bundle;
-        this.metadata = metadata;
         this.data = data;
-        if (!has("incident") && metadata.has("meta")) data.add("incident", metadata.get("meta").deepCopy());
+        JsonElement meta = metadata.get("meta");
+        JsonElement stored = object(meta).get("headline");
+        this.headline = stored != null && stored.isJsonPrimitive() ? stored.getAsString().strip() : "";
+        this.cleaned = number(object(meta).get(IncidentJson.CLEANED), 0) >= IncidentJson.CLEANED_SCHEMA;
+        this.frozen = text(object(metadata.get("context")), "frozen").equals("true");
+        if (!has("incident") && metadata.has("meta")) data.add("incident", meta.deepCopy());
+        for (JsonElement item : array("diag")) {
+            for (JsonElement row : array(object(item).get("entries"))) {
+                JsonArray pair = array(row);
+                if (pair.size() > 1 && text(pair.get(0)).equals("Blocked in") && pair.get(1).isJsonPrimitive()) {
+                    pair.set(1, new JsonPrimitive(frame(pair.get(1).getAsString())));
+                }
+            }
+        }
     }
 
     static IncidentModel load(Path bundleZip) throws IOException {
         try (ZipFile zip = new ZipFile(bundleZip.toFile(), StandardCharsets.UTF_8)) {
             var metaEntry = zip.getEntry("incident.json");
             var htmlEntry = zip.getEntry("report.html");
-            if (metaEntry == null || htmlEntry == null) throw new IOException("Bundle is missing incident.json or report.html");
+            if (metaEntry == null || htmlEntry == null) throw new IOException("the bundle is missing its incident data.");
             JsonObject metadata;
             try (var reader = new InputStreamReader(zip.getInputStream(metaEntry), StandardCharsets.UTF_8)) {
                 metadata = JsonParser.parseReader(reader).getAsJsonObject();
@@ -46,7 +63,7 @@ final class IncidentModel {
                 html = new String(input.readAllBytes(), StandardCharsets.UTF_8);
             }
             var marker = DATA.matcher(html);
-            if (!marker.find()) throw new IOException("Report has no stored report payload");
+            if (!marker.find()) throw new IOException("the bundle has no stored incident data.");
             JsonObject data;
             try (JsonReader reader = new JsonReader(new StringReader(html.substring(marker.end())))) {
                 data = JsonParser.parseReader(reader).getAsJsonObject();
@@ -54,28 +71,28 @@ final class IncidentModel {
             if (!data.has("diag")) {
                 JsonArray diagnostics = legacyDiagnostics(html);
                 boolean hasCapturedDiagnostics = !diagnostics.isEmpty();
-                var blocked = Pattern.compile("Blocked in <code>(.*?)</code>", Pattern.DOTALL).matcher(html);
+                var blocked = BLOCKED.matcher(html);
                 if (diagnostics.isEmpty() && blocked.find()) {
                     JsonObject stalled = new JsonObject(); stalled.addProperty("title", "Stalled thread");
                     JsonArray entries = new JsonArray(); JsonArray frame = new JsonArray();
-                    frame.add("Blocked in"); frame.add(plain(blocked.group(1))); entries.add(frame);
+                    String label = blocked.group(2) == null ? "" : plain(blocked.group(2)).stripTrailing();
+                    frame.add("Blocked in"); frame.add(plain(blocked.group(1)) + label); entries.add(frame);
                     stalled.add("entries", entries); diagnostics.add(stalled);
                 }
-                for (var entry : java.util.Collections.list(zip.entries())) {
-                    if (hasCapturedDiagnostics) break;
-                    String name = entry.getName();
-                    if (!(name.equals("extras/heartbeats.txt") || name.matches("extras/threads(?:-\\d+)?\\.txt") || name.equals("extras/thread-progress.txt"))) continue;
+                var heartbeats = zip.getEntry("extras/heartbeats.txt");
+                if (!hasCapturedDiagnostics && heartbeats != null) {
                     JsonObject snapshot = new JsonObject();
-                    snapshot.addProperty("title", name.equals("extras/heartbeats.txt") ? "Heartbeats" : name.contains("progress") ? "Thread progress" : "Thread dump · " + name.substring(7));
+                    snapshot.addProperty("title", "Heartbeats");
                     snapshot.add("entries", new JsonArray());
-                    try (var input = zip.getInputStream(entry)) { snapshot.addProperty("pre", new String(input.readAllBytes(), StandardCharsets.UTF_8)); }
+                    try (var input = zip.getInputStream(heartbeats)) { snapshot.addProperty("pre", new String(input.readAllBytes(), StandardCharsets.UTF_8)); }
                     diagnostics.add(snapshot);
                 }
                 data.add("diag", diagnostics);
             }
+            IncidentPrivacy.mask(metadata, data);
             return new IncidentModel(bundleZip, metadata, data);
         } catch (IllegalStateException | com.google.gson.JsonParseException failure) {
-            throw new IOException("Invalid incident report payload", failure);
+            throw new IOException("the incident data in the bundle is damaged.", failure);
         }
     }
 
@@ -118,19 +135,26 @@ final class IncidentModel {
         return numeric.appendTail(decoded).toString();
     }
 
+    static String frame(String shown) {
+        if (shown == null || !shown.contains(WRAPPED)) return shown;
+        int note = shown.indexOf(", ");
+        if (note < 0) return FrameLabels.display(shown);
+        String method = shown.substring(0, note);
+        int dot = method.lastIndexOf('.');
+        String stripped = dot <= 0 ? method : method.substring(0, dot + 1) + FrameLabels.originalMethod(method.substring(dot + 1));
+        return stripped + shown.substring(note);
+    }
+
     Path bundle() { return bundle; }
-    JsonObject metadata() { return metadata; }
     JsonElement field(String key) { return data.has(key) ? data.get(key) : JsonNull.INSTANCE; }
     boolean has(String key) { return !field(key).isJsonNull(); }
     JsonObject object(String key) { return object(field(key)); }
     JsonArray array(String key) { return array(field(key)); }
     String text(String key) { return text(field(key)); }
     String id() { return text(object("incident"), "id"); }
-    Set<String> nonNullFields() {
-        Set<String> fields = new LinkedHashSet<>();
-        data.entrySet().stream().filter(entry -> !entry.getValue().isJsonNull()).forEach(entry -> fields.add(entry.getKey()));
-        return Set.copyOf(fields);
-    }
+    String headline() { return headline; }
+    boolean cleaned() { return cleaned; }
+    boolean frozen() { return frozen; }
     String blockedIn() {
         for (JsonElement item : array("diag")) {
             JsonObject diagnostic = object(item);

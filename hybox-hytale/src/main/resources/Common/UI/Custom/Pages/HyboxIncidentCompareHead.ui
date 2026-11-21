@@ -1,0 +1,13 @@
+$H = "HyboxTones.ui";
+Group {
+  LayoutMode: Top;
+  Anchor: (Bottom: 2);
+  Padding: (Top: 4, Bottom: 4);
+  Group {
+    LayoutMode: Left;
+    Label { Text: "Metric"; FlexWeight: 1; Anchor: (Right: 12); Style: (FontSize: 11, RenderBold: true, TextColor: $H.@Text3); }
+    Label { Text: "Baseline"; Anchor: (Width: 170, Right: 12); Style: (FontSize: 11, RenderBold: true, TextColor: $H.@Text3, HorizontalAlignment: End); }
+    Label #WindowHead { Text: "Incident"; Anchor: (Width: 170, Right: 12); Style: (FontSize: 11, RenderBold: true, TextColor: $H.@Text3, HorizontalAlignment: End); }
+    Label { Text: "Change"; Anchor: (Width: 170); Style: (FontSize: 11, RenderBold: true, TextColor: $H.@Text3, HorizontalAlignment: End); }
+  }
+}

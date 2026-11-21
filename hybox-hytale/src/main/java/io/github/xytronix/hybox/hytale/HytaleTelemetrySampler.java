@@ -13,7 +13,9 @@ import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import io.github.xytronix.hybox.core.config.HyboxConfig;
+import io.github.xytronix.hybox.core.health.HealthSnapshot;
 import io.github.xytronix.hybox.core.health.HostCpuStats;
+import io.github.xytronix.hybox.core.health.WorldStatsProvider;
 import io.github.xytronix.hybox.core.jfr.HyboxDiskEvent;
 import io.github.xytronix.hybox.core.jfr.HyboxHostCpuEvent;
 import io.github.xytronix.hybox.core.jfr.HyboxSystemTickEvent;
@@ -40,6 +42,10 @@ final class HytaleTelemetrySampler {
     private long lastGcWallMillis;
     private long lastAllocBytes = -1;
     private Instant lastAllocAt;
+    private volatile Status status;
+    private volatile List<HealthGauges.World> worlds = List.of();
+
+    record Status(double tps, double tickMs, double cpuPct, long heapUsed, long heapMax, int targetTps) {}
 
     HytaleTelemetrySampler(Clock clock, System.Logger logger, HytaleWorldStatsProvider worldStats,
                            MetricsLog metricsLog, HealthGauges healthGauges, HeartbeatRegistry heartbeatRegistry,
@@ -58,45 +64,53 @@ final class HytaleTelemetrySampler {
 
     void sampleWorldTicks() {
         long startNanos = System.nanoTime();
-        int totalPlayers = 0;
-        boolean playersKnown = false;
-        double worstTps = -1;
-        double worstMspt = -1;
+        WorldStatsProvider.Worlds stats = worldStats.worlds();
+        Map<String, Double> worstTicks = worldStats.worstTicksSinceLastCall();
+        int onlineTotal = HealthSnapshot.onlineTotal(stats.onlinePlayers(), stats.worlds());
+        HealthSnapshot.World worst = null;
         List<HealthGauges.World> worldGauges = new ArrayList<>();
-        for (io.github.xytronix.hybox.core.health.HealthSnapshot.World world : worldStats.worlds().worlds()) {
-            if (world.players() >= 0) {
-                totalPlayers += world.players();
-                playersKnown = true;
-            }
+        for (HealthSnapshot.World world : stats.worlds()) {
             worldGauges.add(new HealthGauges.World(world.name(), world.tps(), world.mspt(),
                 world.players(), world.entities(), world.avgPingMs(), world.chunks(),
                 world.chunksGeneratedTotal(), world.chunksLoadedTotal()));
             if (world.tps() < 0) {
                 continue;
             }
-            worstTps = worstTps < 0 ? world.tps() : Math.min(worstTps, world.tps());
-            if (world.mspt() >= 0) {
-                worstMspt = Math.max(worstMspt, world.mspt());
+            if (worst == null || worse(world, worst, stats.targetTps())) {
+                worst = world;
             }
             HyboxWorldTickEvent event = new HyboxWorldTickEvent();
             event.world = world.name();
             event.tps = world.tps();
             event.mspt = world.mspt();
             event.players = world.players();
+            event.onlinePlayers = stats.onlinePlayers();
             event.entities = world.entities();
             event.chunks = world.chunks();
             event.chunksGeneratedTotal = world.chunksGeneratedTotal();
             event.chunksLoadedTotal = world.chunksLoadedTotal();
             event.avgPingMs = world.avgPingMs();
+            event.msptMax = worstTicks.getOrDefault(world.name(), -1.0);
             event.commit();
         }
-        recordHealthMetrics(worstMspt, worstTps, playersKnown ? totalPlayers : -1, worldGauges,
-            HyboxApi.sampleSupplierGauges());
+        java.lang.management.MemoryUsage heap = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage();
+        double cpuLoad = JvmProbes.processCpuLoad();
+        double worstTps = worst == null ? -1 : worst.tps();
+        double worstMspt = worst == null ? -1 : worst.mspt();
+        int worstTarget = worst == null ? stats.targetTps() : target(worst, stats.targetTps());
+        status = new Status(worstTps, worstMspt, cpuLoad < 0 ? -1 : cpuLoad * 100, heap.getUsed(), heap.getMax(), worstTarget);
+        worlds = List.copyOf(worldGauges);
+        HealthSnapshot.Radius all = stats.allPlayers();
+        MetricsLog.Load load = new MetricsLog.Load(worstTarget > 0 ? worstTarget : -1, stats.maxViewRadius(),
+            all == null ? -1 : all.viewMedian(), all == null ? -1 : all.hotMedian(),
+            all != null ? all.sections() : onlineTotal == 0 ? 0 : -1);
+        recordHealthMetrics(worstMspt, worstTps, onlineTotal, worldGauges,
+            HyboxApi.sampleSupplierGauges(), cpuLoad, heap.getUsed(), load);
         sampleDisk();
         sampleHostCpu();
         PlayerDropDetector drop = playerDrop.get();
-        if (drop != null && playersKnown) {
-            for (TriggerEvent event : drop.sample(totalPlayers)) {
+        if (drop != null && onlineTotal >= 0) {
+            for (TriggerEvent event : drop.sample(onlineTotal)) {
                 capture.accept(event);
             }
         }
@@ -114,8 +128,33 @@ final class HytaleTelemetrySampler {
         healthGauges.setCollectorTimeMs((System.nanoTime() - startNanos) / 1_000_000.0);
     }
 
-    private void recordHealthMetrics(double tickAvgMs, double tps, int players,
-                                     List<HealthGauges.World> worlds, Map<String, Double> supplierGauges) {
+    Status status() {
+        return status;
+    }
+
+    static boolean worse(HealthSnapshot.World candidate, HealthSnapshot.World current, int fallbackTarget) {
+        int a = target(candidate, fallbackTarget);
+        int b = target(current, fallbackTarget);
+        double shareA = candidate.tps() / a;
+        double shareB = current.tps() / b;
+        if (Math.abs(shareA - shareB) > 1e-9) {
+            return shareA < shareB;
+        }
+        return Math.max(0, candidate.mspt()) * a > Math.max(0, current.mspt()) * b;
+    }
+
+    static int target(HealthSnapshot.World world, int fallbackTarget) {
+        return world.targetTps() > 0 ? world.targetTps()
+            : fallbackTarget > 0 ? fallbackTarget : HealthSnapshot.DEFAULT_TARGET_TPS;
+    }
+
+    List<HealthGauges.World> worlds() {
+        return worlds;
+    }
+
+    private void recordHealthMetrics(double tickAvgMs, double tps, int players, List<HealthGauges.World> worlds,
+                                     Map<String, Double> supplierGauges, double cpuLoad, long heapUsed,
+                                     MetricsLog.Load load) {
         HyboxConfig cfg = config.get();
         boolean csv = cfg.metricsEnabled();
         boolean live = cfg.prometheusEnabled();
@@ -124,10 +163,9 @@ final class HytaleTelemetrySampler {
         }
         try {
             Instant now = clock.instant();
-            long heapUsed = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed();
             long rss = readRssBytes();
             double gcPct = gcFractionPercent();
-            double cpu = cfg.metricsCpu() ? JvmProbes.processCpuLoad() : -1;
+            double cpu = cfg.metricsCpu() ? cpuLoad : -1;
             double cpuPct = cpu < 0 ? -1 : cpu * 100;
             double alloc = cfg.metricsAllocation() ? allocRateMbPerSec(now) : Double.NaN;
             long queued = sampleQueuedPackets();
@@ -151,7 +189,7 @@ final class HytaleTelemetrySampler {
             }
             if (csv) {
                 String row = MetricsLog.formatRow(now, tickAvgMs, tps, players,
-                    heapUsed, rss, gcPct, cpuPct, alloc, queued);
+                    heapUsed, rss, gcPct, cpuPct, alloc, queued, load);
                 metricsLog.append(now, row, cfg.metricsRetentionDays());
             }
         } catch (Exception e) {
@@ -246,7 +284,8 @@ final class HytaleTelemetrySampler {
         try {
             long[] throttle = HostCpuStats.cgroupThrottle();
             long[] proc = HostCpuStats.procCpu();
-            if (throttle == null && proc == null) {
+            long[] swap = HostCpuStats.swapBytes();
+            if (throttle == null && proc == null && swap == null) {
                 return;
             }
             HyboxHostCpuEvent event = new HyboxHostCpuEvent();
@@ -256,6 +295,8 @@ final class HytaleTelemetrySampler {
             event.cpuTotalJiffies = proc == null ? -1 : proc[0];
             event.cpuStealJiffies = proc == null ? -1 : proc[1];
             event.cpuIowaitJiffies = proc == null ? -1 : proc[2];
+            event.swapInBytes = swap == null ? -1 : swap[0];
+            event.swapOutBytes = swap == null ? -1 : swap[1];
             event.commit();
         } catch (Exception e) {
             logger.log(System.Logger.Level.DEBUG, "Host CPU sampling failed.", e);

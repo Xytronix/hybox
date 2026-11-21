@@ -5,8 +5,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntFunction;
 import java.util.function.Supplier;
 
 import com.hypixel.hytale.metrics.metric.HistoricMetric;
@@ -23,6 +23,15 @@ final class HytaleTickSystems {
     private static final int PERIOD_5M = 2;
     private static final String DISABLED_NOTE = "system metrics disabled";
     private static final long STORE_THREAD_TIMEOUT_MS = 250;
+    private static final ClassValue<String> QUALIFIED = new ClassValue<>() {
+        @Override
+        protected String computeValue(Class<?> type) {
+            Class<?> outer = type.getEnclosingClass();
+            String packageName = type.getPackageName();
+            String prefix = outer != null ? simpleName(outer) : packageName.substring(packageName.lastIndexOf('.') + 1);
+            return prefix.isEmpty() ? simpleName(type) : prefix + "." + simpleName(type);
+        }
+    };
 
     private HytaleTickSystems() {
     }
@@ -78,7 +87,7 @@ final class HytaleTickSystems {
                         if (avg1m <= 0 && max1m <= 0 && avg5m <= 0) {
                             continue;
                         }
-                        collected.add(new Row(systemName(data.getSystem(i)), worldName,
+                        collected.add(new Row(systemName(data::getSystem, size, i), worldName,
                             avg1m, max1m, avg5m, max5m));
                     } catch (Throwable ignored) {
                     }
@@ -119,6 +128,9 @@ final class HytaleTickSystems {
 
     static List<SystemSample> topSystems(int perWorldLimit) {
         List<SystemSample> samples = new ArrayList<>();
+        if (perWorldLimit <= 0) {
+            return samples;
+        }
         try {
             for (Map.Entry<String, World> entry : Universe.get().getWorlds().entrySet()) {
                 String worldName = entry.getKey();
@@ -131,24 +143,36 @@ final class HytaleTickSystems {
                     var data = store.getRegistry().getData();
                     HistoricMetric[] metrics = store.getSystemMetrics();
                     int size = Math.min(data.getSystemSize(), metrics.length);
-                    List<SystemSample> collected = new ArrayList<>();
+                    int[] topIndex = new int[perWorldLimit];
+                    double[] topMs = new double[perWorldLimit];
+                    int count = 0;
                     for (int i = 0; i < size; i++) {
                         HistoricMetric metric = metrics[i];
                         if (metric == null) {
                             continue;
                         }
                         double avgMs = nanosToMs(metric.getAverage(PERIOD_1S));
-                        if (avgMs > 0) {
-                            collected.add(new SystemSample(worldName, systemName(data.getSystem(i)), avgMs));
+                        if (avgMs <= 0 || (count == perWorldLimit && avgMs <= topMs[count - 1])) {
+                            continue;
                         }
+                        int at = count < perWorldLimit ? count++ : count - 1;
+                        while (at > 0 && topMs[at - 1] < avgMs) {
+                            topMs[at] = topMs[at - 1];
+                            topIndex[at] = topIndex[at - 1];
+                            at--;
+                        }
+                        topMs[at] = avgMs;
+                        topIndex[at] = i;
+                    }
+                    List<SystemSample> collected = new ArrayList<>(count);
+                    for (int j = 0; j < count; j++) {
+                        collected.add(new SystemSample(worldName, systemName(data::getSystem, size, topIndex[j]), topMs[j]));
                     }
                     return collected;
                 });
-                if (worldSamples == null) {
-                    continue;
+                if (worldSamples != null) {
+                    samples.addAll(worldSamples);
                 }
-                worldSamples.sort((a, b) -> Double.compare(b.avgMs(), a.avgMs()));
-                samples.addAll(worldSamples.subList(0, Math.min(perWorldLimit, worldSamples.size())));
             }
         } catch (Throwable t) {
             return List.of();
@@ -157,32 +181,37 @@ final class HytaleTickSystems {
     }
 
     private static <T> T onStoreThread(World world, Supplier<T> task) {
-        CompletableFuture<T> future = new CompletableFuture<>();
         try {
-            world.execute(() -> {
-                try {
-                    future.complete(task.get());
-                } catch (Throwable t) {
-                    future.completeExceptionally(t);
-                }
-            });
-            return future.get(STORE_THREAD_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            return HytaleWorldThreads.await(HytaleWorldThreads.submit(world, task),
+                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(STORE_THREAD_TIMEOUT_MS));
         } catch (Throwable t) {
             return null;
         }
     }
 
-    private static String systemName(Object system) {
+    private static String systemName(IntFunction<Object> systems, int size, int index) {
+        Object system = systems.apply(index);
         if (system == null) {
             return "<unknown>";
         }
-        String simple = system.getClass().getSimpleName();
+        Class<?> type = system.getClass();
+        String simple = simpleName(type);
+        for (int i = 0; i < size; i++) {
+            Object other = i == index ? null : systems.apply(i);
+            if (other != null && other.getClass() != type && simpleName(other.getClass()).equals(simple)) {
+                return QUALIFIED.get(type);
+            }
+        }
+        return simple;
+    }
+
+    private static String simpleName(Class<?> type) {
+        String simple = type.getSimpleName();
         if (!simple.isBlank()) {
             return simple;
         }
-        String name = system.getClass().getName();
-        int dot = name.lastIndexOf('.');
-        return dot < 0 ? name : name.substring(dot + 1);
+        String name = type.getName();
+        return name.substring(name.lastIndexOf('.') + 1);
     }
 
     private static double nanosToMs(double nanos) {

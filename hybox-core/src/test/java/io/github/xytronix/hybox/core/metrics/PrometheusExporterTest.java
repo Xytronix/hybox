@@ -199,6 +199,35 @@ class PrometheusExporterTest {
     }
 
     @Test
+    void render_emitsModCountersAsSumsAndGaugesAsLastValueWithModLabel() {
+        HealthGauges gauges = new HealthGauges();
+        ModMetrics mods = gauges.modMetrics();
+        mods.add("IroriPowered:Refixes", "AiTickThrottler froze", true, 3);
+        mods.add("IroriPowered:Refixes", "AiTickThrottler froze", true, 4);
+        mods.add("IroriPowered:Refixes", "AiTickThrottler froze", true, -2);
+        mods.add("IroriPowered:Refixes", "Chunk distance", false, 8);
+        mods.add("IroriPowered:Refixes", "Chunk distance", false, 7);
+        mods.add("My \"Mod\"", "queue", false, Double.NaN);
+        String text = PrometheusExporter.render(gauges);
+        assertEquals(1, text.lines().filter(l -> l.equals("# TYPE hybox_mod_gauge gauge")).count(), text);
+        assertEquals(1, text.lines().filter(l -> l.equals("# TYPE hybox_mod_counter counter")).count(), text);
+        assertTrue(text.contains(
+            "\nhybox_mod_counter{mod=\"IroriPowered:Refixes\",name=\"AiTickThrottler froze\"} 7.00\n"), text);
+        assertTrue(text.contains("\nhybox_mod_gauge{mod=\"IroriPowered:Refixes\",name=\"Chunk distance\"} 7.00\n"), text);
+        assertFalse(text.contains("queue"), text);
+    }
+
+    @Test
+    void render_escapesModLabelsAndDropsSeriesAfterClear() {
+        HealthGauges gauges = new HealthGauges();
+        gauges.modMetrics().add("My \"Mod\"", "a\\b", false, 1);
+        assertTrue(PrometheusExporter.render(gauges)
+            .contains("\nhybox_mod_gauge{mod=\"My \\\"Mod\\\"\",name=\"a\\\\b\"} 1.00\n"));
+        gauges.modMetrics().clear();
+        assertFalse(PrometheusExporter.render(gauges).contains("hybox_mod_"));
+    }
+
+    @Test
     void render_emitsCgroupCpuCounters() {
         HealthGauges gauges = new HealthGauges();
         gauges.setCgroupCpu(5_000_000L, 120_000L, 8L);

@@ -4,42 +4,34 @@ Group {
   LayoutMode: Top;
   Anchor: (Width: 940, Bottom: 6);
   Padding: (Top: 6, Bottom: 6);
-  Background: #ffffff(0.04);
+  Background: $H.@Panel;
   Group {
     LayoutMode: Left;
     Anchor: (Height: 24);
-    Label #Rank { Anchor: (Width: 34, Right: 6); Style: (FontSize: 11, TextColor: #96a9be, VerticalAlignment: Center); }
+    Label #Rank { Anchor: (Width: 34, Right: 6); Style: (FontSize: 11, TextColor: $H.@Text3, VerticalAlignment: Center); }
     Label #Name {
       FlexWeight: 1;
       Anchor: (Right: 8);
-      Style: (FontSize: 12, RenderBold: true, TextColor: #d3e3ed, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 1);
+      Style: (FontSize: 12, RenderBold: true, TextColor: $H.@Text, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 1);
       TextTooltipStyle: $H.@TooltipStyle;
     }
-    Label #State {
-      Anchor: (Width: 110, Height: 22, Right: 10);
-      Background: #ffffff(0.04);
-      Style: (FontSize: 10, RenderBold: true, TextColor: #96a9be, HorizontalAlignment: Center, VerticalAlignment: Center);
-    }
-    Label #Samples { Anchor: (Width: 110, Right: 10); Style: (FontSize: 11, TextColor: #bfcdd5, HorizontalAlignment: End, VerticalAlignment: Center); }
-    Label #Self { Anchor: (Width: 88, Right: 10); Style: (FontSize: 11, TextColor: #7a9cc6, HorizontalAlignment: End, VerticalAlignment: Center); }
+    Label #Samples { Anchor: (Width: 110, Right: 10); Style: (FontSize: 11, TextColor: $H.@Text2, HorizontalAlignment: End, VerticalAlignment: Center); }
+    Label #Self { Anchor: (Width: 88, Right: 10); Style: (FontSize: 11, RenderBold: true, TextColor: $H.@Text, HorizontalAlignment: End, VerticalAlignment: Center); }
     Group {
       Anchor: (Width: 140);
-      $C.@ProgressBar #Share { Anchor: (Width: 140, Height: 6, Top: 9); }
+      $H.@Bar #Share { Anchor: (Width: 140, Height: 6, Top: 9); }
     }
   }
   Label #Top {
     Anchor: (Height: 18, Top: 3, Bottom: 3);
-    Style: (FontSize: 11, TextColor: #bfcdd5, Wrap: true, WrapMaxLines: 1);
+    Style: (FontSize: 11, TextColor: $H.@Text2, Wrap: true, WrapMaxLines: 1);
     TextTooltipStyle: $H.@TooltipStyle;
   }
   Group #Strip {
     Anchor: (Width: 940, Height: 12, Bottom: 4);
-    Background: #ffffff(0.04);
+    Background: $H.@Bg2;
     Group #StripBars { Anchor: (Full: 0); }
     AssetImage #StripImage { Anchor: (Left: 0, Top: 0, Width: 940, Height: 12); Visible: false; }
     Group #StripHover { Anchor: (Full: 0); }
-  }
-  Label #Methods {
-    Style: (FontSize: 10, TextColor: #96a9be, Wrap: true, WrapMaxLines: 4);
   }
 }

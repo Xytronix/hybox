@@ -1,11 +1,12 @@
 $C = "../Common.ui";
+$H = "../Pages/HyboxTones.ui";
 
 Group {
   Anchor: (Left: 20, Top: 80, Height: 72);
   LayoutMode: Left;
 
   Group #Profile {
-    Background: #000000(0.35);
+    Background: $H.@HudBackground;
     Padding: (Horizontal: 14, Vertical: 8);
     LayoutMode: Left;
     Visible: false;
@@ -15,8 +16,8 @@ Group {
       $C.@CircularProgressBar #Ring {
         @Size = 56;
         Value: 0;
-        Background: #ffffff(0.12);
-        Color: #80c991;
+        Background: $H.@Border;
+        Color: $H.@Accent;
       }
     }
 
@@ -24,16 +25,16 @@ Group {
       LayoutMode: Top;
       Anchor: (Width: 150);
       Label {
-        Text: "HYBOX PROFILE";
+        Text: "Hybox profile";
         Anchor: (Height: 18);
-        Style: (FontSize: 12, RenderBold: true, LetterSpacing: 1.2, TextColor: #bfcdd5);
+        Style: (FontSize: 12, RenderBold: true, TextColor: $H.@Text2);
       }
       Group #TimerHost { Anchor: (Height: 32); }
     }
   }
 
   Group #Capture {
-    Background: #000000(0.35);
+    Background: $H.@HudBackground;
     Padding: (Horizontal: 14, Vertical: 8);
     LayoutMode: Left;
     Visible: false;
@@ -44,13 +45,13 @@ Group {
       LayoutMode: Top;
       Anchor: (Width: 260);
       Label {
-        Text: "HYBOX CAPTURE";
+        Text: "Hybox capture";
         Anchor: (Height: 18);
-        Style: (FontSize: 12, RenderBold: true, LetterSpacing: 1.2, TextColor: #bfcdd5);
+        Style: (FontSize: 12, RenderBold: true, TextColor: $H.@Text2);
       }
       Label #Step {
         Anchor: (Height: 22);
-        Style: (FontSize: 14, TextColor: #ffffff, VerticalAlignment: Center);
+        Style: (FontSize: 14, TextColor: $H.@Text, VerticalAlignment: Center);
       }
     }
   }

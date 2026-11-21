@@ -9,15 +9,18 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import io.github.xytronix.hybox.core.capture.CaptureResult;
 import io.github.xytronix.hybox.core.jfr.JfrController;
+import io.github.xytronix.hybox.core.jfr.ProfileMode;
+import io.github.xytronix.hybox.core.trigger.TriggerEngine;
 import io.github.xytronix.hybox.core.trigger.TriggerEvent;
 import io.github.xytronix.hybox.core.trigger.TriggerKind;
 
 final class ProfileSessionController {
+    record Owner(ProfileMode mode, String requesterName) {}
+
     private final Clock clock;
     private final System.Logger logger;
     private final ScheduledExecutorService scheduler;
@@ -25,15 +28,32 @@ final class ProfileSessionController {
     private final Function<TriggerEvent, CaptureResult> leadUpCapture;
     private final Function<TriggerEvent, CompletableFuture<CaptureResult>> finalCapture;
     private final Consumer<CaptureResult> outcome;
-    private final AtomicBoolean profileActive = new AtomicBoolean(false);
-    private volatile long profileEndsAtMs;
-    private long profileStartMs;
-    private volatile Instant recordingStartedAt;
-    private volatile Duration totalDuration = Duration.ZERO;
-    private volatile String requesterName;
-    private Consumer<CaptureResult> completion;
+    private volatile Session running;
+    private volatile Session finishing;
     private boolean closed;
     private long generation;
+
+    private static final class Session {
+        final long id;
+        final ProfileMode mode;
+        final String requesterName;
+        final long startMs;
+        volatile Instant startedAt;
+        volatile Duration total = Duration.ZERO;
+        volatile long endsAtMs;
+        Consumer<CaptureResult> completion;
+
+        Session(long id, ProfileMode mode, String requesterName, long startMs) {
+            this.id = id;
+            this.mode = mode;
+            this.requesterName = requesterName;
+            this.startMs = startMs;
+        }
+
+        Owner owner() {
+            return new Owner(mode, requesterName);
+        }
+    }
 
     ProfileSessionController(Clock clock, System.Logger logger, ScheduledExecutorService scheduler,
                              JfrController jfr, Function<TriggerEvent, CaptureResult> leadUpCapture,
@@ -48,145 +68,181 @@ final class ProfileSessionController {
         this.outcome = Objects.requireNonNull(outcome, "outcome");
     }
 
-    synchronized String start(int minutes, boolean keepBuffer, String requesterName, Consumer<CaptureResult> onComplete) {
+    static int clampMinutes(int minutes) {
+        return Math.max(1, Math.min(30, minutes));
+    }
+
+    synchronized String start(ProfileMode mode, int minutes, boolean keepBuffer, String requesterName,
+                              Consumer<CaptureResult> onComplete) {
+        Objects.requireNonNull(mode, "mode");
         Objects.requireNonNull(onComplete, "onComplete");
         if (closed) {
             return "Hybox is not running.";
         }
-        int clamped = Math.max(1, Math.min(30, minutes));
-        if (!profileActive.compareAndSet(false, true)) {
+        int clamped = clampMinutes(minutes);
+        if (running != null) {
             return "A profile session is already running (" + remainingSeconds() + "s remaining).";
         }
-        this.requesterName = requesterName;
-        recordingStartedAt = null;
-        totalDuration = Duration.ZERO;
-        profileEndsAtMs = 0;
-        long session = ++generation;
-        profileStartMs = clock.millis();
+        Session session = new Session(++generation, mode, requesterName, clock.millis());
+        running = session;
         if (!keepBuffer) {
             try {
                 CaptureResult leadUp = leadUpCapture.apply(new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(),
-                    Map.of("reason", "profile lead-up")));
+                    Map.of("reason", TriggerEngine.PROFILE_LEAD_UP)));
                 if (!leadUp.captured()) {
-                    profileActive.set(false);
-                    return "Profile lead-up capture: " + leadUp.status() + "; recording unchanged.";
+                    running = null;
+                    return "Profile lead-up capture: " + leadUp.status() + ". The recording is unchanged.";
                 }
             } catch (Exception e) {
                 logger.log(System.Logger.Level.WARNING, "Failed to capture the pre-profile lead-up.", e);
-                profileActive.set(false);
-                return "Failed to capture the pre-profile lead-up; recording unchanged.";
+                running = null;
+                return "Failed to capture the pre-profile lead-up. The recording is unchanged.";
             }
         }
         try {
             if (keepBuffer) {
-                jfr.applyConfiguration("profile");
+                jfr.applyConfiguration(mode);
             } else {
-                jfr.restart("profile");
+                jfr.restart(mode);
             }
         } catch (Exception failure) {
-            profileActive.set(false);
-            return "Failed to switch the recording to the profile preset: " + failure;
+            running = null;
+            return "Failed to switch the recording to the " + mode.id() + " profile settings: " + failure;
         }
-        recordingStartedAt = clock.instant();
-        totalDuration = Duration.ofMinutes(clamped);
-        profileEndsAtMs = recordingStartedAt.toEpochMilli() + totalDuration.toMillis();
-        completion = onComplete;
+        session.startedAt = clock.instant();
+        session.total = Duration.ofMinutes(clamped);
+        session.endsAtMs = session.startedAt.toEpochMilli() + session.total.toMillis();
+        session.completion = onComplete;
         try {
-            scheduler.schedule(() -> finish(session), clamped, TimeUnit.MINUTES);
+            scheduler.schedule(() -> finish(session.id), clamped, TimeUnit.MINUTES);
         } catch (RejectedExecutionException failure) {
-            try {
-                jfr.applyConfiguration(null);
-                CaptureResult failed = CaptureResult.failed("Profile completion scheduling rejected");
-                outcome.accept(failed);
-                onComplete.accept(failed);
-            } finally {
-                profileActive.set(false);
-                completion = null;
-            }
+            running = null;
+            session.completion = null;
+            restoreNormalSettings();
+            CaptureResult failed = CaptureResult.failed("Profile completion scheduling rejected");
+            outcome.accept(failed);
+            onComplete.accept(failed);
             return "Failed to schedule profile completion: Hybox is stopping.";
         }
         return null;
     }
 
     boolean active() {
-        return profileActive.get();
+        return running != null;
+    }
+
+    boolean finishing() {
+        return finishing != null;
+    }
+
+    ProfileMode mode() {
+        Session session = running;
+        return session == null ? null : session.mode;
     }
 
     long remainingSeconds() {
-        long remaining = profileEndsAtMs - clock.millis();
+        Session session = running;
+        long remaining = session == null ? 0 : session.endsAtMs - clock.millis();
         return remaining <= 0 ? 0 : (remaining + 999) / 1000;
     }
 
     Instant startedAt() {
-        return recordingStartedAt;
+        Session session = running;
+        return session == null ? null : session.startedAt;
     }
 
     Duration totalDuration() {
-        return totalDuration;
+        Session session = running;
+        return session == null ? Duration.ZERO : session.total;
     }
 
     String requesterName() {
-        return profileActive.get() ? requesterName : null;
+        Session session = running;
+        return session == null ? null : session.requesterName;
     }
 
-    private synchronized void finish(long session) {
-        if (closed || !profileActive.get() || generation != session) {
+    Owner finishingOwner() {
+        Session session = finishing;
+        return session == null ? null : session.owner();
+    }
+
+    private synchronized void finish(long id) {
+        Session session = running;
+        if (closed || session == null || session.id != id || session.completion == null) {
             return;
         }
-        Consumer<CaptureResult> completed = completion;
-        completion = null;
+        Consumer<CaptureResult> completed = session.completion;
+        session.completion = null;
+        running = null;
+        finishing = session;
         try {
-            jfr.applyConfiguration(null);
             finalCapture.apply(new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(),
-                Map.of("reason", "profile session", "profileStartMs", Long.toString(profileStartMs))))
-                .whenComplete((result, failure) -> {
-                    if (failure != null) {
-                        outcome.accept(CaptureResult.failed(failure.getClass().getSimpleName()));
-                    } else if (result.status() == CaptureResult.Status.BUSY
-                        || result.status() == CaptureResult.Status.STOPPED) {
-                        outcome.accept(CaptureResult.failed("Profile capture not admitted: " + result.status()));
-                    } else if (!result.captured()) {
-                        logger.log(System.Logger.Level.WARNING, "Profile-session capture: " + result.status());
-                    }
-                    completed.accept(failure == null ? result
-                        : CaptureResult.failed(failure.getClass().getSimpleName()));
-                });
+                    Map.of("reason", "profile session", "profileStartMs", Long.toString(session.startMs),
+                        ProfileMode.CONTEXT_KEY, session.mode.id())))
+                .whenComplete((result, failure) -> settle(session, completed, result, failure));
         } catch (Exception failure) {
-            CaptureResult failed = CaptureResult.failed(failure.getClass().getSimpleName());
-            outcome.accept(failed);
-            completed.accept(failed);
             logger.log(System.Logger.Level.WARNING, "Profile-session completion failed.", failure);
-        } finally {
-            profileActive.set(false);
+            settle(session, completed, null, failure);
         }
+    }
+
+    private void settle(Session session, Consumer<CaptureResult> completed, CaptureResult result, Throwable failure) {
+        synchronized (this) {
+            if (finishing == session) {
+                finishing = null;
+            }
+            if (running == null && !closed) {
+                restoreNormalSettings();
+            }
+        }
+        CaptureResult settled = failure != null ? CaptureResult.failed(failure.getClass().getSimpleName()) : result;
+        if (failure != null) {
+            outcome.accept(settled);
+        } else if (result.status() == CaptureResult.Status.BUSY || result.status() == CaptureResult.Status.STOPPED) {
+            outcome.accept(CaptureResult.failed("Profile capture not admitted: " + result.status()));
+        } else if (!result.captured() && result.status() != CaptureResult.Status.CANCELLED) {
+            logger.log(System.Logger.Level.WARNING, "Profile-session capture: " + result.status());
+        }
+        completed.accept(settled);
     }
 
     synchronized String finishNow() {
-        if (closed || !profileActive.get() || completion == null) return "No profile session is running.";
-        finish(generation);
+        Session session = running;
+        if (closed || session == null || session.completion == null) return "No profile session is running.";
+        finish(session.id);
         return null;
     }
 
-    synchronized String cancel() {
-        if (closed || !profileActive.get() || completion == null) return "No profile session is running.";
-        Consumer<CaptureResult> cancelled = completion;
-        completion = null;
+    synchronized Owner cancelRunning() {
+        Session session = running;
+        if (closed || session == null || session.completion == null) return null;
+        Consumer<CaptureResult> cancelled = session.completion;
+        session.completion = null;
         generation++;
+        running = null;
+        restoreNormalSettings();
+        cancelled.accept(CaptureResult.of(CaptureResult.Status.CANCELLED));
+        return session.owner();
+    }
+
+    private void restoreNormalSettings() {
         try {
             jfr.applyConfiguration(null);
         } catch (Exception failure) {
-            logger.log(System.Logger.Level.WARNING, "Failed to restore the normal recording preset after cancelling a profile.", failure);
-        } finally {
-            profileActive.set(false);
+            logger.log(System.Logger.Level.WARNING, "Failed to restore the normal recording settings after a profile.", failure);
         }
-        cancelled.accept(CaptureResult.of(CaptureResult.Status.CANCELLED));
-        return null;
     }
 
     synchronized void close() {
         closed = true;
         generation++;
-        if (profileActive.getAndSet(false)) completion.accept(CaptureResult.of(CaptureResult.Status.STOPPED));
-        completion = null;
+        Session session = running;
+        running = null;
+        finishing = null;
+        if (session != null && session.completion != null) {
+            Consumer<CaptureResult> stopped = session.completion;
+            session.completion = null;
+            stopped.accept(CaptureResult.of(CaptureResult.Status.STOPPED));
+        }
     }
 }

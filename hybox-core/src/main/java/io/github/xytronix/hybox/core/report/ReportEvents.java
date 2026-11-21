@@ -9,6 +9,7 @@ import io.github.xytronix.hybox.core.json.JsonWriter;
 
 final class ReportEvents {
     private static final int MAX_EVENTS = 120;
+    private static final String MOD_TYPE = "mod:";
 
     private ReportEvents() {
     }
@@ -19,8 +20,9 @@ final class ReportEvents {
         }
     }
 
-    static void write(JsonWriter json, List<ReportHtml.LogLine> log, JfrTimeline timeline) throws IOException {
-        List<ReportEvent> all = buildEvents(log, timeline);
+    static void write(JsonWriter json, List<ReportHtml.LogLine> log, JfrTimeline timeline, ModNames modNames,
+                      String incidentId) throws IOException {
+        List<ReportEvent> all = buildEvents(log, timeline, modNames, incidentId);
         int hidden = Math.max(0, all.size() - MAX_EVENTS);
         List<ReportEvent> shown = hidden > 0 ? all.subList(all.size() - MAX_EVENTS, all.size()) : all;
         writeEvents(json, shown);
@@ -35,7 +37,8 @@ final class ReportEvents {
         return s.substring(0, cut) + "…";
     }
 
-    private static List<ReportEvent> buildEvents(List<ReportHtml.LogLine> log, JfrTimeline timeline) {
+    private static List<ReportEvent> buildEvents(List<ReportHtml.LogLine> log, JfrTimeline timeline, ModNames modNames,
+                                                 String incidentId) {
         if (timeline == null || timeline.start() == null || timeline.end() == null) {
             return List.of();
         }
@@ -73,9 +76,21 @@ final class ReportEvents {
             if (pe.timeMs() < start || pe.timeMs() > end) {
                 continue;
             }
-            String label = pe.category().isBlank() ? pe.message() : "[" + pe.category() + "] " + pe.message();
-            label = truncate(label, 80);
-            raw.add(new ReportEvent((pe.timeMs() - start) / (double) (end - start), "plugin", label, 1));
+            int slash = pe.category().indexOf('/');
+            String type = slash > 0 ? MOD_TYPE + modNames.id(pe.category().substring(0, slash)) : "plugin";
+            String category = slash > 0 ? pe.category().substring(slash + 1) : pe.category();
+            String label = category.isBlank() ? pe.message() : "[" + category + "] " + pe.message();
+            raw.add(new ReportEvent((pe.timeMs() - start) / (double) (end - start), type, truncate(label, 80), 1));
+        }
+        for (JfrTimeline.ModAction action : timeline.modActions()) {
+            if (action.timeMs() < start || action.timeMs() > end) {
+                continue;
+            }
+            String label = action.category().isEmpty() ? action.message()
+                : action.message().isEmpty() ? "[" + action.category() + "]"
+                : "[" + action.category() + "] " + action.message();
+            raw.add(new ReportEvent((action.timeMs() - start) / (double) (end - start),
+                MOD_TYPE + modNames.id(action.mod()), truncate(label, 80), 1));
         }
         for (JfrTimeline.ConnEvent ce : conns) {
             if (ce.timeMs() < start || ce.timeMs() > end) {
@@ -85,6 +100,13 @@ final class ReportEvents {
                 + (ce.detail() == null || ce.detail().isBlank() ? "" : " · " + ce.detail());
             label = truncate(label, 80);
             raw.add(new ReportEvent((ce.timeMs() - start) / (double) (end - start), "conn", label, 1));
+        }
+        for (JfrTimeline.IncidentMarker mark : timeline.incidentMarkers()) {
+            if (mark.id().equals(incidentId) || mark.timeMs() < start || mark.timeMs() > end) {
+                continue;
+            }
+            String label = mark.headline().isBlank() ? mark.id() : mark.id() + ": " + mark.headline();
+            raw.add(new ReportEvent((mark.timeMs() - start) / (double) (end - start), "incident", truncate(label, 80), 1));
         }
         raw.sort((a, b) -> Double.compare(a.frac(), b.frac()));
 

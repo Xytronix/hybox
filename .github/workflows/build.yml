@@ -44,3 +44,6 @@ jobs:
           name: Hybox
           path: hybox-hytale/build/libs/Hybox-*.jar
           if-no-files-found: error
+
+      - name: Compile and test against Hytale 0.8.0-pre.6
+        run: ./gradlew :hybox-core:test :hybox-hytale:test -PhytaleServerVersion=0.8.0-pre.6 --no-daemon

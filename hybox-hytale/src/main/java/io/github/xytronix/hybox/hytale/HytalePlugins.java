@@ -11,6 +11,7 @@ import com.hypixel.hytale.server.core.plugin.PluginBase;
 import com.hypixel.hytale.server.core.plugin.PluginManager;
 
 import io.github.xytronix.hybox.core.incident.DiagnosticSection;
+import io.github.xytronix.hybox.core.report.ModNames;
 
 final class HytalePlugins {
     private static final System.Logger LOGGER = System.getLogger(HytalePlugins.class.getName());
@@ -19,16 +20,52 @@ final class HytalePlugins {
     }
 
     static List<DiagnosticSection> appendTo(List<DiagnosticSection> base) {
-        Map<String, String> entries = entries();
+        Map<String, String> websites = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        Map<String, String> classes = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        Map<String, String> entries = entries(websites, classes);
         if (entries.isEmpty()) {
             return base;
         }
         List<DiagnosticSection> out = new ArrayList<>(base);
         out.add(new DiagnosticSection("Plugins", entries));
+        if (!websites.isEmpty()) {
+            out.add(new DiagnosticSection("Plugin websites", new LinkedHashMap<>(websites)));
+        }
+        if (!classes.isEmpty()) {
+            out.add(new DiagnosticSection("Plugin classes", new LinkedHashMap<>(classes)));
+        }
         return out;
     }
 
-    private static Map<String, String> entries() {
+    static List<String> knownVersions() {
+        List<String> versions = new ArrayList<>();
+        versions.add(HytaleServerVersion.get());
+        try {
+            for (PluginBase plugin : PluginManager.get().getPlugins()) {
+                try {
+                    versions.add(String.valueOf(plugin.getManifest().getVersion()));
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable t) {
+            LOGGER.log(System.Logger.Level.DEBUG, "Plugin enumeration failed.", t);
+        }
+        return versions;
+    }
+
+    static String modId(String mod) {
+        List<String> ids = new ArrayList<>();
+        try {
+            for (PluginBase plugin : PluginManager.get().getPlugins()) {
+                ids.add(String.valueOf(plugin.getIdentifier()));
+            }
+        } catch (Throwable t) {
+            LOGGER.log(System.Logger.Level.DEBUG, "Plugin enumeration failed.", t);
+        }
+        return new ModNames(ids).id(mod);
+    }
+
+    private static Map<String, String> entries(Map<String, String> websites, Map<String, String> classes) {
         Map<String, String> sorted = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         String serverVersion = HytaleServerVersion.get();
         try {
@@ -43,6 +80,11 @@ final class HytalePlugins {
                         unique = key + " #" + suffix++;
                     }
                     sorted.put(unique, version);
+                    String website = website(plugin);
+                    if (website != null) {
+                        websites.put(unique, website);
+                    }
+                    classes.put(unique, plugin.getClass().getName());
                 } catch (Exception ignored) {
                 }
             }
@@ -50,6 +92,15 @@ final class HytalePlugins {
             LOGGER.log(System.Logger.Level.DEBUG, "Plugin enumeration failed.", t);
         }
         return new LinkedHashMap<>(sorted);
+    }
+
+    private static String website(PluginBase plugin) {
+        try {
+            String website = plugin.getManifest().getWebsite();
+            return website == null || website.isBlank() ? null : website.trim();
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     private static String versionInfo(PluginBase plugin, String serverVersion) {

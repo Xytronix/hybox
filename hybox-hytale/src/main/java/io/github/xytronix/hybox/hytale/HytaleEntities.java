@@ -1,24 +1,41 @@
 package io.github.xytronix.hybox.hytale;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
+import com.hypixel.hytale.component.Component;
 import com.hypixel.hytale.component.ComponentType;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
-import com.hypixel.hytale.server.npc.entities.NPCEntity;
 
 import io.github.xytronix.hybox.core.incident.DiagnosticSection;
 
 final class HytaleEntities {
     private static final System.Logger LOGGER = System.getLogger(HytaleEntities.class.getName());
     private static final int TYPE_LIMIT = 10;
+    private static final long DEADLINE_NANOS = TimeUnit.MILLISECONDS.toNanos(500);
+    private static final String[] NPC_CLASSES = {
+        "com.hypixel.hytale.server.npc.components.NPCComponent",
+        "com.hypixel.hytale.server.npc.entities.NPCEntity"
+    };
+
+    private static volatile NpcAccess npcAccess;
 
     private HytaleEntities() {
+    }
+
+    private record NpcAccess(ComponentType<EntityStore, Component<EntityStore>> type, MethodHandle roleName) {
     }
 
     static List<DiagnosticSection> appendTo(List<DiagnosticSection> base) {
@@ -34,29 +51,68 @@ final class HytaleEntities {
     private static Map<String, String> entries() {
         Map<String, String> out = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         try {
-            var npcType = NPCEntity.getComponentType();
+            long deadline = System.nanoTime() + DEADLINE_NANOS;
+            NpcAccess npc = npcAccess();
+            Map<String, CompletableFuture<String>> pending = new LinkedHashMap<>();
             for (Map.Entry<String, World> entry : Universe.get().getWorlds().entrySet()) {
                 String name = entry.getKey();
                 World world = entry.getValue();
                 if (name == null || name.isBlank() || world == null) {
                     continue;
                 }
+                pending.put(name, HytaleWorldThreads.submit(world, () -> describeWorld(world, npc)));
+            }
+            for (Map.Entry<String, CompletableFuture<String>> entry : pending.entrySet()) {
+                String name = entry.getKey();
                 try {
-                    String value = describeWorld(world, npcType);
+                    String value = HytaleWorldThreads.await(entry.getValue(), deadline);
                     if (value != null) {
                         out.put(name, value);
+                    } else if (entry.getValue().isCancelled()) {
+                        LOGGER.log(System.Logger.Level.DEBUG, "Entity count skipped for " + name
+                            + ": the world thread did not answer in time.");
                     }
-                } catch (Throwable t) {
-                    LOGGER.log(System.Logger.Level.DEBUG, "Entity count failed for " + name, t);
+                } catch (ExecutionException e) {
+                    LOGGER.log(System.Logger.Level.WARNING, "Entity count failed for " + name, e.getCause());
                 }
             }
         } catch (Throwable t) {
-            LOGGER.log(System.Logger.Level.DEBUG, "Entity enumeration failed.", t);
+            LOGGER.log(System.Logger.Level.WARNING, "Entity enumeration failed.", t);
         }
         return out;
     }
 
-    private static String describeWorld(World world, ComponentType<EntityStore, NPCEntity> npcType) {
+    private static NpcAccess npcAccess() {
+        NpcAccess access = npcAccess;
+        if (access == null) {
+            access = resolveNpcAccess();
+            npcAccess = access;
+        }
+        return access;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static NpcAccess resolveNpcAccess() {
+        ClassLoader loader = Universe.class.getClassLoader();
+        MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+        for (String name : NPC_CLASSES) {
+            try {
+                Class<?> type = Class.forName(name, true, loader);
+                Object componentType = lookup.findStatic(type, "getComponentType",
+                    MethodType.methodType(ComponentType.class)).invoke();
+                MethodHandle roleName = lookup.findVirtual(type, "getRoleName", MethodType.methodType(String.class))
+                    .asType(MethodType.methodType(String.class, Object.class));
+                if (componentType != null) {
+                    return new NpcAccess((ComponentType<EntityStore, Component<EntityStore>>) componentType, roleName);
+                }
+            } catch (Throwable t) {
+                LOGGER.log(System.Logger.Level.DEBUG, "NPC access via " + name + " unavailable.", t);
+            }
+        }
+        return null;
+    }
+
+    private static String describeWorld(World world, NpcAccess access) {
         var store = world.getEntityStore().getStore();
         int total = store.getEntityCount();
         if (total <= 0) {
@@ -67,11 +123,16 @@ final class HytaleEntities {
         store.forEachChunk((chunk, buffer) -> {
             int size = chunk.size();
             for (int i = 0; i < size; i++) {
-                NPCEntity npc = chunk.getComponent(i, npcType);
+                Object npc = access == null ? null : chunk.getComponent(i, access.type());
                 if (npc == null) {
                     continue;
                 }
-                String role = npc.getRoleName();
+                String role;
+                try {
+                    role = (String) access.roleName().invokeExact(npc);
+                } catch (Throwable t) {
+                    role = null;
+                }
                 byRole.computeIfAbsent(role == null || role.isBlank() ? "NPC" : role, k -> new int[1])[0]++;
                 npcTotal[0]++;
             }

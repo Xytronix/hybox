@@ -8,23 +8,23 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Stream;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -34,6 +34,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.logging.Level;
 import io.github.xytronix.hybox.core.bundle.BundleBuilder;
+import io.github.xytronix.hybox.core.bundle.BundleCleaner;
+import io.github.xytronix.hybox.core.bundle.BundleMasker;
 import io.github.xytronix.hybox.core.bundle.BundleExtrasRegistry;
 import io.github.xytronix.hybox.core.capture.CapturePipeline;
 import io.github.xytronix.hybox.core.capture.HeapHistogram;
@@ -43,18 +45,26 @@ import io.github.xytronix.hybox.core.capture.PostIncidentWaiter;
 import io.github.xytronix.hybox.core.capture.RecordingDumper;
 import io.github.xytronix.hybox.core.config.HyboxConfig;
 import io.github.xytronix.hybox.core.env.TextRedactor;
+import io.github.xytronix.hybox.core.capture.DiagnosticsProvider;
+import io.github.xytronix.hybox.core.health.FrameLabels;
+import io.github.xytronix.hybox.core.health.ModEventReader;
 import io.github.xytronix.hybox.core.health.ThreadDumpProgress;
+import io.github.xytronix.hybox.core.incident.DiagnosticSection;
 import io.github.xytronix.hybox.core.incident.IncidentMetadata;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
 import io.github.xytronix.hybox.core.jfr.JfrController;
+import io.github.xytronix.hybox.core.jfr.ProfileMode;
 import io.github.xytronix.hybox.core.metrics.HealthGauges;
 import io.github.xytronix.hybox.core.metrics.MetricsLog;
 import io.github.xytronix.hybox.core.metrics.PrometheusExporter;
 import io.github.xytronix.hybox.core.report.TrendReport;
+import io.github.xytronix.hybox.core.text.Units;
+import io.github.xytronix.hybox.core.notify.discord.DiscordWebhookConfig;
 import io.github.xytronix.hybox.core.notify.discord.DiscordWebhookNotifier;
 import io.github.xytronix.hybox.core.notify.discord.HttpClientWebhookTransport;
 import io.github.xytronix.hybox.core.retention.FileDeleter;
 import io.github.xytronix.hybox.core.retention.RetentionManager;
+import io.github.xytronix.hybox.core.retention.RetentionUsage;
 import io.github.xytronix.hybox.core.trigger.DetectorPolicy;
 import io.github.xytronix.hybox.core.trigger.ModulePolicy;
 import io.github.xytronix.hybox.core.trigger.TriggerEvent;
@@ -71,8 +81,6 @@ import io.github.xytronix.hybox.core.trigger.player.PlayerDropDetector;
 import io.github.xytronix.hybox.core.trigger.tick.TickDegradedDetector;
 
 final class HyboxRuntime implements AutoCloseable {
-    private static final DateTimeFormatter INCIDENT_TS =
-        DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss.SSSZ").withLocale(Locale.ROOT);
     private final HyboxPlugin plugin;
     private final Clock clock;
     private final System.Logger logger;
@@ -98,7 +106,11 @@ final class HyboxRuntime implements AutoCloseable {
     private final HytaleNetSampler netSampler;
     private final HealthGauges healthGauges = new HealthGauges();
     private final HytaleTelemetrySampler telemetry;
+    private final HyboxNotifications.Throttle alerts;
+    private volatile HyboxCommand command;
     private volatile PrometheusExporter prometheusExporter;
+    private volatile ModEventReader modEvents;
+    private boolean modEventsUnavailable;
 
     record Engine(
         HyboxConfig config,
@@ -114,8 +126,11 @@ final class HyboxRuntime implements AutoCloseable {
     ) {}
 
     private volatile Engine engine;
+    private volatile HyboxConfig startupConfig;
     private volatile TextRedactor textRedactor;
+    private volatile BundleMasker bundleMasker;
     private final PlayerNameMasker nameMasker = new PlayerNameMasker();
+    private final ServerLogMasker logMasker = new ServerLogMasker(nameMasker);
     private final HytaleLogErrorWatcher logErrorWatcher;
     private final HytaleWorldFailureListener worldFailureListener;
     private final HytaleHealthScheduler healthScheduler;
@@ -129,19 +144,24 @@ final class HyboxRuntime implements AutoCloseable {
     private final AtomicBoolean skipRecoveryWait = new AtomicBoolean();
     private final AtomicBoolean captureAdmitted = new AtomicBoolean();
     private final AtomicReference<PendingProfile> pendingProfile = new AtomicReference<>();
+    private final AtomicReference<QueuedProfile> queuedProfile = new AtomicReference<>();
     private final AtomicLong busyCaptures = new AtomicLong();
     private final AtomicLong droppedCaptures = new AtomicLong();
     private final AtomicLong rejectedWork = new AtomicLong();
+    private static final String STARTING_PROFILE = "starting profile";
     private volatile String captureProgress = "idle";
     private volatile CaptureResult lastCapture;
     private volatile String lastCaptureError;
     private volatile Instant lastSnapshotAt;
     private volatile String lastSnapshotError;
     private volatile long bundleCount;
+    private volatile long[] incidentTimes = new long[0];
     private volatile boolean closed;
     private volatile HeapView lastHeap;
     private boolean started;
     private HyboxApi.Registration diagnosticsRegistration;
+    private PlaceholderApiSupport placeholderApi;
+    private volatile Map<String, Object> previousHyinit;
 
     static HyboxRuntime start(HyboxPlugin plugin) throws Exception {
         Objects.requireNonNull(plugin, "plugin");
@@ -207,14 +227,17 @@ final class HyboxRuntime implements AutoCloseable {
     }
 
     private void initialize(HyboxConfig config) {
+        previousHyinit = HytaleMixins.rotateSaved(dataDir.resolve("live").resolve("hyinit.json"));
+        FrameLabels.install(HytaleMixins.labels(HyinitReader.get()));
         engine = buildEngine(config);
+        startupConfig = config;
         long snapshotMillis = config.jfrSnapshotInterval().toMillis();
         extrasRegistry.register(new HytaleBundleExtrasProvider(
             heartbeatRegistry,
             () -> engine.config().capturePolicy().logTailLines(),
             () -> engine.config().capturePolicy().includeServerLog(),
             dataDir.resolve("metrics"),
-            nameMasker,
+            logMasker,
             () -> lastSpacedDumps.getAndSet(List.of()),
             () -> engine.config().threadDumpCount() > 0));
         healthScheduler.syncNetSampler();
@@ -222,22 +245,25 @@ final class HyboxRuntime implements AutoCloseable {
         registerCommands();
         worldFailureListener.register();
         connectionTracker.register();
+        logMasker.register(plugin, logger);
         try {
             plugin.getEventRegistry().registerGlobal(com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent.class,
                 event -> progressHuds.playerReady(event.getPlayerRef()));
         } catch (RuntimeException | LinkageError failure) {
-            logger.log(System.Logger.Level.WARNING, "Progress HUD cannot follow world changes; it reappears on the next capture.", failure);
+            logger.log(System.Logger.Level.WARNING, "Progress HUD cannot follow world changes. It reappears on the next capture.", failure);
         }
         logErrorWatcher.register();
         diagnosticsRegistration = HyboxApi.registerDiagnostics("hybox", "Environment", HytaleEnvironment::snapshot);
         refreshBundleStats();
+        if (!offerWorker(this::cleanOldBundles)) later(this::cleanOldBundles);
+        placeholderApi = PlaceholderApiSupport.start(plugin, HyboxPlaceholders.of(this, clock.withZone(java.time.ZoneId.systemDefault())), logger);
         startMetricsExporter();
         healthScheduler.startSnapshotWriter(snapshotMillis, recoverOrphanedRecordings());
         logStartup();
     }
 
     private Engine buildEngine(HyboxConfig config) {
-        this.textRedactor = new TextRedactor(config.capturePolicy().redactPatterns());
+        this.textRedactor = new TextRedactor(config.capturePolicy().redactPatterns(), HytalePlugins::knownVersions);
         DetectorPolicy detectors = config.triggerPolicy().detectors();
         ModulePolicy modules = detectors.modules();
 
@@ -251,7 +277,7 @@ final class HyboxRuntime implements AutoCloseable {
             ? new TickDegradedDetector(
                 clock,
                 HytaleHealthScheduler::tickAverageMillis,
-                config.triggerPolicy().tickAvgDegradedMs())
+                config.triggerPolicy())
             : null;
         GcPressureDetector gcPressureDetector = modules.gcPressure() && detectors.gcPressurePct() > 0
             && !detectors.gcPressureWindow().isZero()
@@ -262,7 +288,7 @@ final class HyboxRuntime implements AutoCloseable {
 
         RecordingDumper dumper = (target) -> {
             try {
-                captureProgress = "dumping recording";
+                captureProgress = "saving the recording";
                 jfr.dump(target);
                 captureProgress = "building bundle";
                 return target;
@@ -270,40 +296,79 @@ final class HyboxRuntime implements AutoCloseable {
                 capturePending.set(false);
             }
         };
-        PostIncidentWaiter postIncidentWaiter = (event) -> {
-            captureProgress = "waiting for post-incident evidence";
-            capturePending.set(true);
-            skipRecoveryWait.set(false);
-            try {
-                lastSpacedDumps.set(HytaleHeartbeatPump.awaitRecovery(event, heartbeatRegistry, clock,
-                    config.postIncidentMaxWait(), config.threadDumpCount(), config.threadDumpInterval(),
-                    recoverySignal(event, tickDegradedDetector, gcPressureDetector), skipRecoveryWait::get, logger));
-            } finally {
+        PostIncidentWaiter postIncidentWaiter = new PostIncidentWaiter() {
+            @Override
+            public void awaitResolution(TriggerEvent event) {
+                captureProgress = "waiting for the server to recover";
+                capturePending.set(true);
                 skipRecoveryWait.set(false);
+                try {
+                    lastSpacedDumps.set(HytaleHeartbeatPump.awaitRecovery(event, heartbeatRegistry, clock,
+                        config.postIncidentMaxWait(), config.threadDumpCount(), config.threadDumpInterval(),
+                        recoverySignal(event, tickDegradedDetector, gcPressureDetector), skipRecoveryWait::get, logger));
+                } finally {
+                    skipRecoveryWait.set(false);
+                }
+            }
+
+            @Override
+            public TriggerEvent settle(TriggerEvent event) {
+                return HeartbeatStallDetector.settle(event, heartbeatRegistry, clock.millis());
             }
         };
         IncidentNotifier configuredNotifier = buildNotifier(clock, config, logger,
             task -> submitWorker(task, () -> logger.log(System.Logger.Level.WARNING,
                 "Discord notification skipped: Hybox worker is busy or stopping.")));
-        IncidentNotifier notifier = (report, zip) -> {
-            recordIncidentGauge(report);
-            configuredNotifier.onIncident(report, zip);
+        IncidentNotifier notifier = new IncidentNotifier() {
+            @Override
+            public void onAccepted(IncidentMetadata meta) {
+                alertAccepted(meta);
+                configuredNotifier.onAccepted(meta);
+            }
+
+            @Override
+            public void onIncident(IncidentReport report, Path zip) {
+                recordIncidentGauge(report);
+                announce(report, zip);
+                configuredNotifier.onIncident(report, zip);
+            }
+
+            @Override
+            public void onFailed(IncidentMetadata meta) {
+                alertNotSaved(meta);
+                configuredNotifier.onFailed(meta);
+            }
         };
+        BundleBuilder bundleBuilder = new BundleBuilder(clock, logger, textRedactor, nameMasker::maskText)
+            .withHistory(dataDir.resolve("metrics"), config.metricsEnabled());
+        bundleMasker = bundleBuilder.masker();
+        IncidentPrivacy.install(bundleMasker, nameMasker);
 
         CapturePipeline capturePipeline = new CapturePipeline(
             clock,
             triggerEngine,
             dumper,
-            new BundleBuilder(clock, logger, textRedactor, nameMasker::maskText),
+            bundleBuilder,
             new RetentionManager(clock, logger, FileDeleter.defaultDeleter()),
             notifier,
             extrasRegistry,
             worldStats,
-            () -> ThreadDumpProgress.appendTo(HytaleAssetPacks.appendTo(HytaleServerSettings.appendTo(HytaleModConfigs.appendTo(HytaleMixins.appendTo(HytalePlugins.appendTo(
-                HytaleEntities.appendTo(HytaleTickSystems.appendTo(HytaleHeartbeats.appendTo(HytaleServerLog.appendTo(
-                    HyboxApi.collectDiagnostics(), config.capturePolicy().includeServerLog(),
-                    config.capturePolicy().logTailLines(), nameMasker), heartbeatRegistry, clock))))),
-                config.capturePolicy().includeModConfigs(), HyboxApi.registeredConfigPaths()), config.capturePolicy().includeServerConfig())), lastSpacedDumps.get()),
+            new DiagnosticsProvider() {
+                @Override
+                public List<DiagnosticSection> sections() {
+                    return diagnostics(config, false);
+                }
+
+                @Override
+                public List<DiagnosticSection> recoveredSections() {
+                    return diagnostics(config, true);
+                }
+
+                @Override
+                public Collection<String> knownVersions() {
+                    return HytalePlugins.knownVersions();
+                }
+            },
             postIncidentWaiter,
             incidentDir,
             tempDir,
@@ -339,6 +404,16 @@ final class HyboxRuntime implements AutoCloseable {
         );
     }
 
+    private List<DiagnosticSection> diagnostics(HyboxConfig config, boolean recovered) {
+        List<DiagnosticSection> base = HytalePlugins.appendTo(
+            HytaleEntities.appendTo(HytaleTickSystems.appendTo(HytaleHeartbeats.appendTo(HytaleServerLog.appendTo(
+                HyboxApi.collectDiagnostics(), config.capturePolicy().includeServerLog(),
+                config.capturePolicy().logTailLines(), logMasker), heartbeatRegistry, clock))));
+        List<DiagnosticSection> mixins = recovered ? HytaleMixins.appendSaved(base, previousHyinit) : HytaleMixins.appendTo(base);
+        return ThreadDumpProgress.appendTo(HytaleAssetPacks.appendTo(HytaleServerSettings.appendTo(HytaleModConfigs.appendTo(mixins,
+            config.capturePolicy().includeModConfigs(), HyboxApi.registeredConfigPaths()), config.capturePolicy().includeServerConfig())), lastSpacedDumps.get());
+    }
+
     private static BooleanSupplier recoverySignal(TriggerEvent event, TickDegradedDetector tick,
                                                   GcPressureDetector gc) {
         return switch (event.kind()) {
@@ -357,13 +432,25 @@ final class HyboxRuntime implements AutoCloseable {
         if (config.discordWebhook().webhookUrl().isBlank()) {
             return IncidentNotifier.noop();
         }
+        DiscordWebhookConfig discord = config.discordWebhook();
         return new DiscordWebhookNotifier(
             clock,
             logger,
-            config.discordWebhook(),
-            new HttpClientWebhookTransport(config.discordWebhook().requestTimeout()),
+            discord.withServerName(serverName(discord.serverName())),
+            new HttpClientWebhookTransport(discord.requestTimeout()),
             worker
         );
+    }
+
+    private static String serverName(String configured) {
+        if (configured != null && !configured.isBlank()) return configured.strip();
+        try {
+            String name = com.hypixel.hytale.server.core.HytaleServer.get().getServerName();
+            if (name != null && !name.isBlank()) return name.strip();
+        } catch (RuntimeException | LinkageError unavailable) {
+            return "Hytale server";
+        }
+        return "Hytale server";
     }
 
     private void recordIncidentGauge(IncidentReport report) {
@@ -380,6 +467,7 @@ final class HyboxRuntime implements AutoCloseable {
     private void refreshBundleStats() {
         try (var entries = Files.list(incidentDir)) {
             long[] acc = {0L, 0L};
+            java.util.stream.LongStream.Builder times = java.util.stream.LongStream.builder();
             entries.filter(Files::isRegularFile)
                 .filter(p -> p.getFileName().toString().endsWith(".zip"))
                 .forEach(p -> {
@@ -388,12 +476,19 @@ final class HyboxRuntime implements AutoCloseable {
                         acc[1] += Files.size(p);
                     } catch (IOException ignored) {
                     }
+                    Instant created = HyboxIncidents.createdAt(HyboxIncidents.id(p));
+                    if (created != null) times.add(created.toEpochMilli());
                 });
             healthGauges.setBundles(acc[0], acc[1]);
             bundleCount = acc[0];
+            incidentTimes = times.build().sorted().toArray();
         } catch (Exception e) {
             logger.log(System.Logger.Level.DEBUG, "Failed to refresh bundle stats.", e);
         }
+    }
+
+    long[] incidentTimes() {
+        return incidentTimes;
     }
 
     private void startMetricsExporter() {
@@ -401,6 +496,7 @@ final class HyboxRuntime implements AutoCloseable {
         if (!cfg.prometheusEnabled()) {
             return;
         }
+        startModEvents();
         try {
             prometheusExporter = new PrometheusExporter(
                 healthGauges, cfg.prometheusBind(), cfg.prometheusPort(), "/metrics");
@@ -420,6 +516,27 @@ final class HyboxRuntime implements AutoCloseable {
                 logger.log(System.Logger.Level.WARNING, "Failed to stop Prometheus metrics endpoint.", e);
             }
             prometheusExporter = null;
+        }
+    }
+
+    private void startModEvents() {
+        if (modEvents != null || modEventsUnavailable) {
+            return;
+        }
+        try {
+            modEvents = ModEventReader.start(healthGauges.modMetrics(), HytalePlugins::modId, logger);
+        } catch (Exception | LinkageError e) {
+            modEventsUnavailable = true;
+            logger.log(System.Logger.Level.WARNING,
+                "Prometheus cannot read mod JFR events, so it exports no mod metrics until the server restarts.", e);
+        }
+    }
+
+    private void stopModEvents() {
+        ModEventReader reader = modEvents;
+        if (reader != null) {
+            modEvents = null;
+            reader.close();
         }
     }
 
@@ -478,17 +595,19 @@ final class HyboxRuntime implements AutoCloseable {
             telemetry, netSampler, jfr, rollingFile, () -> engine);
         Package pkg = HyboxRuntime.class.getPackage();
         healthGauges.setVersion(pkg == null ? null : pkg.getImplementationVersion());
+        this.alerts = new HyboxNotifications.Throttle(clock);
     }
 
     void registerCommands() {
         HyboxCommand command = new HyboxCommand(this);
         command.setOwner(plugin);
         plugin.getCommandRegistry().registerCommand(command);
+        this.command = command;
     }
 
     CompletableFuture<CaptureResult> captureManual(PlayerRef requester) {
         CompletableFuture<CaptureResult> capture = enqueueCapture(
-            new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(), Map.of()));
+            duringProfile(new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(), Map.of())));
         HyboxProgressHuds.Handle hud = capture.isDone() ? null : progressHuds.start(requester, HyboxProgressHuds.Kind.CAPTURE);
         capture.whenComplete((result, failure) -> {
             progressHuds.stop(hud);
@@ -502,12 +621,23 @@ final class HyboxRuntime implements AutoCloseable {
     }
 
     void scheduleCapture(TriggerEvent event) {
+        TriggerEvent marked = duringProfile(event);
         if (admitCapture(false) == null) {
-            submitCapture(() -> runCapture(event), () -> {
+            submitCapture(() -> runCapture(marked), () -> {
                 remember(CaptureResult.of(closed ? CaptureResult.Status.STOPPED : CaptureResult.Status.BUSY));
                 releaseCapture();
             });
         }
+    }
+
+    private TriggerEvent duringProfile(TriggerEvent event) {
+        ProfileMode mode = profileSessions.mode();
+        if (mode == null || event.attrs().containsKey(ProfileMode.DURING_KEY)) {
+            return event;
+        }
+        Map<String, String> attrs = new java.util.LinkedHashMap<>(event.attrs());
+        attrs.put(ProfileMode.DURING_KEY, mode.id());
+        return new TriggerEvent(event.kind(), event.scope(), event.at(), attrs);
     }
 
     private CaptureResult admitCapture(boolean manual) {
@@ -558,7 +688,7 @@ final class HyboxRuntime implements AutoCloseable {
                 logServer(Level.WARNING, "Profile capture failed: " + failure.getClass().getSimpleName());
             } else if (outcome.captured()) {
                 logServer(Level.INFO, "Profile capture finished: " + outcome.incidentId().value());
-            } else {
+            } else if (outcome.status() != CaptureResult.Status.CANCELLED) {
                 logServer(Level.WARNING, "Profile capture finished: " + outcome.status()
                     + (outcome.detail() == null ? "" : " (" + outcome.detail() + ")"));
             }
@@ -622,9 +752,65 @@ final class HyboxRuntime implements AutoCloseable {
     private void notifyRequester(PlayerRef requester, CaptureResult result, boolean profile) {
         if (requester == null) return;
         try {
-            HyboxNotifications.completed(requester, result, profile);
+            HyboxNotifications.completed(requester, result, profile,
+                result.captured() ? HyboxChatFormatter.saved(result, incidentDir, true) : null);
         } catch (RuntimeException | LinkageError failure) {
             logger.log(System.Logger.Level.WARNING, "Unable to notify capture requester.", failure);
+        }
+    }
+
+    private void notifyProfile(PlayerRef requester, String text, boolean ok) {
+        if (requester == null) return;
+        try {
+            HyboxNotifications.profileNote(requester, text, ok);
+        } catch (RuntimeException | LinkageError failure) {
+            logger.log(System.Logger.Level.WARNING, "Unable to notify the profile requester.", failure);
+        }
+    }
+
+    private void alertAccepted(IncidentMetadata meta) {
+        if ("MANUAL".equals(meta.trigger())) return;
+        String severity = meta.severity().name();
+        HyboxNotifications.Alert alert = alerts.admit(meta.id().value(), severity, meta.headline());
+        int told = alert == null ? -1 : alertStaff(alert);
+        logServer(meta.severity() == io.github.xytronix.hybox.core.incident.Severity.INFO ? Level.INFO : Level.WARNING,
+            HyboxChatFormatter.acceptedLog(severity, meta.headline(), told));
+    }
+
+    private void alertNotSaved(IncidentMetadata meta) {
+        if ("MANUAL".equals(meta.trigger())) return;
+        String severity = meta.severity().name();
+        HyboxNotifications.Alert alert = alerts.notSaved(meta.id().value(), severity, meta.headline());
+        int told = alert == null ? -1 : alertStaff(alert);
+        logServer(Level.WARNING, HyboxChatFormatter.notSavedLog(severity, meta.headline(), told));
+    }
+
+    private void announce(IncidentReport report, Path zip) {
+        IncidentMetadata meta = report.meta();
+        if ("MANUAL".equals(meta.trigger())) return;
+        String severity = meta.severity().name();
+        HyboxNotifications.Alert alert = alerts.saved(meta.id().value(), severity, meta.headline());
+        int told = alert == null ? -1 : alertStaff(alert);
+        long bytes;
+        try {
+            bytes = Files.size(zip);
+        } catch (IOException | RuntimeException failure) {
+            bytes = -1;
+        }
+        logServer(meta.severity() == io.github.xytronix.hybox.core.incident.Severity.INFO ? Level.INFO : Level.WARNING,
+            HyboxChatFormatter.alertLog(severity, meta.headline(), zip, bytes, told));
+    }
+
+    private int alertStaff(HyboxNotifications.Alert alert) {
+        HyboxCommand root = command;
+        if (root == null) return 0;
+        try {
+            var incident = root.getSubCommand("incident");
+            return HyboxNotifications.alertStaff(com.hypixel.hytale.server.core.universe.Universe.get().getPlayers(),
+                incident::hasPermission, alert, logger);
+        } catch (RuntimeException | LinkageError failure) {
+            logger.log(System.Logger.Level.WARNING, "Unable to tell staff about the incident.", failure);
+            return 0;
         }
     }
 
@@ -638,9 +824,14 @@ final class HyboxRuntime implements AutoCloseable {
             }
             next.result().complete(remember(CaptureResult.of(CaptureResult.Status.STOPPED)));
         }
+        QueuedProfile queued = queuedProfile.getAndSet(null);
+        if (queued != null && !closed) {
+            launchQueuedProfile(queued);
+            return;
+        }
         captureProgress = "idle";
         captureAdmitted.set(false);
-        if (pendingProfile.get() != null && captureAdmitted.compareAndSet(false, true)) {
+        if ((pendingProfile.get() != null || queuedProfile.get() != null) && captureAdmitted.compareAndSet(false, true)) {
             releaseCapture();
         }
     }
@@ -668,6 +859,16 @@ final class HyboxRuntime implements AutoCloseable {
         }
     }
 
+    boolean offerWorker(Runnable work) {
+        if (closed) return false;
+        try {
+            worker.execute(work);
+            return true;
+        } catch (RejectedExecutionException full) {
+            return false;
+        }
+    }
+
     private void submitCapture(Runnable work, Runnable rejected) {
         QueuedWork queued = new QueuedWork(work, rejected);
         if (closed) {
@@ -685,6 +886,19 @@ final class HyboxRuntime implements AutoCloseable {
 
     private record PendingProfile(TriggerEvent event, CompletableFuture<CaptureResult> result) {}
 
+    record QueuedProfile(ProfileMode mode, int minutes, boolean keepBuffer, PlayerRef requester, String requesterName) {}
+
+    record ProfileStart(boolean queued, String error) {
+        static final ProfileStart STARTED = new ProfileStart(false, null);
+        static final ProfileStart QUEUED = new ProfileStart(true, null);
+
+        static ProfileStart failed(String error) {
+            return new ProfileStart(false, error);
+        }
+    }
+
+    record ProfileCancel(boolean cancelled, String message) {}
+
     private record QueuedWork(Runnable work, Runnable rejected) implements Runnable {
         @Override
         public void run() {
@@ -696,7 +910,7 @@ final class HyboxRuntime implements AutoCloseable {
                   String captureProgress, String lastIncident, Instant lastSuccess, CaptureResult lastOutcome,
                   String captureError, long busy, long dropped, long rejected, long bundles,
                   String storagePressure, boolean storageChecked,
-                  CallbackExecutor.Health callbacks) {}
+                  CallbackExecutor.Health callbacks, HytaleMixins.ProblemCounts mixinProblems) {}
 
     Health health() {
         Engine current = engine;
@@ -704,7 +918,16 @@ final class HyboxRuntime implements AutoCloseable {
             captureProgress, lastIncidentId.get(), lastIncidentAt.get(), lastCapture,
             lastCaptureError, busyCaptures.get(), droppedCaptures.get(), rejectedWork.get(), bundleCount,
             current == null ? null : current.capturePipeline().storagePressure(),
-            current != null && current.capturePipeline().storageChecked(), callbacks.health());
+            current != null && current.capturePipeline().storageChecked(), callbacks.health(),
+            HytaleMixins.problemCounts());
+    }
+
+    HytaleTelemetrySampler.Status liveStatus() {
+        return telemetry.status();
+    }
+
+    List<HealthGauges.World> liveWorlds() {
+        return telemetry.worlds();
     }
 
     void snapshotSucceeded() {
@@ -737,6 +960,10 @@ final class HyboxRuntime implements AutoCloseable {
         return incidentDir;
     }
 
+    RetentionUsage storageUsage() {
+        return engine.capturePipeline().storageUsage();
+    }
+
     Path dataDir() {
         return dataDir;
     }
@@ -747,6 +974,10 @@ final class HyboxRuntime implements AutoCloseable {
 
     HyboxConfig config() {
         return engine.config();
+    }
+
+    HyboxConfig startupConfig() {
+        return startupConfig;
     }
 
     boolean deadlockArmed() {
@@ -777,7 +1008,8 @@ final class HyboxRuntime implements AutoCloseable {
         if (closed) {
             return "Reload failed: Hybox is not running.";
         }
-        if (profileSessions.active() || pendingProfile.get() != null || !captureAdmitted.compareAndSet(false, true)) {
+        if (profileSessions.active() || profileSessions.finishing() || pendingProfile.get() != null
+            || queuedProfile.get() != null || !captureAdmitted.compareAndSet(false, true)) {
             return "Reload failed: capture or profile session is busy.";
         }
         captureProgress = "reloading";
@@ -807,6 +1039,9 @@ final class HyboxRuntime implements AutoCloseable {
             || previous.prometheusPort() != fresh.prometheusPort()
             || !previous.prometheusBind().equals(fresh.prometheusBind())) {
             stopMetricsExporter();
+            if (!fresh.prometheusEnabled()) {
+                stopModEvents();
+            }
             startMetricsExporter();
         }
         return reloadSummary(previous, fresh);
@@ -868,40 +1103,103 @@ final class HyboxRuntime implements AutoCloseable {
         return out.toString();
     }
 
-    synchronized CompletableFuture<String> startProfileSession(int minutes, boolean keepBuffer, PlayerRef requester) {
-        CompletableFuture<String> result = new CompletableFuture<>();
-        result.whenComplete((error, failure) -> {
+    synchronized CompletableFuture<ProfileStart> startProfileSession(ProfileMode mode, int minutes, boolean keepBuffer,
+                                                                   PlayerRef requester) {
+        CompletableFuture<ProfileStart> result = new CompletableFuture<>();
+        String label = mode.id() + ", " + ProfileSessionController.clampMinutes(minutes) + " min, keep-buffer=" + keepBuffer;
+        result.whenComplete((start, failure) -> {
             if (failure != null) {
                 logServer(Level.WARNING, "Profile session not started: " + failure);
-            } else if (error != null) {
-                logServer(Level.WARNING, "Profile session not started: " + error);
+            } else if (start.error() != null) {
+                logServer(Level.WARNING, "Profile session not started: " + start.error());
+            } else if (start.queued()) {
+                logServer(Level.INFO, "Profile queued (" + label + "). It starts once the incident is saved.");
             } else {
-                logServer(Level.INFO, "Profile session started: " + minutes + " min, keep-buffer=" + keepBuffer + ".");
+                logServer(Level.INFO, "Profile session started: " + label + ".");
             }
         });
-        if (closed) {
-            result.complete("Hybox is not running.");
+        String refused = profileRefusal();
+        if (refused != null) {
+            result.complete(ProfileStart.failed(refused));
             return result;
         }
-        if (pendingProfile.get() != null || !captureAdmitted.compareAndSet(false, true)) {
-            result.complete("Cannot start profile: a capture is busy.");
+        QueuedProfile request = new QueuedProfile(mode, minutes, keepBuffer, requester, requesterName(requester));
+        if (!captureAdmitted.compareAndSet(false, true)) {
+            if (STARTING_PROFILE.equals(captureProgress)) {
+                result.complete(ProfileStart.failed("A profile is already starting."));
+                return result;
+            }
+            queuedProfile.set(request);
+            if (captureAdmitted.compareAndSet(false, true)) {
+                if (queuedProfile.compareAndSet(request, null)) {
+                    launchProfile(request, result);
+                    return result;
+                }
+                releaseCapture();
+            }
+            result.complete(ProfileStart.QUEUED);
             return result;
         }
+        launchProfile(request, result);
+        return result;
+    }
+
+    private String profileRefusal() {
+        if (closed) return "Hybox is not running.";
+        if (profileSessions.active()) {
+            return "A profile session is already running (" + profileSessions.remainingSeconds() + "s remaining).";
+        }
+        if (queuedProfile.get() != null) return "A profile is already queued. It starts once the incident is saved.";
+        if (pendingProfile.get() != null || profileSessions.finishing()) {
+            return "The last profile is still being saved. Try again in a moment.";
+        }
+        return null;
+    }
+
+    private void launchQueuedProfile(QueuedProfile request) {
+        CompletableFuture<ProfileStart> launched = new CompletableFuture<>();
+        launched.whenComplete((start, failure) -> {
+            String error = failure != null ? failure.toString() : start.error();
+            if (error != null) {
+                logServer(Level.WARNING, "Queued profile did not start: " + error);
+                notifyProfile(request.requester(), "Queued profile did not start. " + error, false);
+            } else {
+                logServer(Level.INFO, "Queued profile started: " + request.mode().id() + ", "
+                    + ProfileSessionController.clampMinutes(request.minutes()) + " min, keep-buffer=" + request.keepBuffer() + ".");
+                notifyProfile(request.requester(), startedMessage(request.mode(), request.minutes()), true);
+            }
+        });
+        launchProfile(request, launched);
+    }
+
+    static String startedMessage(ProfileMode mode, int minutes) {
+        return (mode == ProfileMode.MEMORY ? "Memory profile" : "Profile") + " started for "
+            + ProfileSessionController.clampMinutes(minutes) + " min. A bundle is saved at the end.";
+    }
+
+    private void launchProfile(QueuedProfile request, CompletableFuture<ProfileStart> result) {
+        PlayerRef requester = request.requester();
+        boolean keepBuffer = request.keepBuffer();
         AtomicReference<HyboxProgressHuds.Handle> hud = new AtomicReference<>();
         AtomicBoolean completed = new AtomicBoolean();
-        captureProgress = "starting profile";
+        captureProgress = STARTING_PROFILE;
         submitCapture(() -> {
             try {
                 String outcome;
                 try {
                     synchronized (profileSessions) {
+                        CaptureResult before = lastCapture;
                         outcome = pendingProfile.get() != null
-                            ? "Cannot start profile: a capture is busy."
-                            : profileSessions.start(minutes, keepBuffer, requesterName(requester), capture -> {
+                            ? "The last profile is still being saved. Try again in a moment."
+                            : profileSessions.start(request.mode(), request.minutes(), keepBuffer, request.requesterName(), capture -> {
                                 completed.set(true);
                                 progressHuds.stop(hud.get());
                                 notifyRequester(requester, capture, true);
                             });
+                        CaptureResult leadUp = lastCapture;
+                        if (!keepBuffer && leadUp != before && leadUp != null && leadUp.retention() != null) {
+                            notifyRequester(requester, leadUp, false);
+                        }
                         if (outcome == null && !completed.get()) {
                             HyboxProgressHuds.Handle started = progressHuds.start(requester, HyboxProgressHuds.Kind.PROFILE);
                             hud.set(started);
@@ -911,15 +1209,14 @@ final class HyboxRuntime implements AutoCloseable {
                 } finally {
                     releaseCapture();
                 }
-                result.complete(outcome);
+                result.complete(outcome == null ? ProfileStart.STARTED : ProfileStart.failed(outcome));
             } catch (Throwable failure) {
                 result.completeExceptionally(failure);
             }
         }, () -> {
             releaseCapture();
-            result.complete(closed ? "Hybox is not running." : "Cannot start profile: a capture is busy.");
+            result.complete(ProfileStart.failed(closed ? "Hybox is not running." : "Cannot start profile: Hybox is busy."));
         });
-        return result;
     }
 
     record HeapView(HeapHistogram.Snapshot snapshot, Instant takenAt) {}
@@ -942,8 +1239,11 @@ final class HyboxRuntime implements AutoCloseable {
         Instant now = clock.instant();
         boolean enabled = config().metricsEnabled();
         MetricsLog.Trend trend = enabled ? new MetricsLog(dataDir.resolve("metrics")).read(now, days) : MetricsLog.Trend.EMPTY;
-        long fromMs = now.minus(Duration.ofDays(days)).toEpochMilli();
-        return HyboxTrendModel.from(enabled, days, now, trend, incidentTimesWithin(fromMs, now.toEpochMilli()));
+        List<HyboxIncidents.Incident> incidents = incidentsWithin(now.minus(Duration.ofDays(days)), now);
+        HytaleTelemetrySampler.Status live = telemetry.status();
+        return HyboxTrendModel.from(enabled, days, now, trend,
+            incidents.stream().mapToLong(incident -> incident.createdAt().toEpochMilli()).toArray(),
+            live == null ? 0 : live.targetTps());
     }
 
     Path generateTrendReport(int days) throws IOException {
@@ -952,49 +1252,24 @@ final class HyboxRuntime implements AutoCloseable {
         if (trend.isEmpty()) {
             return null;
         }
-        long fromMs = now.minus(Duration.ofDays(days)).toEpochMilli();
-        long[] incidents = incidentTimesWithin(fromMs, now.toEpochMilli());
+        List<TrendReport.Incident> incidents = incidentsWithin(now.minus(Duration.ofDays(days)), now).stream()
+            .map(HyboxIncidents::details)
+            .map(incident -> new TrendReport.Incident(incident.createdAt().toEpochMilli(), incident.severity(),
+                incident.headline(), incident.kind(), incident.path().getFileName().toString()))
+            .toList();
         Path out = dataDir.resolve("trend-report.html");
         try (OutputStream os = Files.newOutputStream(out)) {
-            TrendReport.write(trend, days, now, incidents, os);
+            TrendReport.write(trend, days, now, incidents, worldStats.worlds().targetTps(), os);
         }
         return out;
     }
 
-    private long[] incidentTimesWithin(long fromMs, long toMs) {
-        if (!Files.isDirectory(incidentDir)) {
-            return new long[0];
-        }
-        List<Long> times = new ArrayList<>();
-        try (Stream<Path> entries = Files.list(incidentDir)) {
-            entries.filter(p -> p.getFileName().toString().endsWith(".zip")).forEach(p -> {
-                String base = p.getFileName().toString();
-                base = base.substring(0, base.length() - ".zip".length());
-                if (base.startsWith("incident-")) {
-                    base = base.substring("incident-".length());
-                }
-                int lastDash = base.lastIndexOf('-');
-                if (lastDash <= 0) {
-                    return;
-                }
-                try {
-                    long ms = OffsetDateTime.parse(base.substring(0, lastDash), INCIDENT_TS)
-                        .toInstant().toEpochMilli();
-                    if (ms >= fromMs && ms <= toMs) {
-                        times.add(ms);
-                    }
-                } catch (RuntimeException ignored) {
-                }
-            });
+    private List<HyboxIncidents.Incident> incidentsWithin(Instant from, Instant to) {
+        try {
+            return HyboxIncidents.within(incidentDir, from, to);
         } catch (IOException e) {
-            return new long[0];
+            return List.of();
         }
-        times.sort(null);
-        long[] out = new long[times.size()];
-        for (int i = 0; i < out.length; i++) {
-            out[i] = times.get(i);
-        }
-        return out;
     }
 
     boolean profileActive() {
@@ -1017,31 +1292,74 @@ final class HyboxRuntime implements AutoCloseable {
         return profileSessions.requesterName();
     }
 
+    ProfileMode profileMode() {
+        return profileSessions.mode();
+    }
+
+    QueuedProfile queuedProfile() {
+        return queuedProfile.get();
+    }
+
     boolean profileCapturePending() {
         return pendingProfile.get() != null;
     }
 
+    boolean profileFinalQueued() {
+        return pendingProfile.get() != null && profileSessions.finishing();
+    }
+
     boolean recoveryWaitActive() {
-        return "waiting for post-incident evidence".equals(captureProgress);
+        return "waiting for the server to recover".equals(captureProgress);
     }
 
     String skipRecoveryWait() {
-        if (!recoveryWaitActive()) return "No capture is waiting for post-incident evidence.";
+        if (!recoveryWaitActive()) return "No capture is waiting for the server to recover.";
         skipRecoveryWait.set(true);
-        logServer(Level.INFO, "Post-incident wait skipped; writing the bundle now.");
+        logServer(Level.INFO, "Recovery wait skipped. Writing the bundle now.");
         return null;
     }
 
     String finishProfileNow() {
+        if (queuedProfile.get() != null) return "The profile has not started yet. Use /hybox profile cancel to drop it.";
         String outcome = profileSessions.finishNow();
-        if (outcome == null) logServer(Level.INFO, "Profile session ended early; saving the bundle now.");
+        if (outcome == null) logServer(Level.INFO, "Profile session ended early. Saving the bundle now.");
         return outcome;
     }
 
-    String cancelProfile() {
-        String outcome = profileSessions.cancel();
-        if (outcome == null) logServer(Level.INFO, "Profile session cancelled; nothing saved.");
-        return outcome;
+    synchronized ProfileCancel cancelProfile(PlayerRef canceller) {
+        String by = ownerLabel(requesterName(canceller));
+        QueuedProfile queued = queuedProfile.getAndSet(null);
+        if (queued != null) {
+            String message = "Queued profile canceled. It never started. Started by " + ownerLabel(queued.requesterName()) + ".";
+            logServer(Level.INFO, "Queued " + queued.mode().id() + " profile canceled by " + by + ". It never started. Started by "
+                + ownerLabel(queued.requesterName()) + ".");
+            if (queued.requester() != null && queued.requester() != canceller) {
+                notifyProfile(queued.requester(), message, false);
+            }
+            return new ProfileCancel(true, message);
+        }
+        ProfileSessionController.Owner owner = profileSessions.cancelRunning();
+        if (owner == null) {
+            PendingProfile pending = pendingProfile.get();
+            ProfileSessionController.Owner finishing = profileSessions.finishingOwner();
+            if (pending != null && finishing != null && pendingProfile.compareAndSet(pending, null)) {
+                pending.result().complete(CaptureResult.of(CaptureResult.Status.CANCELLED));
+                owner = finishing;
+            } else if (finishing != null) {
+                return new ProfileCancel(false, "The profile bundle is being written now and can no longer be canceled.");
+            } else if (profileSessions.active()) {
+                return new ProfileCancel(false, "The profile is still starting. Try again in a moment.");
+            } else {
+                return new ProfileCancel(false, "No profile session is running.");
+            }
+        }
+        logServer(Level.INFO, "Profile session (" + owner.mode().id() + ") canceled by " + by
+            + ". Nothing was saved. Started by " + ownerLabel(owner.requesterName()) + ".");
+        return new ProfileCancel(true, "Profile canceled. Nothing was saved. Started by " + ownerLabel(owner.requesterName()) + ".");
+    }
+
+    static String ownerLabel(String name) {
+        return name == null || name.isBlank() ? "the console" : name;
     }
 
     private String requesterName(PlayerRef requester) {
@@ -1062,18 +1380,6 @@ final class HyboxRuntime implements AutoCloseable {
         return logger;
     }
 
-    ExecutorService worker() {
-        return worker;
-    }
-
-    Optional<String> lastIncidentId() {
-        return Optional.ofNullable(lastIncidentId.get());
-    }
-
-    Optional<Instant> lastIncidentAt() {
-        return Optional.ofNullable(lastIncidentAt.get());
-    }
-
     private void logServer(Level level, String message) {
         try {
             plugin.getLogger().at(level).log(message);
@@ -1088,6 +1394,58 @@ final class HyboxRuntime implements AutoCloseable {
             plugin.getLogger().at(Level.INFO).log("Config: %s", configPath);
         } catch (Exception e) {
             logger.log(System.Logger.Level.INFO, "Hybox started.");
+        }
+    }
+
+    private void cleanOldBundles() {
+        List<Path> bundles;
+        try (var entries = Files.list(incidentDir)) {
+            bundles = entries.filter(path -> path.getFileName().toString().endsWith(".zip")).sorted().toList();
+        } catch (IOException | RuntimeException unreadable) {
+            return;
+        }
+        cleanNext(new ArrayDeque<>(bundles), new AtomicInteger());
+    }
+
+    private void cleanNext(Deque<Path> pending, AtomicInteger cleaned) {
+        if (closed) return;
+        if (pending.isEmpty()) {
+            if (cleaned.get() > 0) {
+                logger.log(System.Logger.Level.INFO, "Removed names, paths and addresses from "
+                    + Units.count(cleaned.get(), "bundle") + " saved by an older Hybox.");
+            }
+            return;
+        }
+        Runnable next = () -> {
+            if (cleanBundle(pending.poll())) cleaned.incrementAndGet();
+            cleanNext(pending, cleaned);
+        };
+        if (!offerWorker(next)) later(() -> cleanNext(pending, cleaned));
+    }
+
+    private boolean cleanBundle(Path bundle) {
+        BundleMasker masker = bundleMasker;
+        if (bundle == null || masker == null || closed) return false;
+        try {
+            if (!Files.isRegularFile(bundle) || BundleCleaner.cleaned(bundle)) return false;
+            IncidentPrivacy.learn(bundle, nameMasker);
+            new BundleCleaner(masker, logger).clean(bundle);
+            return true;
+        } catch (IOException | RuntimeException failure) {
+            String reason = IncidentPrivacy.failure(failure);
+            logger.log(System.Logger.Level.WARNING, "Could not clean " + bundle.getFileName() + " of private data: "
+                + (reason.endsWith(".") ? reason.substring(0, reason.length() - 1) : reason)
+                + ". It stays as it was and shows as not cleaned in game.");
+            return false;
+        }
+    }
+
+    private void later(Runnable task) {
+        if (closed) return;
+        try {
+            scheduler.schedule(task, 30, TimeUnit.SECONDS);
+        } catch (RejectedExecutionException stopping) {
+            return;
         }
     }
 
@@ -1118,10 +1476,16 @@ final class HyboxRuntime implements AutoCloseable {
         }
         closed = true;
         cleanup("Metrics endpoint", this::stopMetricsExporter);
+        cleanup("Mod events", this::stopModEvents);
         cleanup("Log watcher", logErrorWatcher::unregister);
+        if (placeholderApi != null) {
+            cleanup("PlaceholderAPI", placeholderApi);
+        }
         if (diagnosticsRegistration != null) {
             cleanup("Diagnostics", diagnosticsRegistration);
         }
+        cleanup("Frame labels", () -> FrameLabels.install(null));
+        cleanup("Incident privacy", IncidentPrivacy::reset);
         cleanup("Commands", () -> plugin.getCommandRegistry().shutdownAndCleanup(false));
         cleanup("Event listeners", () -> plugin.getEventRegistry().shutdownAndCleanup(false));
         cleanup("Health scheduler", healthScheduler::close);
@@ -1134,6 +1498,7 @@ final class HyboxRuntime implements AutoCloseable {
         drain("Worker executor", worker);
         drain("Capture executor", captureExecutor);
         cleanup("Profile session", profileSessions::close);
+        queuedProfile.set(null);
         PendingProfile pending = pendingProfile.getAndSet(null);
         if (pending != null) {
             pending.result().complete(remember(CaptureResult.of(CaptureResult.Status.STOPPED)));
@@ -1145,7 +1510,7 @@ final class HyboxRuntime implements AutoCloseable {
                     Files.createDirectories(rollingFile.getParent());
                     jfr.dump(rollingFile);
                     logger.log(System.Logger.Level.WARNING,
-                        "Shutdown during an in-flight capture; left a rolling snapshot at " + rollingFile
+                        "Shutdown during an in-flight capture. Left a rolling snapshot at " + rollingFile
                         + " for recovery on the next startup.");
                 } else {
                     Files.deleteIfExists(rollingFile);

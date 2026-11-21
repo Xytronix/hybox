@@ -317,6 +317,6 @@ final class HyboxProgressHuds implements AutoCloseable {
     }
 
     private void log(Throwable failure) {
-        logger.log(System.Logger.Level.WARNING, "Progress HUD unavailable; capture continues.", failure);
+        logger.log(System.Logger.Level.WARNING, "Progress HUD unavailable. The capture continues.", failure);
     }
 }

@@ -23,11 +23,15 @@ class HyboxConfigurationTest {
                 new String(input.readAllBytes(), StandardCharsets.UTF_8)));
             assertEquals("Hybox", manifest.getName());
             assertEquals("Xytronix", manifest.getGroup());
-            assertEquals(ServerVersionCheck.COMPATIBLE,
-                PluginManifest.checkServerVersionCompatibility(manifest.getServerVersion(), target));
+            for (String version : java.util.List.of(target, "0.7.7", "0.8.0-pre.5", "0.8.0", "0.8.1", "0.9.0")) {
+                assertEquals(ServerVersionCheck.COMPATIBLE,
+                    PluginManifest.checkServerVersionCompatibility(manifest.getServerVersion(), version), version);
+            }
             assertEquals(ServerVersionCheck.INCOMPATIBLE,
                 PluginManifest.checkServerVersionCompatibility(manifest.getServerVersion(), "0.5.6"));
             assertEquals(HyboxPlugin.class.getName(), manifest.getMain());
+            assertTrue(manifest.getDependencies().isEmpty());
+            assertTrue(manifest.getOptionalDependencies().containsKey(PlaceholderApiSupport.PLACEHOLDER_API));
         }
     }
 

@@ -14,18 +14,21 @@ import io.github.xytronix.hybox.core.testutil.MutableClock;
 class TriggerEngineTest {
 
     @Test
-    void profileCompletionBypassesCooldownAndDebounce() {
+    void profileCapturesBypassCooldownAndDebounce() {
         MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
         TriggerPolicy policy = new TriggerPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60), 1000, 5000, 100, 250);
         TriggerEngine engine = new TriggerEngine(clock, policy);
         TriggerEvent manual = new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(), Map.of());
         assertEquals(TriggerDecision.ACCEPT, engine.evaluate(manual).decision());
-        assertEquals(TriggerDecision.COOLDOWN, engine.evaluate(new TriggerEvent(TriggerKind.MANUAL, "server",
-            clock.instant(), Map.of("reason", "profile lead-up"))).decision());
+        assertEquals(TriggerDecision.ACCEPT, engine.evaluate(new TriggerEvent(TriggerKind.MANUAL, "server",
+            clock.instant(), Map.of("reason", TriggerEngine.PROFILE_LEAD_UP))).decision(),
+            "A profile queued behind an incident must be able to save its lead-up right away");
         TriggerEvent completion = new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(),
             Map.of("reason", "profile session", "profileStartMs", "0"));
         assertEquals(TriggerDecision.ACCEPT, engine.evaluate(completion).decision());
         assertEquals(TriggerDecision.COOLDOWN, engine.evaluate(manual).decision());
+        assertEquals(TriggerDecision.COOLDOWN, engine.evaluate(new TriggerEvent(TriggerKind.TICK_DEGRADED, "default",
+            clock.instant(), Map.of("tickAvgMs", "150"))).decision(), "Automatic triggers keep their cooldown");
     }
 
     @Test
@@ -119,8 +122,13 @@ class TriggerEngineTest {
 
         clock.advance(Duration.ofSeconds(5));
         TriggerEvent stall = new TriggerEvent(TriggerKind.HEARTBEAT_STALL, "world", clock.instant(),
-            Map.of("stallMs", "300000"));
-        assertEquals(TriggerDecision.ACCEPT, engine.evaluate(stall).decision());
+            Map.of("stallMs", "259745"));
+        TriggerResult accepted = engine.evaluate(stall);
+        assertEquals(TriggerDecision.ACCEPT, accepted.decision());
+        assertEquals("World world stopped responding for 4 min 20 s", accepted.headline());
+
+        TriggerEvent again = new TriggerEvent(TriggerKind.GC_PRESSURE, "jvm", clock.instant(), Map.of("gcPct", "31"));
+        assertEquals("Capture skipped. Another capture ran less than 30 s ago.", engine.evaluate(again).headline());
     }
 
     @Test
@@ -150,7 +158,7 @@ class TriggerEngineTest {
         TriggerResult result = engine.evaluate(event);
         assertEquals(TriggerDecision.ACCEPT, result.decision());
         assertEquals(Severity.CRITICAL, result.severity());
-        assertEquals("World failed world: java.lang.IllegalStateException: boom", result.headline());
+        assertEquals("World world failed: java.lang.IllegalStateException: boom", result.headline());
     }
 
     @Test
@@ -164,7 +172,7 @@ class TriggerEngineTest {
         TriggerResult first = engine.evaluate(degraded);
         assertEquals(TriggerDecision.ACCEPT, first.decision());
         assertEquals(Severity.DEGRADED, first.severity());
-        assertEquals("Tick average degraded world (120ms)", first.headline());
+        assertEquals("World world is slow: 120 ms per tick", first.headline());
 
         clock.advance(Duration.ofSeconds(1));
         TriggerEvent critical = new TriggerEvent(TriggerKind.TICK_DEGRADED, "other", clock.instant(),
@@ -172,6 +180,38 @@ class TriggerEngineTest {
         TriggerResult second = engine.evaluate(critical);
         assertEquals(TriggerDecision.ACCEPT, second.decision());
         assertEquals(Severity.CRITICAL, second.severity());
+    }
+
+    @Test
+    void autoTickSeverityUsesTargetTpsFromEvent() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        TriggerPolicy policy = new TriggerPolicy(Duration.ZERO, Duration.ZERO, 1000, 5000, 0, 0);
+        TriggerEngine engine = new TriggerEngine(clock, policy);
+
+        TriggerResult fastCritical = engine.evaluate(new TriggerEvent(TriggerKind.TICK_DEGRADED, "fast",
+            clock.instant(), Map.of("tickAvgMs", "130", "targetTps", "60")));
+        assertEquals(Severity.CRITICAL, fastCritical.severity());
+        assertEquals("World fast is slow: 130 ms per tick", fastCritical.headline());
+
+        TriggerResult fastDegraded = engine.evaluate(new TriggerEvent(TriggerKind.TICK_DEGRADED, "fast2",
+            clock.instant(), Map.of("tickAvgMs", "50", "targetTps", "60")));
+        assertEquals(Severity.DEGRADED, fastDegraded.severity());
+
+        TriggerResult normal = engine.evaluate(new TriggerEvent(TriggerKind.TICK_DEGRADED, "normal",
+            clock.instant(), Map.of("tickAvgMs", "130", "targetTps", "30")));
+        assertEquals(Severity.DEGRADED, normal.severity());
+
+        TriggerResult slowWorld = engine.evaluate(new TriggerEvent(TriggerKind.TICK_DEGRADED, "slow",
+            clock.instant(), Map.of("tickAvgMs", "260", "targetTps", "20")));
+        assertEquals(Severity.DEGRADED, slowWorld.severity());
+
+        TriggerResult missingTarget = engine.evaluate(new TriggerEvent(TriggerKind.TICK_DEGRADED, "legacy",
+            clock.instant(), Map.of("tickAvgMs", "260")));
+        assertEquals(Severity.CRITICAL, missingTarget.severity());
+
+        TriggerResult belowBudget = engine.evaluate(new TriggerEvent(TriggerKind.TICK_DEGRADED, "calm",
+            clock.instant(), Map.of("tickAvgMs", "90", "targetTps", "30")));
+        assertEquals(Severity.INFO, belowBudget.severity());
     }
 
     @Test
@@ -183,7 +223,7 @@ class TriggerEngineTest {
         TriggerResult deadlock = engine.evaluate(new TriggerEvent(
             TriggerKind.DEADLOCK, "jvm", clock.instant(), Map.of("threads", "2", "threadIds", "7,12")));
         assertEquals(Severity.CRITICAL, deadlock.severity());
-        assertEquals("Deadlock detected (2 threads)", deadlock.headline());
+        assertEquals("2 threads are deadlocked", deadlock.headline());
 
         TriggerResult heapDegraded = engine.evaluate(new TriggerEvent(
             TriggerKind.HEAP_PRESSURE, "jvm", clock.instant(), Map.of("usedPct", "92", "sustainedSec", "60")));
@@ -196,7 +236,7 @@ class TriggerEngineTest {
         TriggerResult gc = engine.evaluate(new TriggerEvent(
             TriggerKind.GC_PRESSURE, "jvm", clock.instant(), Map.of("gcPct", "31")));
         assertEquals(Severity.DEGRADED, gc.severity());
-        assertEquals("GC pressure (31% of wall time in GC)", gc.headline());
+        assertEquals("31% of the time spent in GC pauses", gc.headline());
 
         TriggerResult cpu = engine.evaluate(new TriggerEvent(
             TriggerKind.CPU_SATURATION, "jvm", clock.instant(), Map.of("cpuPct", "97", "sustainedSec", "60")));
@@ -205,11 +245,33 @@ class TriggerEngineTest {
         TriggerResult net = engine.evaluate(new TriggerEvent(
             TriggerKind.NET_SATURATION, "net", clock.instant(), Map.of("direction", "in", "mbps", "940")));
         assertEquals(Severity.DEGRADED, net.severity());
-        assertEquals("Network inbound traffic sustained 940 Mbit/s", net.headline());
+        assertEquals("Inbound traffic at 940 Mbit/s", net.headline());
 
         TriggerResult drop = engine.evaluate(new TriggerEvent(
             TriggerKind.PLAYER_DROP, "server", clock.instant(), Map.of("before", "20", "after", "4")));
         assertEquals(Severity.DEGRADED, drop.severity());
-        assertEquals("Player count dropped 20 to 4", drop.headline());
+        assertEquals("Players dropped from 20 to 4", drop.headline());
+    }
+
+    @Test
+    void aLongerFinalStallEscalatesToCriticalWithoutUsingTheCooldown() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        TriggerEngine engine = new TriggerEngine(clock, new TriggerPolicy(Duration.ofSeconds(30), Duration.ZERO,
+            2000, 10000, 100, 250, DetectorPolicy.defaults(), Set.of()));
+
+        TriggerResult settled = engine.describe(new TriggerEvent(TriggerKind.HEARTBEAT_STALL, "default", clock.instant(),
+            Map.of("stallMs", "240000", "frozen", "true")));
+        assertEquals(TriggerDecision.ACCEPT, settled.decision());
+        assertEquals(Severity.CRITICAL, settled.severity());
+        assertEquals("World default stopped responding for 4 min and was still frozen when the bundle was saved",
+            settled.headline());
+        assertEquals("World default stopped responding for 12 s", engine.describe(new TriggerEvent(
+            TriggerKind.HEARTBEAT_STALL, "default", clock.instant(), Map.of("stallMs", "12000"))).headline());
+
+        TriggerEvent first = new TriggerEvent(TriggerKind.HEARTBEAT_STALL, "default", clock.instant(),
+            Map.of("stallMs", "2100"));
+        assertEquals(Severity.DEGRADED, engine.evaluate(first).severity());
+        assertEquals(TriggerDecision.COOLDOWN, engine.evaluate(new TriggerEvent(TriggerKind.HEARTBEAT_STALL, "nether",
+            clock.instant(), Map.of("stallMs", "2100"))).decision());
     }
 }

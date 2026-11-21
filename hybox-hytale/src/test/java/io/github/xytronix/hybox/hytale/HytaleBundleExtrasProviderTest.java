@@ -109,7 +109,7 @@ class HytaleBundleExtrasProviderTest {
         Files.writeString(metricsDir.resolve("not-health.csv"), "unrelated\n", StandardCharsets.UTF_8);
         HytaleBundleExtrasProvider provider = new HytaleBundleExtrasProvider(
             new HeartbeatRegistry(Clock.systemUTC()), () -> 0, () -> true, metricsDir,
-            new PlayerNameMasker(), () -> List.of(), () -> true);
+            new ServerLogMasker(new PlayerNameMasker()), () -> List.of(), () -> true);
 
         List<BundleAttachment> extras = provider.historicalExtras();
 
@@ -131,7 +131,7 @@ class HytaleBundleExtrasProviderTest {
             List.of(new DiagnosticSection("Server log", Map.of(), capturedTail)));
         HytaleBundleExtrasProvider provider = new HytaleBundleExtrasProvider(
             new HeartbeatRegistry(Clock.systemUTC()), () -> 500, () -> true, null,
-            new PlayerNameMasker(), () -> List.of(), () -> false);
+            new ServerLogMasker(new PlayerNameMasker()), () -> List.of(), () -> false);
 
         var readTail = HytaleBundleExtrasProvider.class.getDeclaredMethod("buildServerLogTail", IncidentReport.class);
         readTail.setAccessible(true);

@@ -7,7 +7,7 @@ import jdk.jfr.Name;
 import jdk.jfr.StackTrace;
 
 @Name(HyboxHostCpuEvent.NAME)
-@Label("Host CPU Sample")
+@Label("Machine CPU Sample")
 @Category("Hybox")
 @StackTrace(false)
 public final class HyboxHostCpuEvent extends Event {
@@ -30,4 +30,10 @@ public final class HyboxHostCpuEvent extends Event {
 
     @Label("Container CPU usage micros")
     public long cpuUsageUsec;
+
+    @Label("Bytes read back from swap (total)")
+    public long swapInBytes = -1;
+
+    @Label("Bytes written to swap (total)")
+    public long swapOutBytes = -1;
 }

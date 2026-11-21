@@ -1,0 +1,13 @@
+$H = "HyboxTones.ui";
+Group {
+  LayoutMode: Top;
+  Anchor: (Bottom: 2);
+  Padding: (Top: 3, Bottom: 4);
+  Group {
+    LayoutMode: Left;
+    Label #Metric { FlexWeight: 1; Anchor: (Right: 12); Style: (FontSize: 12, TextColor: $H.@Text3, Wrap: true); TextTooltipStyle: $H.@TooltipStyle; }
+    Label #Baseline { Anchor: (Width: 170, Right: 12); Style: (FontSize: 13, TextColor: $H.@Text, HorizontalAlignment: End); }
+    Label #Incident { Anchor: (Width: 170, Right: 12); Style: (FontSize: 13, TextColor: $H.@Text, HorizontalAlignment: End); }
+    Label #Change { Anchor: (Width: 170); Style: (FontSize: 13, TextColor: $H.@Text, HorizontalAlignment: End); }
+  }
+}

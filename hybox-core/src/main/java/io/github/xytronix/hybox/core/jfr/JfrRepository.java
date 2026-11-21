@@ -49,15 +49,22 @@ public final class JfrRepository {
         return defaultBase;
     }
 
-    public static Optional<Path> sessionDirForPid(Path base, long pid) throws IOException {
+    public static Optional<Path> sessionDirForPid(Path base, long pid, String active) throws IOException {
         if (base == null || !Files.isDirectory(base, LinkOption.NOFOLLOW_LINKS)) {
             return Optional.empty();
         }
         String suffix = "_" + pid;
+        String activeName = active == null ? "" : active.substring(Math.max(active.lastIndexOf('/'), active.lastIndexOf('\\')) + 1);
+        if (activeName.endsWith(suffix)) {
+            Path dir = base.resolve(activeName);
+            if (Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
+                return Optional.of(dir);
+            }
+        }
         try (Stream<Path> entries = Files.list(base)) {
             return entries
-                .filter(dir -> Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS))
                 .filter(dir -> dir.getFileName().toString().endsWith(suffix))
+                .filter(dir -> Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS))
                 .max(Comparator.comparing(dir -> dir.getFileName().toString()));
         }
     }

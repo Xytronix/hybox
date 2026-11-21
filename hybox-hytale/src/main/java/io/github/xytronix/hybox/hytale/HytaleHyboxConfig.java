@@ -56,9 +56,9 @@ final class HytaleHyboxConfig {
     private static final Duration DEFAULT_JFR_SNAPSHOT_INTERVAL = Duration.ofMinutes(10);
     private static final Duration DEFAULT_JFR_SAMPLE_INTERVAL = Duration.ofSeconds(10);
     private static final String DEFAULT_JFR_CONFIGURATION = "default";
-    private static final boolean DEFAULT_JFR_OLD_OBJECT_SAMPLING = false;
+    private static final boolean DEFAULT_JFR_OLD_OBJECT_SAMPLING = true;
 
-    private static final boolean DEFAULT_METRICS_ENABLED = false;
+    private static final boolean DEFAULT_METRICS_ENABLED = true;
     private static final int DEFAULT_METRICS_RETENTION_DAYS = 7;
     private static final boolean DEFAULT_METRICS_CPU = true;
     private static final boolean DEFAULT_METRICS_ALLOCATION = false;
@@ -70,8 +70,10 @@ final class HytaleHyboxConfig {
     private static final Duration DEFAULT_TRIGGER_DEBOUNCE = Duration.ofSeconds(2);
     private static final long DEFAULT_STALL_DEGRADED_MS = 2_000L;
     private static final long DEFAULT_STALL_CRITICAL_MS = 10_000L;
-    private static final long DEFAULT_TICK_AVG_DEGRADED_MS = 100L;
-    private static final long DEFAULT_TICK_AVG_CRITICAL_MS = 250L;
+    private static final long DEFAULT_TICK_AVG_DEGRADED_MS = 0L;
+    private static final long DEFAULT_TICK_AVG_CRITICAL_MS = 0L;
+    private static final long LEGACY_DEFAULT_TICK_AVG_DEGRADED_MS = 100L;
+    private static final long LEGACY_DEFAULT_TICK_AVG_CRITICAL_MS = 250L;
     private static final DetectorPolicy DEFAULT_DETECTORS = DetectorPolicy.defaults();
 
     private static final int DEFAULT_RETENTION_MAX_COUNT = 25;
@@ -82,12 +84,13 @@ final class HytaleHyboxConfig {
     private static final Duration DEFAULT_DISCORD_COOLDOWN = Duration.ofMinutes(1);
     private static final Duration DEFAULT_DISCORD_REQUEST_TIMEOUT = Duration.ofSeconds(10);
     private static final String DEFAULT_DISCORD_USERNAME = "Hybox";
+    private static final String DEFAULT_DISCORD_SERVER_NAME = "";
 
     private static final boolean DEFAULT_CAPTURE_ENABLED = true;
     private static final boolean DEFAULT_CAPTURE_ALLOW_PLUGIN_EXTRAS = true;
     private static final int DEFAULT_CAPTURE_LOG_TAIL_LINES = 500;
     private static final boolean DEFAULT_CAPTURE_HEAP_HISTOGRAM = false;
-    private static final boolean DEFAULT_CAPTURE_INCLUDE_SERVER_LOG = false;
+    private static final boolean DEFAULT_CAPTURE_INCLUDE_SERVER_LOG = true;
     private static final boolean DEFAULT_CAPTURE_INCLUDE_SERVER_CONFIG = false;
     private static final boolean DEFAULT_CAPTURE_INCLUDE_MOD_CONFIGS = false;
     private static final boolean DEFAULT_CAPTURE_ALLOW_MOD_CONFIG_OPT_IN = true;
@@ -117,7 +120,7 @@ final class HytaleHyboxConfig {
             raw = configFile.load().join();
         } catch (Exception e) {
             throw new IllegalStateException("Failed to load Hybox config from " + configPath
-                + "; the existing configuration was not replaced.", e);
+                + ". The existing configuration was not replaced.", e);
         }
         HyboxConfig loaded = Objects.requireNonNull(raw, "Loaded configuration").toCoreConfig(logger);
         if (!existed) {
@@ -134,7 +137,7 @@ final class HytaleHyboxConfig {
     enum SettingKind { TOGGLE, NUMBER }
 
     enum SettingUnit {
-        BOOLEAN("", 1), COUNT("", 1), PERCENT("percent", 1), MILLISECONDS("ms", 1),
+        BOOLEAN("", 1), COUNT("", 1), PERCENT("%", 1), MILLISECONDS("ms", 1),
         SECONDS("seconds", 1), MINUTES("minutes", 60), DAYS("days", 86400), DAY_COUNT("days", 1),
         MEBIBYTES("MiB", 1024 * 1024), MBPS("Mbit/s", 1);
 
@@ -153,18 +156,85 @@ final class HytaleHyboxConfig {
         long stored(long display) {
             return Math.multiplyExact(display, scale);
         }
+
+        String format(long display) {
+            return switch (this) {
+                case BOOLEAN, COUNT -> Long.toString(display);
+                case PERCENT -> display + "%";
+                case MBPS -> display + " Mbit/s";
+                case DAYS, DAY_COUNT -> amount(display, "day");
+                case MILLISECONDS -> time(display, "ms");
+                case SECONDS -> time(display * 1000, "second");
+                case MINUTES -> time(display * 60_000, "minute");
+                case MEBIBYTES -> display != 0 && display % (1024 * 1024) == 0 ? display / (1024 * 1024) + " TiB"
+                    : display != 0 && display % 1024 == 0 ? display / 1024 + " GiB" : display + " MiB";
+            };
+        }
+
+        private static String time(long millis, String zeroUnit) {
+            if (millis == 0) return zeroUnit.equals("ms") ? "0 ms" : "0 " + zeroUnit + "s";
+            if (millis % 86_400_000 == 0) return amount(millis / 86_400_000, "day");
+            if (millis % 3_600_000 == 0) return amount(millis / 3_600_000, "hour");
+            if (millis % 60_000 == 0) return amount(millis / 60_000, "minute");
+            if (millis % 1000 == 0) return amount(millis / 1000, "second");
+            if (millis >= 1000) return decimal(millis, 1000) + " seconds";
+            return millis + " ms";
+        }
+
+        String formatStored(Object stored) {
+            if (stored instanceof Duration duration) return time(duration.toMillis(), "second");
+            long value = (long) stored;
+            return switch (this) {
+                case MILLISECONDS -> time(value, "ms");
+                case MEBIBYTES -> bytes(value);
+                default -> format(value);
+            };
+        }
+
+        private static String bytes(long value) {
+            String[] names = {"TiB", "GiB", "MiB", "KiB"};
+            long[] sizes = {1L << 40, 1L << 30, 1L << 20, 1L << 10};
+            for (int i = 0; i < sizes.length; i++) {
+                if (value >= sizes[i] && value % (sizes[i] / 4) == 0) return decimal(value, sizes[i]) + " " + names[i];
+            }
+            return value + " bytes";
+        }
+
+        private static String decimal(long value, long divisor) {
+            return new java.math.BigDecimal(value).divide(java.math.BigDecimal.valueOf(divisor))
+                .stripTrailingZeros().toPlainString();
+        }
+
+        private static String amount(long value, String unit) {
+            return value + " " + unit + (value == 1 ? "" : "s");
+        }
     }
 
     record SettingField(String id, String eventKey, String configKey, SettingKind kind,
-                        SettingUnit unit, long min, long max, String errorName, boolean restartRequired,
-                        Function<FileConfig, Object> getter, BiConsumer<FileConfig, Object> setter) {
+                        SettingUnit unit, long min, long max, boolean zeroIsAuto, String group, String label,
+                        boolean restartRequired,
+                        Function<FileConfig, Object> getter, BiConsumer<FileConfig, Object> setter,
+                        Function<FileConfig, Object> stored) {
         String selector() {
             return "#" + id + (kind == SettingKind.TOGGLE ? " #CheckBox.Value" : " #Input.Value");
         }
 
+        String name() {
+            return group.isEmpty() ? label : group + ": " + label;
+        }
+
+        String range() {
+            String between = "between " + unit.format(min) + " and " + unit.format(max);
+            return zeroIsAuto ? "0 for Auto, or " + between : between;
+        }
+
         Object read(FileConfig raw) {
-            Object value = getter.apply(raw);
-            return kind == SettingKind.NUMBER ? Math.clamp((long) value, min, max) : value;
+            return clamp(getter.apply(raw));
+        }
+
+        Object clamp(Object value) {
+            if (kind != SettingKind.NUMBER || zeroIsAuto && (long) value == 0L) return value;
+            return Math.clamp((long) value, min, max);
         }
 
         Object parse(Object submitted, Object current, List<String> problems) {
@@ -173,163 +243,170 @@ final class HytaleHyboxConfig {
             double number = ((Number) submitted).doubleValue();
             if (!Double.isFinite(number) || number != Math.rint(number)
                 || number < -0x1p63 || number >= 0x1p63) {
-                problems.add(errorName + " must be a whole number within the supported range.");
+                problems.add(name() + " must be a whole number" + (zeroIsAuto ? ", " : " ") + range() + ".");
                 return current;
             }
             return (long) number;
         }
 
         void validate(Object value, List<String> problems) {
-            if (kind == SettingKind.NUMBER && ((long) value < min || (long) value > max)) {
-                problems.add(errorName + " must be between " + min + " and " + max
-                    + (unit.label.isEmpty() ? "" : " " + unit.label) + ".");
+            if (kind != SettingKind.NUMBER || zeroIsAuto && (long) value == 0L) return;
+            if ((long) value < min || (long) value > max) {
+                problems.add(name() + " must be " + range() + ".");
             }
         }
     }
 
-    private static final long MAX_EXACT_UI_INTEGER = 9_007_199_254_740_991L;
-
     static final List<SettingField> SETTINGS_FIELDS = List.of(
-        toggle("HeartbeatStall", "Trigger.Modules.HeartbeatStall", false,
+        toggle("HeartbeatStall", "Trigger.Modules.HeartbeatStall", "Heartbeat stall", false,
             c -> c.trigger.modules.heartbeatStall, (c, v) -> c.trigger.modules.heartbeatStall = v),
         number("StallDegraded", "@StallDegradedMs", "Trigger.StallDegradedMs", SettingUnit.MILLISECONDS,
-            1, MAX_EXACT_UI_INTEGER, "Heartbeat degraded threshold", false,
+            500, 600_000, "Heartbeat stall", "Degraded", false,
             c -> c.trigger.stallDegradedMs, (c, v) -> c.trigger.stallDegradedMs = v),
         number("StallCritical", "@StallCriticalMs", "Trigger.StallCriticalMs", SettingUnit.MILLISECONDS,
-            1, MAX_EXACT_UI_INTEGER, "Heartbeat critical threshold", false,
+            500, 600_000, "Heartbeat stall", "Critical", false,
             c -> c.trigger.stallCriticalMs, (c, v) -> c.trigger.stallCriticalMs = v),
-        toggle("TickDegraded", "Trigger.Modules.TickDegraded", false,
+        toggle("TickDegraded", "Trigger.Modules.TickDegraded", "Slow ticks", false,
             c -> c.trigger.modules.tickDegraded, (c, v) -> c.trigger.modules.tickDegraded = v),
-        number("TickAvgDegraded", "@TickAvgDegradedMs", "Trigger.TickAvgDegradedMs", SettingUnit.MILLISECONDS,
-            1, MAX_EXACT_UI_INTEGER, "Tick degraded threshold", false,
+        autoNumber("TickAvgDegraded", "@TickAvgDegradedMs", "Trigger.TickAvgDegradedMs", SettingUnit.MILLISECONDS,
+            10, 10_000, "Slow ticks", "Degraded",
             c -> c.trigger.tickAvgDegradedMs, (c, v) -> c.trigger.tickAvgDegradedMs = v),
-        number("TickAvgCritical", "@TickAvgCriticalMs", "Trigger.TickAvgCriticalMs", SettingUnit.MILLISECONDS,
-            1, MAX_EXACT_UI_INTEGER, "Tick critical threshold", false,
+        autoNumber("TickAvgCritical", "@TickAvgCriticalMs", "Trigger.TickAvgCriticalMs", SettingUnit.MILLISECONDS,
+            10, 10_000, "Slow ticks", "Critical",
             c -> c.trigger.tickAvgCriticalMs, (c, v) -> c.trigger.tickAvgCriticalMs = v),
-        toggle("Deadlock", "Trigger.Modules.Deadlock", false,
+        toggle("Deadlock", "Trigger.Modules.Deadlock", "Deadlock", false,
             c -> c.trigger.modules.deadlock, (c, v) -> c.trigger.modules.deadlock = v),
-        toggle("HeapPressure", "Trigger.Modules.HeapPressure", false,
+        toggle("HeapPressure", "Trigger.Modules.HeapPressure", "Heap pressure", false,
             c -> c.trigger.modules.heapPressure, (c, v) -> c.trigger.modules.heapPressure = v),
         number("HeapPressurePct", "@HeapPressurePct", "Trigger.HeapPressurePct", SettingUnit.PERCENT,
-            1, 100, "Heap pressure", false,
+            50, 100, "Heap pressure", "Heap used", false,
             c -> c.trigger.heapPressurePct, (c, v) -> c.trigger.heapPressurePct = (int) v),
         duration("HeapPressureSustain", "@HeapPressureSustain", "Trigger.HeapPressureSustain", SettingUnit.SECONDS,
-            0, 3600, "Heap pressure sustain", false,
+            0, 3600, "Heap pressure", "Sustain", false,
             c -> c.trigger.heapPressureSustain, (c, v) -> c.trigger.heapPressureSustain = v),
-        toggle("GcPressure", "Trigger.Modules.GcPressure", false,
+        toggle("GcPressure", "Trigger.Modules.GcPressure", "GC pressure", false,
             c -> c.trigger.modules.gcPressure, (c, v) -> c.trigger.modules.gcPressure = v),
         number("GcPressurePct", "@GcPressurePct", "Trigger.GcPressurePct", SettingUnit.PERCENT,
-            1, 100, "GC pressure", false,
+            1, 90, "GC pressure", "GC time", false,
             c -> c.trigger.gcPressurePct, (c, v) -> c.trigger.gcPressurePct = (int) v),
         duration("GcPressureWindow", "@GcPressureWindow", "Trigger.GcPressureWindow", SettingUnit.SECONDS,
-            1, 3600, "GC pressure window", false,
+            10, 3600, "GC pressure", "Window", false,
             c -> c.trigger.gcPressureWindow, (c, v) -> c.trigger.gcPressureWindow = v),
-        toggle("CpuSaturation", "Trigger.Modules.CpuSaturation", false,
+        toggle("CpuSaturation", "Trigger.Modules.CpuSaturation", "CPU saturation", false,
             c -> c.trigger.modules.cpuSaturation, (c, v) -> c.trigger.modules.cpuSaturation = v),
         number("CpuSaturationPct", "@CpuSaturationPct", "Trigger.CpuSaturationPct", SettingUnit.PERCENT,
-            1, 100, "CPU saturation", false,
+            10, 100, "CPU saturation", "CPU used", false,
             c -> c.trigger.cpuSaturationPct, (c, v) -> c.trigger.cpuSaturationPct = (int) v),
         duration("CpuSaturationSustain", "@CpuSaturationSustain", "Trigger.CpuSaturationSustain", SettingUnit.SECONDS,
-            0, 3600, "CPU saturation sustain", false,
+            0, 3600, "CPU saturation", "Sustain", false,
             c -> c.trigger.cpuSaturationSustain, (c, v) -> c.trigger.cpuSaturationSustain = v),
-        toggle("NetSaturation", "Trigger.Modules.NetSaturation", false,
+        toggle("NetSaturation", "Trigger.Modules.NetSaturation", "Network saturation", false,
             c -> c.trigger.modules.netSaturation, (c, v) -> c.trigger.modules.netSaturation = v),
         number("NetInMbps", "@NetInMbps", "Trigger.NetInMbps", SettingUnit.MBPS,
-            0, 100000, "Network inbound limit", false,
+            0, 100_000, "Network saturation", "In", false,
             c -> c.trigger.netInMbps, (c, v) -> c.trigger.netInMbps = v),
         number("NetOutMbps", "@NetOutMbps", "Trigger.NetOutMbps", SettingUnit.MBPS,
-            0, 100000, "Network outbound limit", false,
+            0, 100_000, "Network saturation", "Out", false,
             c -> c.trigger.netOutMbps, (c, v) -> c.trigger.netOutMbps = v),
         duration("NetSustain", "@NetSustain", "Trigger.NetSustain", SettingUnit.SECONDS,
-            0, 3600, "Network saturation sustain", false,
+            0, 3600, "Network saturation", "Sustain", false,
             c -> c.trigger.netSustain, (c, v) -> c.trigger.netSustain = v),
-        toggle("PlayerDrop", "Trigger.Modules.PlayerDrop", false,
+        toggle("PlayerDrop", "Trigger.Modules.PlayerDrop", "Player drop", false,
             c -> c.trigger.modules.playerDrop, (c, v) -> c.trigger.modules.playerDrop = v),
         number("PlayerDropPct", "@PlayerDropPct", "Trigger.PlayerDropPct", SettingUnit.PERCENT,
-            1, 100, "Player drop", false,
+            10, 100, "Player drop", "Player loss", false,
             c -> c.trigger.playerDropPct, (c, v) -> c.trigger.playerDropPct = (int) v),
         duration("PlayerDropWindow", "@PlayerDropWindow", "Trigger.PlayerDropWindow", SettingUnit.SECONDS,
-            1, 3600, "Player drop window", false,
+            10, 3600, "Player drop", "Window", false,
             c -> c.trigger.playerDropWindow, (c, v) -> c.trigger.playerDropWindow = v),
         number("PlayerDropMinPlayers", "@PlayerDropMinPlayers", "Trigger.PlayerDropMinPlayers", SettingUnit.COUNT,
-            0, 10000, "Player drop minimum players", false,
+            0, 1000, "Player drop", "Min players", false,
             c -> c.trigger.playerDropMinPlayers, (c, v) -> c.trigger.playerDropMinPlayers = (int) v),
-        toggle("LogError", "Trigger.Modules.LogError", false,
+        toggle("LogError", "Trigger.Modules.LogError", "Log errors", false,
             c -> c.trigger.modules.logError, (c, v) -> c.trigger.modules.logError = v),
         duration("LogErrorDedupeWindow", "@LogErrorDedupeWindow", "Trigger.LogErrorDedupeWindow", SettingUnit.SECONDS,
-            0, 86400, "Log error repeat window", false,
+            0, 86400, "Log errors", "Repeat window", false,
             c -> c.trigger.logErrorDedupeWindow, (c, v) -> c.trigger.logErrorDedupeWindow = v),
         duration("Cooldown", "@CooldownSeconds", "Trigger.Cooldown", SettingUnit.SECONDS,
-            0, 3600, "Cooldown", false,
+            0, 3600, "", "Cooldown", false,
             c -> c.trigger.cooldown, (c, v) -> c.trigger.cooldown = v),
         duration("Debounce", "@DebounceSeconds", "Trigger.Debounce", SettingUnit.SECONDS,
-            0, 3600, "Debounce", false,
+            0, 3600, "", "Debounce", false,
             c -> c.trigger.debounce, (c, v) -> c.trigger.debounce = v),
-        toggle("CaptureEnabled", "Capture.Enabled", false,
+        toggle("CaptureEnabled", "Capture.Enabled", "Incident capture enabled", false,
             c -> c.capture.enabled, (c, v) -> c.capture.enabled = v),
         number("RetentionMaxCount", "@RetentionMaxCount", "Retention.MaxCount", SettingUnit.COUNT,
-            1, 1000, "Retained bundles", false,
+            1, 1000, "Capture and storage", "Max bundles", false,
             c -> c.retention.maxCount, (c, v) -> c.retention.maxCount = (int) v),
         number("RetentionMaxTotalMiB", "@RetentionMaxTotalMiB", "Retention.MaxTotalBytes", SettingUnit.MEBIBYTES,
-            1, 1048576, "Retention total size", false,
+            64, 1_048_576, "Capture and storage", "Total", false,
             c -> c.retention.maxTotalBytes, (c, v) -> c.retention.maxTotalBytes = v),
         duration("RetentionMaxAgeDays", "@RetentionMaxAgeDays", "Retention.MaxAge", SettingUnit.DAYS,
-            1, 3650, "Retention age", false,
+            1, 365, "Capture and storage", "Age", false,
             c -> c.retention.maxAge == null ? DEFAULT_RETENTION_MAX_AGE : c.retention.maxAge,
             (c, v) -> c.retention.maxAge = v),
-        toggle("MetricsEnabled", "Metrics.Enabled", false,
+        toggle("MetricsEnabled", "Metrics.Enabled", "Metrics history", false,
             c -> c.metrics.enabled, (c, v) -> c.metrics.enabled = v),
         number("MetricsRetentionDays", "@MetricsRetentionDays", "Metrics.RetentionDays", SettingUnit.DAY_COUNT,
-            1, 365, "Metrics retention days", false,
+            1, 365, "Metrics history", "Keep", false,
             c -> c.metrics.retentionDays, (c, v) -> c.metrics.retentionDays = (int) v),
-        toggle("MetricsCpu", "Metrics.Cpu", false,
+        toggle("MetricsCpu", "Metrics.Cpu", "CPU use", false,
             c -> c.metrics.cpu, (c, v) -> c.metrics.cpu = v),
-        toggle("MetricsAllocation", "Metrics.Allocation", false,
+        toggle("MetricsAllocation", "Metrics.Allocation", "Allocation rate", false,
             c -> c.metrics.allocation, (c, v) -> c.metrics.allocation = v),
         duration("PostIncidentMaxWait", "@PostIncidentMaxWait", "Jfr.PostIncidentMaxWait", SettingUnit.SECONDS,
-            0, 3600, "Post-incident maximum wait", false,
+            0, 600, "Incident evidence", "Max wait", false,
             c -> c.jfr.postIncidentMaxWait, (c, v) -> c.jfr.postIncidentMaxWait = v),
         number("ThreadDumpCount", "@ThreadDumpCount", "Jfr.ThreadDumpCount", SettingUnit.COUNT,
-            0, 20, "Thread dump count", false,
+            0, 20, "Incident evidence", "Dump count", false,
             c -> c.jfr.threadDumpCount, (c, v) -> c.jfr.threadDumpCount = (int) v),
         duration("ThreadDumpInterval", "@ThreadDumpInterval", "Jfr.ThreadDumpInterval", SettingUnit.SECONDS,
-            1, 3600, "Thread dump interval", false,
+            1, 120, "Incident evidence", "Dump every", false,
             c -> c.jfr.threadDumpInterval, (c, v) -> c.jfr.threadDumpInterval = v),
         duration("JfrMaxAgeMinutes", "@JfrMaxAgeMinutes", "Jfr.MaxAge", SettingUnit.MINUTES,
-            1, 1440, "Recording history", true,
+            5, 1440, "Recording", "History", true,
             c -> c.jfr.maxAge, (c, v) -> c.jfr.maxAge = v),
         number("JfrMaxSizeMiB", "@JfrMaxSizeMiB", "Jfr.MaxSizeBytes", SettingUnit.MEBIBYTES,
-            16, 8192, "Recording size", true,
+            16, 8192, "Recording", "Size", true,
             c -> c.jfr.maxSizeBytes, (c, v) -> c.jfr.maxSizeBytes = v),
         duration("JfrSampleIntervalSeconds", "@JfrSampleIntervalSeconds", "Jfr.SampleInterval", SettingUnit.SECONDS,
-            5, 300, "Recording sample interval", true,
+            5, 300, "Recording", "Sample every", true,
             c -> c.jfr.sampleInterval, (c, v) -> c.jfr.sampleInterval = v),
         duration("JfrSnapshotIntervalMinutes", "@JfrSnapshotIntervalMinutes", "Jfr.SnapshotInterval", SettingUnit.MINUTES,
-            0, 1440, "Recording snapshot interval", true,
+            0, 1440, "Recording", "Snapshot", true,
             c -> c.jfr.snapshotInterval, (c, v) -> c.jfr.snapshotInterval = v),
-        toggle("JfrOldObjectSampling", "Jfr.OldObjectSampling", true,
+        toggle("JfrOldObjectSampling", "Jfr.OldObjectSampling", "Old-object sampling", true,
             c -> c.jfr.oldObjectSampling, (c, v) -> c.jfr.oldObjectSampling = v)
     );
 
-    private static SettingField toggle(String id, String configKey, boolean restartRequired,
+    private static SettingField toggle(String id, String configKey, String label, boolean restartRequired,
                                        Function<FileConfig, Boolean> getter, BiConsumer<FileConfig, Boolean> setter) {
-        return new SettingField(id, "@" + id, configKey, SettingKind.TOGGLE, SettingUnit.BOOLEAN, 0, 1,
-            id, restartRequired, getter::apply, (c, v) -> setter.accept(c, (boolean) v));
+        return new SettingField(id, "@" + id, configKey, SettingKind.TOGGLE, SettingUnit.BOOLEAN, 0, 1, false,
+            "", label, restartRequired, getter::apply, (c, v) -> setter.accept(c, (boolean) v), getter::apply);
     }
 
     private static SettingField number(String id, String eventKey, String configKey, SettingUnit unit,
-                                      long min, long max, String errorName, boolean restartRequired,
+                                      long min, long max, String group, String label, boolean restartRequired,
                                       ToLongFunction<FileConfig> getter, ObjLongConsumer<FileConfig> setter) {
-        return new SettingField(id, eventKey, configKey, SettingKind.NUMBER, unit, min, max,
-            errorName, restartRequired, c -> unit.display(getter.applyAsLong(c)),
-            (c, v) -> setter.accept(c, unit.stored((long) v)));
+        return new SettingField(id, eventKey, configKey, SettingKind.NUMBER, unit, min, max, false,
+            group, label, restartRequired, c -> unit.display(getter.applyAsLong(c)),
+            (c, v) -> setter.accept(c, unit.stored((long) v)), c -> getter.applyAsLong(c));
+    }
+
+    private static SettingField autoNumber(String id, String eventKey, String configKey, SettingUnit unit,
+                                          long min, long max, String group, String label,
+                                          ToLongFunction<FileConfig> getter, ObjLongConsumer<FileConfig> setter) {
+        return new SettingField(id, eventKey, configKey, SettingKind.NUMBER, unit, min, max, true,
+            group, label, false, c -> unit.display(getter.applyAsLong(c)),
+            (c, v) -> setter.accept(c, unit.stored((long) v)), c -> getter.applyAsLong(c));
     }
 
     private static SettingField duration(String id, String eventKey, String configKey, SettingUnit unit,
-                                        long min, long max, String errorName, boolean restartRequired,
+                                        long min, long max, String group, String label, boolean restartRequired,
                                         Function<FileConfig, Duration> getter, BiConsumer<FileConfig, Duration> setter) {
-        return number(id, eventKey, configKey, unit, min, max, errorName, restartRequired,
-            c -> getter.apply(c).getSeconds(), (c, v) -> setter.accept(c, Duration.ofSeconds(v)));
+        return new SettingField(id, eventKey, configKey, SettingKind.NUMBER, unit, min, max, false,
+            group, label, restartRequired, c -> unit.display(getter.apply(c).getSeconds()),
+            (c, v) -> setter.accept(c, Duration.ofSeconds(unit.stored((long) v))), getter::apply);
     }
 
     record HyboxSettings(Map<String, Object> values) {
@@ -345,13 +422,32 @@ final class HytaleHyboxConfig {
             List<String> problems = new ArrayList<>();
             for (SettingField field : SETTINGS_FIELDS) field.validate(value(field), problems);
             if ((long) values.get("StallCritical") < (long) values.get("StallDegraded")) {
-                problems.add("Heartbeat critical threshold must be at least the degraded threshold.");
+                problems.add("Heartbeat stall: Critical must be at least Degraded.");
             }
-            if ((long) values.get("TickAvgCritical") < (long) values.get("TickAvgDegraded")) {
-                problems.add("Tick critical threshold must be at least the degraded threshold.");
+            long tickDegraded = (long) values.get("TickAvgDegraded");
+            long tickCritical = (long) values.get("TickAvgCritical");
+            if (tickDegraded > 0 && tickCritical > 0 && tickCritical < tickDegraded) {
+                problems.add("Slow ticks: Critical must be at least Degraded.");
             }
             return List.copyOf(problems);
         }
+    }
+
+    static List<SettingField> pendingRestart(HyboxSettings saved, HyboxConfig running) {
+        List<SettingField> pending = new ArrayList<>();
+        for (SettingField field : SETTINGS_FIELDS) {
+            if (!field.restartRequired()) continue;
+            Object applied = switch (field.id()) {
+                case "JfrMaxAgeMinutes" -> running.jfrMaxAge().toMinutes();
+                case "JfrMaxSizeMiB" -> SettingUnit.MEBIBYTES.display(running.jfrMaxSizeBytes());
+                case "JfrSampleIntervalSeconds" -> running.jfrSampleInterval().getSeconds();
+                case "JfrSnapshotIntervalMinutes" -> running.jfrSnapshotInterval().toMinutes();
+                case "JfrOldObjectSampling" -> running.jfrOldObjectSampling();
+                default -> throw new IllegalStateException("No running value for " + field.id());
+            };
+            if (!field.clamp(applied).equals(saved.value(field))) pending.add(field);
+        }
+        return List.copyOf(pending);
     }
 
     static HyboxSettings read(Path dataDir, System.Logger logger) {
@@ -409,7 +505,7 @@ final class HytaleHyboxConfig {
             Objects.requireNonNull(configFile.load().join(), "Loaded configuration");
         } catch (RuntimeException failure) {
             throw new IllegalStateException("Failed to load Hybox config from " + path(dataDir)
-                + "; the existing configuration was not replaced.", failure);
+                + ". The existing configuration was not replaced.", failure);
         }
         return configFile;
     }
@@ -432,7 +528,8 @@ final class HytaleHyboxConfig {
             DEFAULT_DISCORD_WEBHOOK_URL,
             DEFAULT_DISCORD_COOLDOWN,
             DEFAULT_DISCORD_REQUEST_TIMEOUT,
-            DEFAULT_DISCORD_USERNAME
+            DEFAULT_DISCORD_USERNAME,
+            DEFAULT_DISCORD_SERVER_NAME
         );
         return new HyboxConfig(
             DEFAULT_JFR_MAX_AGE,
@@ -501,12 +598,20 @@ final class HytaleHyboxConfig {
         HyboxConfig toCoreConfig(System.Logger logger) {
             Objects.requireNonNull(logger, "logger");
 
-            Jfr jfrCfg = this.jfr == null ? new Jfr() : this.jfr;
-            Trigger triggerCfg = this.trigger == null ? new Trigger() : this.trigger;
-            Retention retentionCfg = this.retention == null ? new Retention() : this.retention;
-            Capture captureCfg = this.capture == null ? new Capture() : this.capture;
-            Discord discordCfg = this.discord == null ? new Discord() : this.discord;
-            Metrics metricsCfg = this.metrics == null ? new Metrics() : this.metrics;
+            if (this.jfr == null) this.jfr = new Jfr();
+            if (this.trigger == null) this.trigger = new Trigger();
+            if (this.trigger.modules == null) this.trigger.modules = new Modules();
+            if (this.retention == null) this.retention = new Retention();
+            if (this.capture == null) this.capture = new Capture();
+            if (this.discord == null) this.discord = new Discord();
+            if (this.metrics == null) this.metrics = new Metrics();
+            clampToSettingRanges(logger);
+            Jfr jfrCfg = this.jfr;
+            Trigger triggerCfg = this.trigger;
+            Retention retentionCfg = this.retention;
+            Capture captureCfg = this.capture;
+            Discord discordCfg = this.discord;
+            Metrics metricsCfg = this.metrics;
 
             Duration jfrMaxAge = nonNegativeDuration(jfrCfg.maxAge, DEFAULT_JFR_MAX_AGE, "Jfr.MaxAge", logger);
             long jfrMaxSizeBytes = nonNegativeLong(jfrCfg.maxSizeBytes, DEFAULT_JFR_MAX_SIZE_BYTES, "Jfr.MaxSizeBytes", logger);
@@ -581,27 +686,27 @@ final class HytaleHyboxConfig {
             if (stallCriticalMs < stallDegradedMs) {
                 logger.log(
                     System.Logger.Level.WARNING,
-                    String.format("Config Trigger.StallCriticalMs (%d) is < Trigger.StallDegradedMs (%d); clamping.",
+                    String.format("Config Trigger.StallCriticalMs (%d) is < Trigger.StallDegradedMs (%d). Clamping.",
                         stallCriticalMs, stallDegradedMs)
                 );
                 stallCriticalMs = stallDegradedMs;
             }
-            long tickAvgDegradedMs = positiveLong(
+            long tickAvgDegradedMs = nonNegativeLong(
                 triggerCfg.tickAvgDegradedMs,
                 DEFAULT_TICK_AVG_DEGRADED_MS,
                 "Trigger.TickAvgDegradedMs",
                 logger
             );
-            long tickAvgCriticalMs = positiveLong(
+            long tickAvgCriticalMs = nonNegativeLong(
                 triggerCfg.tickAvgCriticalMs,
                 DEFAULT_TICK_AVG_CRITICAL_MS,
                 "Trigger.TickAvgCriticalMs",
                 logger
             );
-            if (tickAvgCriticalMs < tickAvgDegradedMs) {
+            if (tickAvgDegradedMs > 0 && tickAvgCriticalMs > 0 && tickAvgCriticalMs < tickAvgDegradedMs) {
                 logger.log(
                     System.Logger.Level.WARNING,
-                    String.format("Config Trigger.TickAvgCriticalMs (%d) is < Trigger.TickAvgDegradedMs (%d); clamping.",
+                    String.format("Config Trigger.TickAvgCriticalMs (%d) is < Trigger.TickAvgDegradedMs (%d). Clamping.",
                         tickAvgCriticalMs, tickAvgDegradedMs)
                 );
                 tickAvgCriticalMs = tickAvgDegradedMs;
@@ -664,7 +769,7 @@ final class HytaleHyboxConfig {
             if (maxAge != null && maxAge.isNegative()) {
                 logger.log(
                     System.Logger.Level.WARNING,
-                    String.format("Config Retention.MaxAge is negative; using default %s.", DEFAULT_RETENTION_MAX_AGE)
+                    String.format("Config Retention.MaxAge is negative. Using default %s.", DEFAULT_RETENTION_MAX_AGE)
                 );
                 maxAge = DEFAULT_RETENTION_MAX_AGE;
             }
@@ -689,6 +794,7 @@ final class HytaleHyboxConfig {
                 logger
             );
             String username = nonBlankString(discordCfg.username, DEFAULT_DISCORD_USERNAME, "Discord.Username", logger);
+            String serverName = discordCfg.serverName == null ? DEFAULT_DISCORD_SERVER_NAME : discordCfg.serverName.strip();
 
             int logTailLines = nonNegativeInt(
                 captureCfg.logTailLines,
@@ -727,7 +833,7 @@ final class HytaleHyboxConfig {
                         captureCfg.allowModConfigOptIn,
                         FRAMEWORK_PREFIXES
                     ),
-                    new DiscordWebhookConfig(webhookUrl, webhookCooldown, requestTimeout, username),
+                    new DiscordWebhookConfig(webhookUrl, webhookCooldown, requestTimeout, username, serverName),
                     postIncidentMaxWait,
                     snapshotInterval,
                     jfrConfiguration,
@@ -744,8 +850,23 @@ final class HytaleHyboxConfig {
                     threadDumpInterval
                 );
             } catch (RuntimeException e) {
-                logger.log(System.Logger.Level.WARNING, "Invalid Hybox config; falling back to defaults.", e);
+                logger.log(System.Logger.Level.WARNING, "Invalid Hybox config. Falling back to defaults.", e);
                 return defaultCoreConfig();
+            }
+        }
+
+        private void clampToSettingRanges(System.Logger logger) {
+            for (SettingField field : SETTINGS_FIELDS) {
+                if (field.kind() != SettingKind.NUMBER) continue;
+                long value = (long) field.getter().apply(this);
+                if (value <= 0 || (value >= field.min() && value <= field.max())) continue;
+                long allowed = Math.clamp(value, field.min(), field.max());
+                String before = field.unit().formatStored(field.stored().apply(this));
+                field.setter().accept(this, allowed);
+                logger.log(System.Logger.Level.WARNING, String.format(
+                    "Config %s (%s) is %s, outside the allowed range %s to %s. Using %s. hybox.json was not changed.",
+                    field.configKey(), field.name(), before, field.unit().format(field.min()),
+                    field.unit().format(field.max()), field.unit().formatStored(field.stored().apply(this))));
             }
         }
 
@@ -757,7 +878,7 @@ final class HytaleHyboxConfig {
         ) {
             if (value == null || value.isNegative()) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be >= 0; using default %s.", key, defaultValue));
+                    String.format("Config %s must be >= 0. Using default %s.", key, defaultValue));
                 return defaultValue;
             }
             return value;
@@ -766,7 +887,7 @@ final class HytaleHyboxConfig {
         private static long positiveLong(long value, long defaultValue, String key, System.Logger logger) {
             if (value <= 0L) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be > 0; using default %d.", key, defaultValue));
+                    String.format("Config %s must be > 0. Using default %d.", key, defaultValue));
                 return defaultValue;
             }
             return value;
@@ -805,7 +926,7 @@ final class HytaleHyboxConfig {
                     kinds.add(TriggerKind.valueOf(name.trim().toUpperCase(Locale.ROOT)));
                 } catch (IllegalArgumentException e) {
                     logger.log(System.Logger.Level.WARNING,
-                        String.format("Config %s has unknown trigger kind '%s'; ignoring.", key, name));
+                        String.format("Config %s has unknown trigger kind '%s'. Ignoring it.", key, name));
                 }
             }
             return kinds;
@@ -814,7 +935,7 @@ final class HytaleHyboxConfig {
         private static long nonNegativeLong(long value, long defaultValue, String key, System.Logger logger) {
             if (value < 0L) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be >= 0; using default %d.", key, defaultValue));
+                    String.format("Config %s must be >= 0. Using default %d.", key, defaultValue));
                 return defaultValue;
             }
             return value;
@@ -823,7 +944,7 @@ final class HytaleHyboxConfig {
         private static int percentInt(int value, int defaultValue, String key, System.Logger logger) {
             if (value < 0 || value > 100) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be within 0..100 (0 = disabled); using default %d.",
+                    String.format("Config %s must be within 0..100 (0 = disabled). Using default %d.",
                         key, defaultValue));
                 return defaultValue;
             }
@@ -833,7 +954,7 @@ final class HytaleHyboxConfig {
         private static int nonNegativeInt(int value, int defaultValue, String key, System.Logger logger) {
             if (value < 0) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be >= 0; using default %d.", key, defaultValue));
+                    String.format("Config %s must be >= 0. Using default %d.", key, defaultValue));
                 return defaultValue;
             }
             return value;
@@ -842,7 +963,7 @@ final class HytaleHyboxConfig {
         private static String nonBlankString(String value, String defaultValue, String key, System.Logger logger) {
             if (value == null || value.isBlank()) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be non-blank; using default %s.", key, defaultValue));
+                    String.format("Config %s must be non-blank. Using default %s.", key, defaultValue));
                 return defaultValue;
             }
             return value.trim();
@@ -1056,12 +1177,12 @@ final class HytaleHyboxConfig {
             }, (c, ei) -> c.stallCriticalMs).add()
             .append(new KeyedCodec<>("TickAvgDegradedMs", Codec.LONG), (c, v, ei) -> {
                 if (v != null) {
-                    c.tickAvgDegradedMs = v;
+                    c.tickAvgDegradedMs = v == LEGACY_DEFAULT_TICK_AVG_DEGRADED_MS ? DEFAULT_TICK_AVG_DEGRADED_MS : v;
                 }
             }, (c, ei) -> c.tickAvgDegradedMs).add()
             .append(new KeyedCodec<>("TickAvgCriticalMs", Codec.LONG), (c, v, ei) -> {
                 if (v != null) {
-                    c.tickAvgCriticalMs = v;
+                    c.tickAvgCriticalMs = v == LEGACY_DEFAULT_TICK_AVG_CRITICAL_MS ? DEFAULT_TICK_AVG_CRITICAL_MS : v;
                 }
             }, (c, ei) -> c.tickAvgCriticalMs).add()
             .append(new KeyedCodec<>("Modules", Modules.CODEC), (c, v, ei) -> {
@@ -1326,6 +1447,7 @@ final class HytaleHyboxConfig {
         public Duration cooldown = DEFAULT_DISCORD_COOLDOWN;
         public Duration requestTimeout = DEFAULT_DISCORD_REQUEST_TIMEOUT;
         public String username = DEFAULT_DISCORD_USERNAME;
+        public String serverName = DEFAULT_DISCORD_SERVER_NAME;
 
         static final BuilderCodec<Discord> CODEC = BuilderCodec
             .builder(Discord.class, Discord::new)
@@ -1349,6 +1471,11 @@ final class HytaleHyboxConfig {
                     c.username = v;
                 }
             }, (c, ei) -> c.username).add()
+            .append(new KeyedCodec<>("ServerName", Codec.STRING), (c, v, ei) -> {
+                if (v != null) {
+                    c.serverName = v;
+                }
+            }, (c, ei) -> c.serverName).add()
             .build();
     }
 

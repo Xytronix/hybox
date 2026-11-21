@@ -111,6 +111,24 @@ class HyboxCommandPermissionTest {
         }
     }
 
+    @Test
+    void commandTextsNeverMentionAReport() throws Exception {
+        var field = Unsafe.class.getDeclaredField("theUnsafe");
+        field.setAccessible(true);
+        var unsafe = (Unsafe) field.get(null);
+        var command = new HyboxCommand((HyboxRuntime) unsafe.allocateInstance(HyboxRuntime.class));
+        List<String> texts = new java.util.ArrayList<>(HyboxCommand.usage());
+        collectDescriptions(command, texts);
+        assertTrue(texts.size() > 12, texts.toString());
+        for (String text : texts) assertFalse(text.toLowerCase(java.util.Locale.ROOT).contains("report"), text);
+    }
+
+    private static void collectDescriptions(AbstractCommand command, List<String> texts) {
+        if (command.getDescription() != null) texts.add(command.getDescription());
+        for (AbstractCommand child : command.getSubCommands().values()) collectDescriptions(child, texts);
+        for (AbstractCommand variant : command.getVariantCommands()) collectDescriptions(variant, texts);
+    }
+
     private static void assertPermissionsRecursively(AbstractCommand command, String expected, Set<String> permissions) {
         assertNotNull(command.getPermission(), command.getFullyQualifiedName());
         assertEquals(expected, command.getPermission(), command.getFullyQualifiedName());

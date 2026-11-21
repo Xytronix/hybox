@@ -6,6 +6,7 @@ import com.hypixel.hytale.event.EventRegistry;
 import com.hypixel.hytale.server.core.command.system.CommandRegistry;
 import com.hypixel.hytale.server.core.plugin.PluginBase;
 import io.github.xytronix.hybox.core.jfr.JfrController;
+import io.github.xytronix.hybox.core.jfr.ProfileMode;
 import io.github.xytronix.hybox.core.capture.CaptureResult;
 import io.github.xytronix.hybox.core.config.HyboxConfig;
 import io.github.xytronix.hybox.core.incident.IncidentId;
@@ -53,15 +54,14 @@ class HyboxLifecycleTest {
     void failedStartupClosesRecordingAndPropagatesToFramework() throws Exception {
         String recordingName = "hybox-startup-" + dir.getFileName();
         Files.writeString(dir.resolve("hybox.json"),
-            "{\"Version\":1,\"Jfr\":{\"RecordingName\":\"" + recordingName
-                + "\",\"SnapshotInterval\":\"PT9223372036854776S\"}}");
+            "{\"Version\":1,\"Jfr\":{\"RecordingName\":\"" + recordingName + "\"}}");
         HyboxPlugin plugin = plugin();
         Path rolling = dir.resolve("live/rolling.jfr");
         Files.createDirectories(rolling.getParent());
         Files.writeString(rolling, "previous-session");
         try {
             IllegalStateException failure = assertThrows(IllegalStateException.class, plugin::start);
-            assertInstanceOf(ArithmeticException.class, failure.getCause());
+            assertInstanceOf(RuntimeException.class, failure.getCause());
             assertTrue(FlightRecorder.getFlightRecorder().getRecordings().stream()
                 .noneMatch(recording -> recordingName.equals(recording.getName())));
             HyboxApi.registerConfig("probe", dir.resolve("probe.json"));
@@ -101,7 +101,7 @@ class HyboxLifecycleTest {
             assertEquals(1, eventCleanup.get());
             assertEquals(CaptureResult.Status.STOPPED, runtime.captureManual(null).join().status());
             assertTrue(runtime.reload().contains("not running"));
-            assertNotNull(runtime.startProfileSession(1, false, null).join());
+            assertNotNull(runtime.startProfileSession(ProfileMode.LAG, 1, false, null).join().error());
             assertDoesNotThrow(runtime::close);
             assertEquals(1, eventCleanup.get());
         } finally {
@@ -122,7 +122,7 @@ class HyboxLifecycleTest {
             event -> CaptureResult.captured(new IncidentId("lead-up")), event -> completedCapture, result -> {});
         recorder.start();
         try {
-            assertNull(profiles.start(1, true, null, result -> {}));
+            assertNull(profiles.start(ProfileMode.LAG, 1, true, null, result -> {}));
             finishProfile(profiles);
             assertFalse(profiles.active());
             profiles.close();
@@ -328,7 +328,8 @@ class HyboxLifecycleTest {
             assertEquals(200, health.dropped());
             assertEquals(CaptureResult.Status.BUSY, health.lastOutcome().status());
             assertTrue(runtime.reload().contains("busy"));
-            assertNotNull(runtime.startProfileSession(1, false, null).get(1, TimeUnit.SECONDS));
+            assertTrue(runtime.startProfileSession(ProfileMode.LAG, 1, false, null).get(1, TimeUnit.SECONDS).queued());
+            assertEquals("Queued profile canceled. It never started. Started by the console.", runtime.cancelProfile(null).message());
             release.countDown();
             assertEquals(CaptureResult.Status.DISABLED, admitted.get(5, TimeUnit.SECONDS).status());
             assertFalse(runtime.health().captureBusy());
@@ -401,7 +402,7 @@ class HyboxLifecycleTest {
         CountDownLatch blocked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         try {
-            assertNull(runtime.startProfileSession(1, true, null).get(5, TimeUnit.SECONDS));
+            assertNull(runtime.startProfileSession(ProfileMode.LAG, 1, true, null).get(5, TimeUnit.SECONDS).error());
             capture.execute(() -> {
                 blocked.countDown();
                 await(release);
@@ -415,18 +416,28 @@ class HyboxLifecycleTest {
             ProfileSessionController profiles = (ProfileSessionController) field.get(runtime);
             finishProfile(profiles);
             assertFalse(profiles.active());
-            assertEquals(settings, original.getSettings());
             assertTrue(recorder.isRunning());
             if (fullQueue) {
+                assertEquals(settings, original.getSettings());
                 assertEquals(CaptureResult.Status.FAILED, runtime.health().lastOutcome().status());
                 assertNotNull(runtime.health().captureError());
                 assertEquals(1, runtime.health().rejected());
                 assertFalse(runtime.health().captureBusy());
             } else {
+                assertNotEquals(settings, original.getSettings(), "Profile settings stay until the final bundle is written");
                 assertEquals(1, capture.getQueue().size());
                 assertTrue(runtime.health().captureBusy());
-                assertNotNull(runtime.startProfileSession(1, false, null).get(1, TimeUnit.SECONDS));
-                assertEquals(settings, original.getSettings());
+                HyboxRuntime.ProfileStart refused = runtime.startProfileSession(ProfileMode.LAG, 1, false, null).get(1, TimeUnit.SECONDS);
+                assertFalse(refused.queued());
+                assertEquals("The last profile is still being saved. Try again in a moment.", refused.error());
+                release.countDown();
+                awaitTrue(() -> {
+                    try {
+                        return settings.equals(original.getSettings());
+                    } catch (java.util.ConcurrentModificationException writing) {
+                        return false;
+                    }
+                });
             }
             release.countDown();
         } finally {
@@ -445,10 +456,10 @@ class HyboxLifecycleTest {
             event -> CaptureResult.of(CaptureResult.Status.DISABLED),
             event -> CompletableFuture.completedFuture(CaptureResult.of(CaptureResult.Status.DISABLED)), result -> {});
         try {
-            assertNotNull(profiles.start(1, false, null, result -> {}));
+            assertNotNull(profiles.start(ProfileMode.LAG, 1, false, null, result -> {}));
             assertFalse(profiles.active());
             scheduler.shutdownNow();
-            assertNotNull(profiles.start(1, true, null, result -> {}));
+            assertNotNull(profiles.start(ProfileMode.LAG, 1, true, null, result -> {}));
             assertFalse(profiles.active());
             assertTrue(recorder.isRunning());
         } finally {
@@ -486,14 +497,15 @@ class HyboxLifecycleTest {
             CompletableFuture<CaptureResult> profile = profileCapture(runtime);
             assertEquals(CaptureResult.Status.BUSY, profileCapture(runtime).get(1, TimeUnit.SECONDS).status());
             assertFalse(profile.isDone());
-            assertTrue(runtime.startProfileSession(1, true, null).get(1, TimeUnit.SECONDS).contains("busy"));
+            assertEquals("The last profile is still being saved. Try again in a moment.",
+                runtime.startProfileSession(ProfileMode.LAG, 1, true, null).get(1, TimeUnit.SECONDS).error());
             assertTrue(runtime.reload().contains("busy"));
             release.countDown();
             assertEquals(CaptureResult.Status.DISABLED, manual.get(5, TimeUnit.SECONDS).status());
             assertEquals(CaptureResult.Status.DISABLED, profile.get(5, TimeUnit.SECONDS).status());
             capture.submit(() -> {}).get(5, TimeUnit.SECONDS);
             assertFalse(runtime.health().captureBusy());
-            assertNull(runtime.startProfileSession(1, true, null).get(5, TimeUnit.SECONDS));
+            assertNull(runtime.startProfileSession(ProfileMode.LAG, 1, true, null).get(5, TimeUnit.SECONDS).error());
         } finally {
             release.countDown();
             runtime.close();
@@ -585,13 +597,13 @@ class HyboxLifecycleTest {
                 }
                 return CaptureResult.of(CaptureResult.Status.CANCELLED);
             }, event -> new CompletableFuture<>(), result -> {}));
-        CompletableFuture<String> started = runtime.startProfileSession(1, false, null);
+        CompletableFuture<HyboxRuntime.ProfileStart> started = runtime.startProfileSession(ProfileMode.LAG, 1, false, null);
         assertTrue(entered.await(5, TimeUnit.SECONDS));
         CompletableFuture.runAsync(runtime::close).get(15, TimeUnit.SECONDS);
         assertTrue(capture.isTerminated());
         assertTrue(recorderOpenOnInterrupt.get());
         assertFalse(recorder.isRunning());
-        assertTrue(started.get(1, TimeUnit.SECONDS).contains("CANCELLED"));
+        assertTrue(started.get(1, TimeUnit.SECONDS).error().contains("CANCELLED"));
         assertFalse(runtime.profileActive());
         assertFalse(runtime.health().captureBusy());
     }
@@ -604,6 +616,200 @@ class HyboxLifecycleTest {
             "server", Clock.systemUTC().instant(), Map.of("reason", "profile session", "profileStartMs", "0")));
     }
 
+    private static final String CAPTURING = "{\"Version\":1}";
+
+    @Test
+    void incidentDuringAProfileIsSavedAtOnceMarkedAndTheProfileBundleShowsIt() throws Exception {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        JfrController recorder = new JfrController(Duration.ofMinutes(5), 64L * 1024 * 1024, "hybox-profile-incident");
+        recorder.start();
+        HyboxRuntime runtime = runtime(scheduler, worker, HyboxRuntime.newCaptureExecutor(), recorder, CAPTURING);
+        try {
+            assertNull(runtime.startProfileSession(ProfileMode.LAG, 5, true, null).get(5, TimeUnit.SECONDS).error());
+            runtime.scheduleCapture(worldFailure());
+            Path incident = awaitBundles(1).getFirst();
+            assertTrue(runtime.profileActive(), "The profile keeps running");
+            assertTrue(context(incident).contains("\"duringProfile\":\"lag\""), context(incident));
+            assertNull(runtime.finishProfileNow());
+            Path profile = awaitBundles(2).get(1);
+            assertTrue(context(profile).contains("\"profileMode\":\"lag\""), context(profile));
+            String id = incident.getFileName().toString().replace("incident-", "").replace(".zip", "");
+            assertTrue(markers(profile).stream().anyMatch(marker -> marker.startsWith("hybox incident: " + id + " CRITICAL")),
+                markers(profile).toString());
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    void profileStartedWhileAnIncidentIsWrittenIsQueuedAndStartsOnceTheBundleIsSaved() throws Exception {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        ThreadPoolExecutor capture = (ThreadPoolExecutor) HyboxRuntime.newCaptureExecutor();
+        JfrController recorder = new JfrController(Duration.ofMinutes(5), 64L * 1024 * 1024, "hybox-profile-queued");
+        recorder.start();
+        HyboxRuntime runtime = runtime(scheduler, worker, capture, recorder, CAPTURING);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            blockCapture(capture, release);
+            runtime.scheduleCapture(worldFailure());
+            assertTrue(runtime.health().captureBusy());
+            assertTrue(runtime.startProfileSession(ProfileMode.MEMORY, 5, true, null).get(1, TimeUnit.SECONDS).queued());
+            assertFalse(runtime.profileActive());
+            assertEquals(ProfileMode.MEMORY, runtime.queuedProfile().mode());
+            assertEquals("A profile is already queued. It starts once the incident is saved.",
+                runtime.startProfileSession(ProfileMode.LAG, 5, true, null).get(1, TimeUnit.SECONDS).error());
+            release.countDown();
+            awaitTrue(runtime::profileActive);
+            assertEquals(1, bundles().size(), "The incident bundle is written before the queued profile starts");
+            assertEquals(ProfileMode.MEMORY, runtime.profileMode());
+            assertNull(runtime.queuedProfile());
+        } finally {
+            release.countDown();
+            runtime.close();
+        }
+    }
+
+    @Test
+    void cancellingARunningProfileSavesNothingAndNamesWhoStartedIt() throws Exception {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        JfrController recorder = new JfrController(Duration.ofMinutes(5), 64L * 1024 * 1024, "hybox-profile-cancel-running");
+        recorder.start();
+        HyboxRuntime runtime = runtime(scheduler, worker, HyboxRuntime.newCaptureExecutor(), recorder, CAPTURING);
+        try {
+            assertNull(runtime.startProfileSession(ProfileMode.MEMORY, 5, true, null).get(5, TimeUnit.SECONDS).error());
+            HyboxRuntime.ProfileCancel cancel = runtime.cancelProfile(null);
+            assertTrue(cancel.cancelled());
+            assertEquals("Profile canceled. Nothing was saved. Started by the console.", cancel.message());
+            assertFalse(runtime.profileActive());
+            assertEquals("No profile session is running.", runtime.cancelProfile(null).message());
+            assertTrue(bundles().isEmpty());
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    void cancellingAQueuedStartMeansItNeverStartsAndTheIncidentIsStillSaved() throws Exception {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        ThreadPoolExecutor capture = (ThreadPoolExecutor) HyboxRuntime.newCaptureExecutor();
+        JfrController recorder = new JfrController(Duration.ofMinutes(5), 64L * 1024 * 1024, "hybox-profile-cancel-queued");
+        recorder.start();
+        HyboxRuntime runtime = runtime(scheduler, worker, capture, recorder, CAPTURING);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            blockCapture(capture, release);
+            runtime.scheduleCapture(worldFailure());
+            assertTrue(runtime.startProfileSession(ProfileMode.LAG, 5, true, null).get(1, TimeUnit.SECONDS).queued());
+            HyboxRuntime.ProfileCancel cancel = runtime.cancelProfile(null);
+            assertTrue(cancel.cancelled());
+            assertEquals("Queued profile canceled. It never started. Started by the console.", cancel.message());
+            assertNull(runtime.queuedProfile());
+            release.countDown();
+            assertEquals(1, awaitBundles(1).size());
+            awaitTrue(() -> !runtime.health().captureBusy());
+            assertFalse(runtime.profileActive(), "A cancelled queued profile never starts");
+            assertNull(runtime.queuedProfile());
+        } finally {
+            release.countDown();
+            runtime.close();
+        }
+    }
+
+    @Test
+    void cancellingAQueuedFinalBundleDropsOnlyTheProfileAndKeepsTheIncident() throws Exception {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        ThreadPoolExecutor capture = (ThreadPoolExecutor) HyboxRuntime.newCaptureExecutor();
+        String name = "hybox-profile-cancel-final";
+        JfrController recorder = new JfrController(Duration.ofMinutes(5), 64L * 1024 * 1024, name);
+        recorder.start();
+        var original = FlightRecorder.getFlightRecorder().getRecordings().stream()
+            .filter(recording -> name.equals(recording.getName())).findFirst().orElseThrow();
+        var normal = original.getSettings();
+        HyboxRuntime runtime = runtime(scheduler, worker, capture, recorder, CAPTURING);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            assertNull(runtime.startProfileSession(ProfileMode.MEMORY, 5, true, null).get(5, TimeUnit.SECONDS).error());
+            blockCapture(capture, release);
+            runtime.scheduleCapture(worldFailure());
+            assertNull(runtime.finishProfileNow());
+            assertTrue(runtime.profileFinalQueued());
+            assertEquals("1 s", original.getSettings().get("jdk.OldObjectSample#cutoff"));
+            HyboxRuntime.ProfileCancel cancel = runtime.cancelProfile(null);
+            assertTrue(cancel.cancelled());
+            assertEquals("Profile canceled. Nothing was saved. Started by the console.", cancel.message());
+            assertFalse(runtime.profileFinalQueued());
+            assertEquals(normal, original.getSettings());
+            release.countDown();
+            Path incident = awaitBundles(1).getFirst();
+            awaitTrue(() -> !runtime.health().captureBusy());
+            assertEquals(1, bundles().size(), "Only the incident bundle is saved");
+            assertTrue(context(incident).contains("\"duringProfile\":\"memory\""), context(incident));
+        } finally {
+            release.countDown();
+            runtime.close();
+        }
+    }
+
+    private static TriggerEvent worldFailure() {
+        return new TriggerEvent(TriggerKind.WORLD_FAILURE, "default", Clock.systemUTC().instant(), Map.of("error", "boom"));
+    }
+
+    private static void blockCapture(ThreadPoolExecutor capture, CountDownLatch release) throws Exception {
+        CountDownLatch blocked = new CountDownLatch(1);
+        capture.execute(() -> {
+            blocked.countDown();
+            await(release);
+        });
+        assertTrue(blocked.await(5, TimeUnit.SECONDS));
+    }
+
+    private List<Path> bundles() throws Exception {
+        Path incidents = dir.resolve("incidents");
+        if (!Files.isDirectory(incidents)) return List.of();
+        try (var files = Files.list(incidents)) {
+            return files.filter(file -> file.getFileName().toString().endsWith(".zip")).sorted().toList();
+        }
+    }
+
+    private List<Path> awaitBundles(int count) throws Exception {
+        for (int i = 0; i < 600 && bundles().size() < count; i++) Thread.sleep(50);
+        List<Path> found = bundles();
+        assertTrue(found.size() >= count, "Expected " + count + " bundles, found " + found);
+        return found;
+    }
+
+    private static void awaitTrue(java.util.function.BooleanSupplier condition) throws Exception {
+        for (int i = 0; i < 600 && !condition.getAsBoolean(); i++) Thread.sleep(50);
+        assertTrue(condition.getAsBoolean());
+    }
+
+    private static String context(Path bundle) throws Exception {
+        try (var zip = new java.util.zip.ZipFile(bundle.toFile())) {
+            String json = new String(zip.getInputStream(zip.getEntry("incident.json")).readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            return json.replaceAll("\\s", "");
+        }
+    }
+
+    private List<String> markers(Path bundle) throws Exception {
+        Path recording = Files.createTempFile(dir, "profile-", ".jfr");
+        try (var zip = new java.util.zip.ZipFile(bundle.toFile())) {
+            Files.write(recording, zip.getInputStream(zip.getEntry("recording.jfr")).readAllBytes());
+        }
+        List<String> markers = new ArrayList<>();
+        try (RecordingFile file = new RecordingFile(recording)) {
+            while (file.hasMoreEvents()) {
+                var event = file.readEvent();
+                if ("io.github.xytronix.hybox.marker".equals(event.getEventType().getName())) markers.add(event.getString("message"));
+            }
+        }
+        return markers;
+    }
+
     private HyboxRuntime runtime(ScheduledExecutorService scheduler, ExecutorService worker,
                                  JfrController recorder) throws Exception {
         return runtime(scheduler, worker, HyboxRuntime.newCaptureExecutor(), recorder);
@@ -611,7 +817,12 @@ class HyboxLifecycleTest {
 
     private HyboxRuntime runtime(ScheduledExecutorService scheduler, ExecutorService worker,
                                  ExecutorService capture, JfrController recorder) throws Exception {
-        Files.writeString(dir.resolve("hybox.json"), "{\"Version\":1,\"Capture\":{\"Enabled\":false}}");
+        return runtime(scheduler, worker, capture, recorder, "{\"Version\":1,\"Capture\":{\"Enabled\":false}}");
+    }
+
+    private HyboxRuntime runtime(ScheduledExecutorService scheduler, ExecutorService worker,
+                                 ExecutorService capture, JfrController recorder, String config) throws Exception {
+        Files.writeString(dir.resolve("hybox.json"), config);
         var constructor = HyboxRuntime.class.getDeclaredConstructor(HyboxPlugin.class, Clock.class,
             System.Logger.class, Path.class, ScheduledExecutorService.class, ExecutorService.class,
             ExecutorService.class, JfrController.class);

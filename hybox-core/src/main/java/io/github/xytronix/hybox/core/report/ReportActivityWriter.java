@@ -9,26 +9,35 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import io.github.xytronix.hybox.core.health.FrameLabels;
 import io.github.xytronix.hybox.core.health.HealthSnapshot;
 import io.github.xytronix.hybox.core.health.JfrTimeline;
 import io.github.xytronix.hybox.core.incident.IncidentMetadata;
+import io.github.xytronix.hybox.core.incident.IncidentReport;
 import io.github.xytronix.hybox.core.json.JsonWriter;
 
 final class ReportActivityWriter {
 
+    private static final double SLOWER_WORLD_TPS = 1;
+
     private ReportActivityWriter() {
     }
 
-    record TickSelection(String world, double[] tps, double[] mspt) {}
+    record TickSelection(String world, double[] tps, double[] mspt, double[] worst, String reason,
+                         double[] incidentMspt, double[] incidentWorst) {}
 
-    static TickSelection selectTicks(IncidentMetadata meta, HealthSnapshot snapshot, JfrTimeline timeline) {
+    static TickSelection selectTicks(IncidentReport report, JfrTimeline timeline) {
         if (timeline == null || timeline.ticks().isEmpty()) {
             return null;
         }
+        IncidentMetadata meta = report.meta();
+        HealthSnapshot snapshot = report.snapshot();
         Map<String, JfrTimeline.WorldTicks> ticks = timeline.ticks();
         String world = null;
+        String reason;
         if (meta.world() != null && ticks.containsKey(meta.world())) {
             world = meta.world();
+            reason = "incident";
         } else {
             long best = -1;
             for (String candidate : ticks.keySet()) {
@@ -38,9 +47,68 @@ final class ReportActivityWriter {
                     world = candidate;
                 }
             }
+            reason = "busiest";
+        }
+        String picked = world;
+        String slowest = world;
+        double slowestShare = tpsShare(ticks.get(world), HealthSnapshot.targetTps(snapshot, world));
+        for (Map.Entry<String, JfrTimeline.WorldTicks> candidate : ticks.entrySet()) {
+            double share = tpsShare(candidate.getValue(), HealthSnapshot.targetTps(snapshot, candidate.getKey()));
+            if (share < slowestShare) {
+                slowest = candidate.getKey();
+                slowestShare = share;
+            }
+        }
+        JfrTimeline.WorldTicks slow = ticks.get(slowest);
+        double slowTarget = HealthSnapshot.targetTps(snapshot, slowest);
+        double worldTarget = HealthSnapshot.targetTps(snapshot, world);
+        if (!slowest.equals(world)
+            && slowestShare * slowTarget <= tpsShare(ticks.get(world), worldTarget) * slowTarget - SLOWER_WORLD_TPS
+            && ReportJson.min(slow.tps()) < 0.9 * slowTarget && ReportJson.min(ticks.get(world).tps()) >= 0.9 * worldTarget) {
+            world = slowest;
+            reason = "slowest";
         }
         JfrTimeline.WorldTicks wt = ticks.get(world);
-        return wt == null ? null : new TickSelection(world, wt.tps(), wt.mspt());
+        if (wt == null) {
+            return null;
+        }
+        JfrTimeline.WorldTicks incident = !world.equals(picked) && picked.equals(meta.world())
+            ? ticks.get(picked) : null;
+        return new TickSelection(world, wt.tps(), wt.mspt(),
+            worstOf(report, timeline, wt, world.equals(meta.world())), reason,
+            incident == null ? null : incident.mspt(),
+            incident == null ? null : worstOf(report, timeline, incident, true));
+    }
+
+    private static double[] worstOf(IncidentReport report, JfrTimeline timeline, JfrTimeline.WorldTicks ticks,
+                                    boolean incidentWorld) {
+        if (ticks.worst() != null || !incidentWorld) {
+            return ticks.worst();
+        }
+        return stallPoint(report, timeline, ticks.tps() == null ? 0 : ticks.tps().length);
+    }
+
+    private static double tpsShare(JfrTimeline.WorldTicks ticks, double target) {
+        return ticks == null || ticks.tps() == null || ticks.tps().length == 0
+            ? Double.POSITIVE_INFINITY : ReportJson.avg(ticks.tps()) / target;
+    }
+
+    private static double[] stallPoint(IncidentReport report, JfrTimeline timeline, int buckets) {
+        Long stallMs = ReportHtml.parseStallMs(report.context());
+        if (stallMs == null || buckets < 2 || timeline.start() == null || timeline.end() == null
+            || !"HEARTBEAT_STALL".equals(report.meta().trigger())) {
+            return null;
+        }
+        long start = timeline.start().toEpochMilli();
+        long span = timeline.end().toEpochMilli() - start;
+        long marker = ReportHtml.profileStartMs(report.context(), report.meta().createdAt().toEpochMilli());
+        if (span <= 0 || marker < start || marker > start + span) {
+            return null;
+        }
+        double[] series = new double[buckets];
+        java.util.Arrays.fill(series, Double.NaN);
+        series[(int) Math.round((double) (marker - start) / span * (buckets - 1))] = stallMs;
+        return series;
     }
 
     static void writeTps(JsonWriter json, TickSelection tick, HealthSnapshot snapshot) throws IOException {
@@ -50,8 +118,8 @@ final class ReportActivityWriter {
         }
         json.name("tps").beginObject();
         json.name("world").value(tick.world());
-        ReportJson.writeNullable(json, "target", snapshot != null && snapshot.targetTps() > 0
-            ? (long) snapshot.targetTps() : null);
+        json.name("pick").value(tick.reason());
+        ReportJson.writeNullable(json, "target", Math.round(HealthSnapshot.targetTps(snapshot, tick.world())));
         json.name("avg").value(ReportJson.round2(ReportJson.avg(tick.tps())));
         json.name("min").value(ReportJson.round2(ReportJson.min(tick.tps())));
         json.endObject();
@@ -74,6 +142,7 @@ final class ReportActivityWriter {
             ReportJson.writeDoubleSeries(json, "netOut", timeline.netOutSeries());
             ReportJson.writeLongSeries(json, "threads", timeline.threadSeries());
             ReportJson.writeDoubleSeries(json, "gcPause", timeline.gcPauseSeries());
+            ReportJson.writeDoubleSeries(json, "gcTime", timeline.gcTimeSeries());
             ReportJson.writeDoubleSeries(json, "players", timeline.playersSeries());
             ReportJson.writeDoubleSeries(json, "exceptions", timeline.exceptionsSeries());
             ReportJson.writeDoubleSeries(json, "connects", timeline.connectsSeries());
@@ -87,21 +156,35 @@ final class ReportActivityWriter {
         if (tick != null) {
             ReportJson.writeDoubleSeries(json, "tps", tick.tps());
             ReportJson.writeDoubleSeries(json, "mspt", tick.mspt());
+            ReportJson.writeSparseSeries(json, "msptWorst", tick.worst());
+            if (tick.incidentMspt() != null) {
+                ReportJson.writeDoubleSeries(json, "msptIncident", tick.incidentMspt());
+                ReportJson.writeSparseSeries(json, "msptWorstIncident", tick.incidentWorst());
+            }
         }
         json.endObject();
     }
 
-    static void writePluginMetrics(JsonWriter json, JfrTimeline timeline) throws IOException {
+    static void writePluginMetrics(JsonWriter json, JfrTimeline timeline, ModNames modNames) throws IOException {
         List<JfrTimeline.PluginMetric> metrics = timeline == null ? List.of() : timeline.pluginMetrics();
         if (metrics.isEmpty()) {
             json.name("pluginMetrics").nullValue();
             return;
         }
-        json.name("pluginMetrics").beginArray();
+        List<Map.Entry<String, JfrTimeline.PluginMetric>> named = new ArrayList<>(metrics.size());
         for (JfrTimeline.PluginMetric metric : metrics) {
+            String name = metric.mod() == null ? metric.name()
+                : modNames.id(metric.mod()) + metric.name().substring(metric.mod().length());
+            named.add(Map.entry(name, metric));
+        }
+        named.sort(Map.Entry.comparingByKey(String.CASE_INSENSITIVE_ORDER));
+        json.name("pluginMetrics").beginArray();
+        for (Map.Entry<String, JfrTimeline.PluginMetric> entry : named) {
+            JfrTimeline.PluginMetric metric = entry.getValue();
             boolean counter = "count".equals(metric.kind());
             json.beginObject();
-            json.name("name").value(metric.name());
+            json.name("name").value(entry.getKey());
+            json.name("label").value(ModNames.metricLabel(entry.getKey()));
             json.name("kind").value(metric.kind());
             json.name("events").value(metric.events());
             json.name("uncharted").value(metric.uncharted());
@@ -133,37 +216,39 @@ final class ReportActivityWriter {
         return v == 0 || !Double.isFinite(v) ? v : new BigDecimal(v).round(new MathContext(4)).doubleValue();
     }
 
-    private record TickSystemRow(String system, String world, double avg1m, double max1m,
-                                 double avg5m, double max5m) {}
+    record TickSystemRow(String system, String world, double avg1m, double max1m,
+                         double avg5m, double max5m) {}
 
-    static void writeTickSystems(JsonWriter json, Map<String, String> tickSystems) throws IOException {
-        String note = null;
+    static List<TickSystemRow> tickSystemRows(Map<String, String> tickSystems) {
         List<TickSystemRow> rows = new ArrayList<>();
-        if (tickSystems != null) {
-            for (Map.Entry<String, String> e : tickSystems.entrySet()) {
-                if ("Note".equals(e.getKey())) {
-                    note = e.getValue();
-                    continue;
-                }
-                String key = e.getKey().replaceFirst(" #\\d+$", "");
-                int at = key.lastIndexOf(" @ ");
-                if (at < 0) {
-                    continue;
-                }
-                String[] parts = e.getValue().trim().split("\\s+");
-                if (parts.length < 4) {
-                    continue;
-                }
-                try {
-                    rows.add(new TickSystemRow(
-                        key.substring(0, at), key.substring(at + " @ ".length()),
-                        Double.parseDouble(parts[0]), Double.parseDouble(parts[1]),
-                        Double.parseDouble(parts[2]), Double.parseDouble(parts[3])));
-                } catch (NumberFormatException ignored) {
-                }
+        if (tickSystems == null) {
+            return rows;
+        }
+        for (Map.Entry<String, String> e : tickSystems.entrySet()) {
+            String key = e.getKey().replaceFirst(" #\\d+$", "");
+            int at = key.lastIndexOf(" @ ");
+            if ("Note".equals(e.getKey()) || at < 0) {
+                continue;
+            }
+            String[] parts = e.getValue().trim().split("\\s+");
+            if (parts.length < 4) {
+                continue;
+            }
+            try {
+                rows.add(new TickSystemRow(
+                    key.substring(0, at), key.substring(at + " @ ".length()),
+                    Double.parseDouble(parts[0]), Double.parseDouble(parts[1]),
+                    Double.parseDouble(parts[2]), Double.parseDouble(parts[3])));
+            } catch (NumberFormatException ignored) {
             }
         }
         rows.sort((a, b) -> Double.compare(b.avg1m(), a.avg1m()));
+        return rows;
+    }
+
+    static void writeTickSystems(JsonWriter json, Map<String, String> tickSystems) throws IOException {
+        String note = tickSystems == null ? null : tickSystems.get("Note");
+        List<TickSystemRow> rows = tickSystemRows(tickSystems);
         if (rows.isEmpty()) {
             json.name("tickSystems").nullValue();
         } else {
@@ -200,32 +285,9 @@ final class ReportActivityWriter {
         json.endArray();
     }
 
-    static void writeModCpu(JsonWriter json, JfrTimeline timeline, Map<String, String> modCpu,
-                            ReportAttribution attribution) throws IOException {
-        boolean detailed = timeline != null && !timeline.cpuByMod().isEmpty();
-        List<JfrTimeline.ModCpu> rows;
-        if (detailed) {
-            rows = timeline.cpuByMod();
-        } else {
-            rows = new ArrayList<>();
-            for (Map.Entry<String, String> entry : modCpu == null ? Map.<String, String>of().entrySet()
-                : modCpu.entrySet()) {
-                String value = entry.getValue();
-                long samples = 0;
-                String method = value;
-                int idx = value.indexOf(" samples · ");
-                if (idx > 0) {
-                    try {
-                        samples = Long.parseLong(value.substring(0, idx).trim());
-                        method = value.substring(idx + " samples · ".length()).trim();
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                rows.add(new JfrTimeline.ModCpu(entry.getKey(), samples, method, List.of()));
-            }
-            attribution = new ReportAttribution(rows);
-        }
-        rows = attribution.cpu(rows);
+    static void writeModCpu(JsonWriter json, List<JfrTimeline.ModCpu> recorded, ReportAttribution attribution,
+                            Map<String, Integer> threadGroups, long samples) throws IOException {
+        List<JfrTimeline.ModCpu> rows = attribution.cpu(recorded);
         if (rows.isEmpty()) {
             json.name("modCpu").nullValue();
             return;
@@ -236,19 +298,72 @@ final class ReportActivityWriter {
             json.value(row.id());
             json.value(row.samples());
             json.value(row.method());
-            if (detailed) {
-                json.beginArray();
-                for (JfrTimeline.ThreadShare thread : row.threads()) {
-                    json.beginArray();
-                    json.value(thread.thread());
-                    json.value(thread.samples());
-                    json.endArray();
-                }
-                json.endArray();
+            writeThreadShares(json, row.threads(), threadGroups);
+            json.value(row.self());
+            json.value(row.total());
+            json.value(row.selfMethod());
+            writeThreadShares(json, row.selfThreads(), threadGroups);
+            json.value(FrameLabels.labelOf(row.selfMethod()));
+            json.value(row.totalMethod());
+            json.value(FrameLabels.labelOf(row.totalMethod()));
+            json.value(ModNames.onStackSentence(row.id(), row.total(), samples, "samples", row.totalMethod()));
+            json.endArray();
+        }
+        json.endArray();
+    }
+
+    static void writeSliceTop(JsonWriter json, JfrTimeline timeline, ReportAttribution attribution) throws IOException {
+        JfrTimeline.Slices slices = timeline == null ? null : timeline.slices();
+        if (slices == null) {
+            json.name("sliceTop").nullValue();
+            return;
+        }
+        json.name("sliceTop").beginObject();
+        json.name("sec").value(slices.seconds());
+        json.name("min").value(slices.minSamples());
+        json.name("frames").beginArray();
+        for (JfrTimeline.SliceFrame frame : slices.frames()) {
+            json.beginArray();
+            json.value(frame.method());
+            json.value(frame.mod() == null ? null : attribution.canonical(frame.mod()));
+            json.endArray();
+        }
+        json.endArray();
+        json.name("threads").beginArray();
+        for (String thread : slices.threads()) {
+            json.value(thread);
+        }
+        json.endArray();
+        json.name("b").beginArray();
+        for (int[] bucket : slices.buckets()) {
+            json.beginArray();
+            for (int v : bucket) {
+                json.value(v);
             }
             json.endArray();
         }
         json.endArray();
+        json.endObject();
+    }
+
+    private static void writeThreadShares(JsonWriter json, List<JfrTimeline.ThreadShare> threads,
+                                          Map<String, Integer> threadGroups) throws IOException {
+        json.beginArray();
+        for (JfrTimeline.ThreadShare thread : threads) {
+            json.beginArray();
+            json.value(thread.thread());
+            json.value(thread.samples());
+            writeGroupSize(json, thread.thread(), threadGroups);
+            json.endArray();
+        }
+        json.endArray();
+    }
+
+    static void writeGroupSize(JsonWriter json, String thread, Map<String, Integer> threadGroups) throws IOException {
+        Integer size = threadGroups.get(thread);
+        if (size != null) {
+            json.value(size.longValue());
+        }
     }
 
     static void writeFlame(JsonWriter json, JfrTimeline timeline) throws IOException {
@@ -271,6 +386,9 @@ final class ReportActivityWriter {
         }
         json.endArray();
         json.value(node.owner());
+        if (node.label() != null) {
+            json.value(node.label());
+        }
         json.endArray();
     }
 
@@ -323,8 +441,8 @@ final class ReportActivityWriter {
         json.endArray();
     }
 
-    static void writeThreads(JsonWriter json, HealthSnapshot snapshot, JfrTimeline timeline)
-        throws IOException {
+    static void writeThreads(JsonWriter json, HealthSnapshot snapshot, JfrTimeline timeline,
+                             ReportAttribution attribution) throws IOException {
         HealthSnapshot.Threads threads = snapshot == null ? null : snapshot.threads();
         ReportJson.writeNullable(json, "threadTotal", threads != null && threads.total() > 0 ? (long) threads.total() : null);
         if (threads == null || threads.byState().isEmpty()) {
@@ -360,9 +478,33 @@ final class ReportActivityWriter {
                     json.beginArray();
                     json.value(m.method());
                     json.value(m.samples());
+                    String label = FrameLabels.labelOf(m.method());
+                    if (label != null) {
+                        json.value(label);
+                    }
                     json.endArray();
                 }
                 json.endArray();
+                String topLabel = FrameLabels.labelOf(hot.topMethod());
+                Map<String, JfrTimeline.ModShare> shares = attribution.shares(hot.mods());
+                if (topLabel != null || !shares.isEmpty()) {
+                    json.value(topLabel);
+                }
+                if (!shares.isEmpty()) {
+                    json.beginArray();
+                    List<Map.Entry<String, JfrTimeline.ModShare>> mods = new ArrayList<>(shares.entrySet());
+                    mods.sort((a, b) -> a.getValue().total() != b.getValue().total()
+                        ? Long.compare(b.getValue().total(), a.getValue().total())
+                        : Long.compare(b.getValue().self(), a.getValue().self()));
+                    for (Map.Entry<String, JfrTimeline.ModShare> mod : mods) {
+                        json.beginArray();
+                        json.value(mod.getKey());
+                        json.value(mod.getValue().self());
+                        json.value(mod.getValue().total());
+                        json.endArray();
+                    }
+                    json.endArray();
+                }
                 json.endArray();
             }
         }
@@ -381,6 +523,17 @@ final class ReportActivityWriter {
                     json.value(caller);
                 }
                 json.endArray();
+                String label = FrameLabels.labelOf(hm.method());
+                if (label != null || !hm.callerLabels().isEmpty()) {
+                    json.value(label);
+                }
+                if (!hm.callerLabels().isEmpty()) {
+                    json.beginArray();
+                    for (String callerLabel : hm.callerLabels()) {
+                        json.value(callerLabel);
+                    }
+                    json.endArray();
+                }
                 json.endArray();
             }
         }
@@ -389,7 +542,7 @@ final class ReportActivityWriter {
 
     static void writeWorlds(JsonWriter json, IncidentMetadata meta, HealthSnapshot snapshot,
                             JfrTimeline timeline) throws IOException {
-        Map<String, Long> samples = timeline == null ? Map.of() : timeline.worldSamples();
+        Map<String, Long> samples = ReportFindings.worldCpu(snapshot, timeline);
         json.name("worlds").beginArray();
         LinkedHashSet<String> seen = new LinkedHashSet<>();
         if (snapshot != null) {
@@ -419,6 +572,8 @@ final class ReportActivityWriter {
                 ReportJson.writeNullableDouble(json, "msptP50", w.msptP50() >= 0 ? w.msptP50() : null);
                 ReportJson.writeNullableDouble(json, "msptP95", w.msptP95() >= 0 ? w.msptP95() : null);
                 ReportJson.writeNullableDouble(json, "msptMax", w.msptMax() >= 0 ? w.msptMax() : null);
+                ReportJson.writeNullable(json, "targetTps", w.targetTps() > 0 ? (long) w.targetTps() : null);
+                writeRadius(json, w.radius());
                 json.endObject();
             }
         }
@@ -441,14 +596,58 @@ final class ReportActivityWriter {
             json.name("msptP50").nullValue();
             json.name("msptP95").nullValue();
             json.name("msptMax").nullValue();
+            json.name("targetTps").nullValue();
+            json.name("radius").nullValue();
             json.endObject();
         }
         json.endArray();
     }
 
+    private static void writeRadius(JsonWriter json, HealthSnapshot.Radius radius) throws IOException {
+        json.name("radius");
+        if (radius == null) {
+            json.nullValue();
+            return;
+        }
+        json.beginObject();
+        json.name("players").value((Number) radius.players());
+        json.name("view").beginArray();
+        known(json, radius.viewMin());
+        known(json, radius.viewMedian());
+        known(json, radius.viewMax());
+        json.endArray();
+        json.name("hot").beginArray();
+        known(json, radius.hotMin());
+        known(json, radius.hotMedian());
+        known(json, radius.hotMax());
+        json.endArray();
+        ReportJson.writeNullable(json, "sections", radius.sections() >= 0 ? radius.sections() : null);
+        ReportJson.writeNullable(json, "sectionsMax", radius.sectionsMax() >= 0 ? (long) radius.sectionsMax() : null);
+        json.name("hotLowered").value((Number) radius.hotLowered());
+        ReportJson.writeNullable(json, "hotLoweredTo", radius.hotLoweredTo() >= 0 ? (long) radius.hotLoweredTo() : null);
+        json.name("top").beginArray();
+        for (HealthSnapshot.PlayerLoad load : radius.top()) {
+            json.beginArray();
+            json.value(load.name());
+            known(json, load.view());
+            known(json, load.hot());
+            known(json, load.sections());
+            json.endArray();
+        }
+        json.endArray();
+        json.endObject();
+    }
+
+    private static void known(JsonWriter json, int value) throws IOException {
+        if (value < 0) {
+            json.nullValue();
+        } else {
+            json.value((Number) value);
+        }
+    }
+
     static String worldKey(String world) {
-        String s = ReportHtml.worldShort(world);
-        return s == null ? null : s.toLowerCase(Locale.ROOT);
+        return world == null ? null : world.toLowerCase(Locale.ROOT);
     }
 
     static Long samplesForWorld(Map<String, Long> samples, String name) {
@@ -536,15 +735,22 @@ final class ReportActivityWriter {
                 json.endArray();
             }
             json.endArray();
-            json.name("mods").beginArray();
-            for (Map.Entry<String, Long> e : attribution.counts(w.mods()).entrySet()) {
-                json.beginArray();
-                json.value(e.getKey());
-                json.value(e.getValue());
-                json.endArray();
-            }
-            json.endArray();
+            json.name("mods");
+            writeModShares(json, attribution.shares(w.mods()));
             json.endObject();
+        }
+        json.endArray();
+    }
+
+    static void writeModShares(JsonWriter json, Map<String, JfrTimeline.ModShare> mods) throws IOException {
+        json.beginArray();
+        for (Map.Entry<String, JfrTimeline.ModShare> e : mods.entrySet()) {
+            json.beginArray();
+            json.value(e.getKey());
+            json.value(e.getValue().samples());
+            json.value(e.getValue().self());
+            json.value(e.getValue().total());
+            json.endArray();
         }
         json.endArray();
     }

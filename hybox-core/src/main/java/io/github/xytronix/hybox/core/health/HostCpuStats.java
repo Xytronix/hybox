@@ -1,9 +1,13 @@
 package io.github.xytronix.hybox.core.health;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class HostCpuStats {
+    private static final long AT_PAGESZ = 6;
+    private static volatile long pageSize;
 
     private HostCpuStats() {
     }
@@ -168,6 +172,53 @@ public final class HostCpuStats {
             return null;
         }
         return new long[] {current, max};
+    }
+
+    public static long[] swapBytes() {
+        Path path = Path.of("/proc/vmstat");
+        try {
+            if (!Files.isReadable(path)) {
+                return null;
+            }
+            long in = -1;
+            long out = -1;
+            for (String line : Files.readAllLines(path)) {
+                if (line.startsWith("pswpin ")) {
+                    in = Long.parseLong(line.substring("pswpin ".length()).trim());
+                } else if (line.startsWith("pswpout ")) {
+                    out = Long.parseLong(line.substring("pswpout ".length()).trim());
+                }
+            }
+            long page = pageSize();
+            return in < 0 || out < 0 || page <= 0 ? null : new long[] {in * page, out * page};
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static long pageSize() {
+        long cached = pageSize;
+        if (cached != 0) {
+            return cached;
+        }
+        long found = -1;
+        try {
+            ByteBuffer auxv = ByteBuffer.wrap(Files.readAllBytes(Path.of("/proc/self/auxv"))).order(ByteOrder.nativeOrder());
+            while (auxv.remaining() >= 16) {
+                long type = auxv.getLong();
+                long value = auxv.getLong();
+                if (type == AT_PAGESZ) {
+                    found = value;
+                    break;
+                }
+                if (type == 0) {
+                    break;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        pageSize = found;
+        return found;
     }
 
     private static long readLong(Path path) {

@@ -5,8 +5,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.ParseException;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import jdk.jfr.Configuration;
 import jdk.jfr.EventSettings;
@@ -15,12 +20,23 @@ import jdk.jfr.FlightRecorder;
 import jdk.jfr.FlightRecorderListener;
 import jdk.jfr.RecordingState;
 
+import io.github.xytronix.hybox.core.health.JfrTimeline;
+
 /**
  * Controls a single rolling JFR recording and exposes a minimal API for dumping it.
  */
 public final class JfrController implements AutoCloseable {
     private static final String DEFAULT_CONFIGURATION = "default";
+    private static final String PROFILE_CONFIGURATION = "profile";
+    static final String PROFILE_SAMPLE_PERIOD = "10 ms";
+    static final String PROFILE_LOCK_THRESHOLD = "10 ms";
+    static final String MEMORY_ALLOCATION_THROTTLE = "1000/s";
+    static final String MEMORY_ROOT_SEARCH_CUTOFF = "1 s";
     private static final String DUMP_MARKER_PREFIX = "hybox dump:";
+    static final Set<String> LEAN_DISABLED_EVENTS = Stream.concat(
+            Stream.of("jdk.ThreadSleep", "jdk.JavaMonitorWait", "jdk.NativeMethodSample"),
+            RecordingScrubber.DROPPED_EVENTS.stream().filter(name -> !name.equals("jdk.InitialSystemProperty")))
+        .collect(Collectors.toUnmodifiableSet());
 
     private final Duration maxAge;
     private final long maxSizeBytes;
@@ -76,35 +92,40 @@ public final class JfrController implements AutoCloseable {
         if (recording != null) {
             return;
         }
-        startWith(configurationName);
+        startWith(null);
     }
 
-    public synchronized void restart(String configurationOverride) {
+    public synchronized void restart(ProfileMode mode) {
         close();
-        startWith(configurationOverride == null || configurationOverride.isBlank()
-            ? configurationName : configurationOverride);
+        startWith(mode);
     }
 
-    public synchronized void applyConfiguration(String configurationOverride) {
+    public synchronized void applyConfiguration(ProfileMode mode) {
         Recording rec = requireRecording();
-        String name = configurationOverride == null || configurationOverride.isBlank()
-            ? configurationName : configurationOverride;
         try {
-            rec.setSettings(Configuration.getConfiguration(name).getSettings());
+            rec.setSettings(settings(mode));
         } catch (Exception e) {
             logger.log(System.Logger.Level.WARNING,
-                "Failed to apply JFR configuration '" + name + "' to the live recording.", e);
+                "Failed to apply JFR configuration '" + configurationLabel(mode) + "' to the live recording.", e);
             return;
         }
+        applyHyboxSettings(rec, mode);
+    }
+
+    private void applyHyboxSettings(Recording rec, ProfileMode mode) {
         enableMarkerEvent(rec);
-        if (oldObjectSampling) {
+        if (oldObjectSampling && mode != ProfileMode.MEMORY) {
             enableOldObjectSampling(rec);
         }
         disableConfiguredEvents(rec);
     }
 
-    private void startWith(String configuration) {
-        Recording created = createConfiguredRecording(configuration);
+    private String configurationLabel(ProfileMode mode) {
+        return mode == null ? configurationName : PROFILE_CONFIGURATION + " " + mode.id();
+    }
+
+    private void startWith(ProfileMode mode) {
+        Recording created = createConfiguredRecording(mode);
         try {
             created.setName(recordingName);
             created.setToDisk(true);
@@ -112,14 +133,10 @@ public final class JfrController implements AutoCloseable {
             created.setMaxSize(Math.max(0L, maxSizeBytes));
             if (maxAge.isZero() && maxSizeBytes <= 0L) {
                 logger.log(System.Logger.Level.WARNING,
-                    "JFR recording has no age or size cap (both unlimited); the on-disk recording can grow until it "
+                    "JFR recording has no age or size cap (both unlimited). The recording on disk can grow until it "
                     + "fills the disk. Set Jfr.MaxAge or Jfr.MaxSizeBytes to a positive value to bound it.");
             }
-            enableMarkerEvent(created);
-            if (oldObjectSampling) {
-                enableOldObjectSampling(created);
-            }
-            disableConfiguredEvents(created);
+            applyHyboxSettings(created, mode);
             RecordingHealth observer = new RecordingHealth(created);
             FlightRecorder.addListener(observer);
             health = observer;
@@ -178,14 +195,14 @@ public final class JfrController implements AutoCloseable {
         return recording;
     }
 
-    private Recording createConfiguredRecording(String configurationName) {
-        Recording configured = tryLoadConfiguration(configurationName);
+    private Recording createConfiguredRecording(ProfileMode mode) {
+        Recording configured = tryLoadConfiguration(mode);
         if (configured != null) {
             return configured;
         }
 
-        if (!"profile".equals(configurationName)) {
-            Recording profile = tryLoadConfiguration("profile");
+        if (mode == null && !PROFILE_CONFIGURATION.equals(configurationName)) {
+            Recording profile = tryLoadConfiguration(ProfileMode.LAG);
             if (profile != null) {
                 return profile;
             }
@@ -226,12 +243,47 @@ public final class JfrController implements AutoCloseable {
         }
     }
 
-    private Recording tryLoadConfiguration(String configurationName) {
+    private Recording tryLoadConfiguration(ProfileMode mode) {
         try {
-            return new Recording(Configuration.getConfiguration(configurationName));
+            return new Recording(settings(mode));
         } catch (IOException | ParseException e) {
-            logger.log(System.Logger.Level.DEBUG, "Failed to load JFR configuration '" + configurationName + "'.", e);
+            logger.log(System.Logger.Level.DEBUG, "Failed to load JFR configuration '" + configurationLabel(mode) + "'.", e);
             return null;
         }
+    }
+
+    private Map<String, String> settings(ProfileMode mode) throws IOException, ParseException {
+        return mode == null ? settings(configurationName) : profileSettings(mode);
+    }
+
+    static Map<String, String> settings(String configurationName) throws IOException, ParseException {
+        Map<String, String> settings = new HashMap<>(Configuration.getConfiguration(configurationName).getSettings());
+        if (DEFAULT_CONFIGURATION.equals(configurationName)) {
+            for (String event : LEAN_DISABLED_EVENTS) {
+                settings.put(event + "#enabled", "false");
+            }
+            String lockWait = JfrTimeline.LOCK_WAIT_MS + " ms";
+            settings.put("jdk.ThreadPark#threshold", lockWait);
+            settings.put("jdk.JavaMonitorEnter#threshold", lockWait);
+        }
+        return settings;
+    }
+
+    static Map<String, String> profileSettings(ProfileMode mode) throws IOException, ParseException {
+        Map<String, String> settings = settings(PROFILE_CONFIGURATION);
+        settings.put("jdk.ExecutionSample#enabled", "true");
+        settings.put("jdk.ExecutionSample#period", PROFILE_SAMPLE_PERIOD);
+        settings.put("jdk.ThreadPark#enabled", "true");
+        settings.put("jdk.ThreadPark#threshold", PROFILE_LOCK_THRESHOLD);
+        settings.put("jdk.JavaMonitorEnter#enabled", "true");
+        settings.put("jdk.JavaMonitorEnter#threshold", PROFILE_LOCK_THRESHOLD);
+        if (mode == ProfileMode.MEMORY) {
+            settings.put("jdk.ObjectAllocationSample#enabled", "true");
+            settings.put("jdk.ObjectAllocationSample#throttle", MEMORY_ALLOCATION_THROTTLE);
+            settings.put("jdk.OldObjectSample#enabled", "true");
+            settings.put("jdk.OldObjectSample#stackTrace", "true");
+            settings.put("jdk.OldObjectSample#cutoff", MEMORY_ROOT_SEARCH_CUTOFF);
+        }
+        return settings;
     }
 }

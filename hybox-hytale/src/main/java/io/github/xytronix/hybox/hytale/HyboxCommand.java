@@ -18,6 +18,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import io.github.xytronix.hybox.core.jfr.ProfileMode;
+import io.github.xytronix.hybox.core.text.Units;
 import io.github.xytronix.hybox.hytale.HyboxChatFormatter.Tone;
 
 final class HyboxCommand extends AbstractAsyncCommand {
@@ -49,14 +51,25 @@ final class HyboxCommand extends AbstractAsyncCommand {
             }
             return HyboxDashboardPage.open(context, runtime, this);
         }
-        send(context, Tone.OK, usage());
+        usage().forEach(line -> send(context, Tone.OK, line));
         return CompletableFuture.completedFuture(null);
     }
 
-    static String usage() {
-        return "Usage: /hybox ui|settings|incident [id]|status [--verbose]|list [--count=5] [--details]"
-            + "|triggers [--details]|dump|histogram|profile [--" + ProfileCommand.MINUTES + "=" + ProfileCommand.DEFAULT_MINUTES
-            + "] [--" + ProfileCommand.KEEP_BUFFER + "=" + ProfileCommand.DEFAULT_KEEP_BUFFER + "] [stop|cancel]|trend|reload";
+    static List<String> usage() {
+        return List.of(
+            "/hybox ui: open the dashboard",
+            "/hybox dump: save a bundle now",
+            "/hybox incident [id]: open the latest incident, or the one given",
+            "/hybox profile [lag|memory] [--" + ProfileCommand.MINUTES + "=" + ProfileCommand.DEFAULT_MINUTES + "] [--"
+                + ProfileCommand.KEEP_BUFFER + "=" + ProfileCommand.DEFAULT_KEEP_BUFFER + "]: record a profile and save it",
+            "/hybox profile stop|cancel: save the profile now, or drop the running or queued one",
+            "/hybox status [--verbose]: recorder health, last capture and storage",
+            "/hybox list [--count=5] [--details]: recent incidents",
+            "/hybox triggers [--details]: which triggers are on and off",
+            "/hybox histogram: the 10 largest heap classes",
+            "/hybox trend [--days=7]: health metric trends",
+            "/hybox settings: open the settings page, in game only",
+            "/hybox reload: reload hybox.json");
     }
 
     private static void send(CommandContext context, Tone tone, String text) {
@@ -92,7 +105,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
         @Override
         protected CompletableFuture<Void> executeAsync(CommandContext context) {
             if (!context.isPlayer()) {
-                send(context, Tone.WARN, "The settings page needs a player; edit hybox.json and use /hybox reload.");
+                send(context, Tone.WARN, "Settings open in game only. From the console, edit hybox.json and run /hybox reload.");
                 return CompletableFuture.completedFuture(null);
             }
             Ref<EntityStore> ref = context.senderAsPlayerRef();
@@ -108,7 +121,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
                     return;
                 }
                 HyboxSettingsPage.open(runtime, ref, store, world, this,
-                    () -> HyboxDashboardPage.open(context, runtime, rootCommand));
+                    () -> HyboxDashboardPage.open(context, runtime, rootCommand), null);
             }, world);
         }
     }
@@ -117,7 +130,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
         private final HyboxRuntime runtime;
 
         private IncidentCommand(HyboxRuntime runtime) {
-            super("incident", "Open a complete incident report (latest by default)");
+            super("incident", "Open the latest incident, or the one given");
             this.runtime = runtime;
             addUsageVariant(new IncidentByIdCommand(runtime));
         }
@@ -134,7 +147,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
             withRequiredArg("id", "Full incident id or numeric suffix", ArgTypes.STRING);
 
         private IncidentByIdCommand(HyboxRuntime runtime) {
-            super("Open an incident report by id");
+            super("Open an incident by id");
             this.runtime = runtime;
         }
 
@@ -162,7 +175,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
                     result.completeExceptionally(failure);
                 }
             }, () -> {
-                send(context, Tone.WARN, "Worker busy or stopping; try again later.");
+                send(context, Tone.WARN, "Hybox is busy. Try again in a moment.");
                 result.complete(null);
             });
             return result;
@@ -197,9 +210,12 @@ final class HyboxCommand extends AbstractAsyncCommand {
             HyboxRuntime.Health health = runtime.health();
             Instant now = Instant.now();
             long profileSeconds = runtime.profileActive() ? runtime.profileRemainingSeconds() : 0;
-            HyboxChatFormatter.statusMessages(health, now, profileSeconds).forEach(context::sendMessage);
+            HyboxChatFormatter.statusMessages(health, runtime.liveStatus(), now, profileSeconds).forEach(context::sendMessage);
+            var usage = runtime.storageUsage();
+            send(context, HyboxChatFormatter.storageTone(usage), HyboxChatFormatter.storageLine(usage));
             if (Boolean.TRUE.equals(context.get(verboseArg))) {
-                HyboxChatFormatter.statusDetails(health, runtime.config(), runtime.configPath(), runtime.incidentDir(), now)
+                HyboxChatFormatter.statusDetails(health, runtime.config(), runtime.configPath(), runtime.incidentDir(), now,
+                        context.isPlayer())
                     .forEach(line -> send(context, Tone.OK, line));
             }
         }
@@ -213,7 +229,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
         private final AbstractCommand rootCommand;
 
         private ListCommand(HyboxRuntime runtime, AbstractCommand rootCommand) {
-            super("list", "Open the Incidents tab; from the console, list recent incidents", runtime);
+            super("list", "Open the Incidents tab. From the console, list recent incidents", runtime);
             this.rootCommand = rootCommand;
         }
 
@@ -247,7 +263,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
         private final AbstractCommand rootCommand;
 
         private TriggersCommand(HyboxRuntime runtime, AbstractCommand rootCommand) {
-            super("triggers", "Open the Triggers tab; from the console, show armed and disabled triggers");
+            super("triggers", "Open the Triggers tab. From the console, show which triggers are on and off");
             this.runtime = runtime;
             this.rootCommand = rootCommand;
         }
@@ -259,8 +275,8 @@ final class HyboxCommand extends AbstractAsyncCommand {
             var triggers = HyboxChatFormatter.triggers(policy, HyboxDashboardPage.armedTriggers(runtime));
             send(context, Tone.OK, HyboxChatFormatter.triggerSummary(triggers));
             if (Boolean.TRUE.equals(context.get(detailsArg))) {
-                send(context, Tone.OK, "Cooldown=" + policy.cooldown() + ", debounce=" + policy.debounce());
-                for (var trigger : triggers) send(context, trigger.armed() ? Tone.OK : Tone.WARN, trigger.details());
+                send(context, Tone.OK, HyboxChatFormatter.timing(policy));
+                for (var trigger : triggers) send(context, Tone.OK, trigger.details());
             }
             return CompletableFuture.completedFuture(null);
         }
@@ -279,7 +295,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
         private final AbstractCommand rootCommand;
 
         private HistogramCommand(HyboxRuntime runtime, AbstractCommand rootCommand) {
-            super("histogram", "Open the Heap tab; from the console, print the top heap classes", runtime);
+            super("histogram", "Open the Heap tab. From the console, print the top heap classes", runtime);
             this.rootCommand = rootCommand;
         }
 
@@ -303,37 +319,71 @@ final class HyboxCommand extends AbstractAsyncCommand {
 
     private static final class ProfileCommand extends RuntimeAsyncCommand {
         private static final String MINUTES = "minutes";
+        private static final String MINUTES_HELP = "Profiling duration in minutes (1-30)";
         private static final int DEFAULT_MINUTES = 5;
         private static final String KEEP_BUFFER = "keep-buffer";
+        private static final String KEEP_BUFFER_HELP = "Include the recording from before the start (default)";
         private static final boolean DEFAULT_KEEP_BUFFER = true;
 
-        private final DefaultArg<Integer> minutesArg = withDefaultArg(MINUTES, "Profiling duration in minutes (1-30)",
+        private final DefaultArg<Integer> minutesArg = withDefaultArg(MINUTES, MINUTES_HELP,
             ArgTypes.INTEGER, DEFAULT_MINUTES, Integer.toString(DEFAULT_MINUTES));
-        private final DefaultArg<Boolean> keepBufferArg =
-            withDefaultArg(KEEP_BUFFER, "Keep the rolling buffer so one bundle spans before + after (default)",
-                ArgTypes.BOOLEAN, DEFAULT_KEEP_BUFFER, Boolean.toString(DEFAULT_KEEP_BUFFER));
+        private final DefaultArg<Boolean> keepBufferArg = withDefaultArg(KEEP_BUFFER, KEEP_BUFFER_HELP,
+            ArgTypes.BOOLEAN, DEFAULT_KEEP_BUFFER, Boolean.toString(DEFAULT_KEEP_BUFFER));
 
         private ProfileCommand(HyboxRuntime runtime) {
-            super("profile", "Record a high-fidelity bundle (keep-buffer=false starts a fresh recording)", runtime);
+            super("profile", "Record a lag or memory profile for 1 to 30 minutes, then save a bundle", runtime);
             addSubCommand(new ProfileStopCommand(runtime));
             addSubCommand(new ProfileCancelCommand(runtime));
+            addUsageVariant(new ProfileModeCommand(runtime));
         }
 
         @Override
         protected CompletableFuture<Void> executeAsync(CommandContext context) {
-            Integer requested = context.get(minutesArg);
-            int minutes = Math.max(1, Math.min(30, requested == null ? DEFAULT_MINUTES : requested));
-            boolean keepBuffer = Boolean.TRUE.equals(context.get(keepBufferArg));
-            return runtime.startProfileSession(minutes, keepBuffer, context.isPlayer()
-                ? context.senderAs(com.hypixel.hytale.server.core.universe.PlayerRef.class) : null).thenAccept(error -> {
-                if (error != null) {
-                    send(context, Tone.ERROR, error.startsWith("Failed to switch")
-                        ? "Failed to switch to the profile preset; check the server log." : error);
+            return startProfile(runtime, context, ProfileMode.LAG, context.get(minutesArg), context.get(keepBufferArg));
+        }
+
+        static CompletableFuture<Void> startProfile(HyboxRuntime runtime, CommandContext context, ProfileMode mode,
+                                                   Integer requested, Boolean keep) {
+            int minutes = ProfileSessionController.clampMinutes(requested == null ? DEFAULT_MINUTES : requested);
+            boolean keepBuffer = Boolean.TRUE.equals(keep);
+            return runtime.startProfileSession(mode, minutes, keepBuffer, context.isPlayer()
+                ? context.senderAs(com.hypixel.hytale.server.core.universe.PlayerRef.class) : null).thenAccept(start -> {
+                if (start.error() != null) {
+                    send(context, Tone.ERROR, start.error().startsWith("Failed to switch")
+                        ? "Failed to switch to the profile settings. The server log has the error." : start.error());
+                } else if (start.queued()) {
+                    send(context, Tone.OK, QUEUED_MESSAGE);
                 } else {
-                    send(context, Tone.OK, "Profile started · " + minutes + " min · "
-                        + (keepBuffer ? "rolling buffer kept" : "fresh recording") + " · captures automatically at the end.");
+                    send(context, Tone.OK, HyboxRuntime.startedMessage(mode, minutes));
                 }
             });
+        }
+    }
+
+    static final String QUEUED_MESSAGE = "Profile queued, starts once the incident is saved.";
+
+    private static final class ProfileModeCommand extends RuntimeAsyncCommand {
+        private final com.hypixel.hytale.server.core.command.system.arguments.system.RequiredArg<String> modeArg =
+            withRequiredArg("mode", "lag (CPU and locks) or memory (lag plus allocations and leak paths)", ArgTypes.STRING);
+        private final DefaultArg<Integer> minutesArg = withDefaultArg(ProfileCommand.MINUTES, ProfileCommand.MINUTES_HELP,
+            ArgTypes.INTEGER, ProfileCommand.DEFAULT_MINUTES, Integer.toString(ProfileCommand.DEFAULT_MINUTES));
+        private final DefaultArg<Boolean> keepBufferArg = withDefaultArg(ProfileCommand.KEEP_BUFFER,
+            ProfileCommand.KEEP_BUFFER_HELP, ArgTypes.BOOLEAN, ProfileCommand.DEFAULT_KEEP_BUFFER,
+            Boolean.toString(ProfileCommand.DEFAULT_KEEP_BUFFER));
+
+        private ProfileModeCommand(HyboxRuntime runtime) {
+            super(null, "Record a lag or memory profile", runtime);
+        }
+
+        @Override
+        protected CompletableFuture<Void> executeAsync(CommandContext context) {
+            String requested = context.get(modeArg);
+            ProfileMode mode = ProfileMode.parse(requested);
+            if (mode == null) {
+                send(context, Tone.ERROR, "Unknown profile mode \"" + requested + "\". Use lag or memory.");
+                return CompletableFuture.completedFuture(null);
+            }
+            return ProfileCommand.startProfile(runtime, context, mode, context.get(minutesArg), context.get(keepBufferArg));
         }
     }
 
@@ -345,20 +395,21 @@ final class HyboxCommand extends AbstractAsyncCommand {
         @Override
         protected CompletableFuture<Void> executeAsync(CommandContext context) {
             String error = runtime.finishProfileNow();
-            send(context, error == null ? Tone.OK : Tone.WARN, error == null ? "Profile ended · saving bundle." : error);
+            send(context, error == null ? Tone.OK : Tone.WARN, error == null ? "Profile stopped. Saving the bundle." : error);
             return CompletableFuture.completedFuture(null);
         }
     }
 
     private static final class ProfileCancelCommand extends RuntimeAsyncCommand {
         private ProfileCancelCommand(HyboxRuntime runtime) {
-            super("cancel", "Cancel the running profile without saving a bundle", runtime);
+            super("cancel", "Cancel the running or queued profile without saving a bundle", runtime);
         }
 
         @Override
         protected CompletableFuture<Void> executeAsync(CommandContext context) {
-            String error = runtime.cancelProfile();
-            send(context, error == null ? Tone.OK : Tone.WARN, error == null ? "Profile cancelled · nothing saved." : error);
+            var outcome = runtime.cancelProfile(context.isPlayer()
+                ? context.senderAs(com.hypixel.hytale.server.core.universe.PlayerRef.class) : null);
+            send(context, outcome.cancelled() ? Tone.OK : Tone.WARN, outcome.message());
             return CompletableFuture.completedFuture(null);
         }
     }
@@ -369,7 +420,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
             withDefaultArg("days", "How many days back to chart (1-30)", ArgTypes.INTEGER, 7, "7");
 
         private TrendCommand(HyboxRuntime runtime, AbstractCommand rootCommand) {
-            super("trend", "View health metric trends in game or build an HTML report from the console", runtime);
+            super("trend", "Show health trends in game, or save the last days as an HTML file from the console", runtime);
             this.rootCommand = rootCommand;
         }
 
@@ -383,13 +434,13 @@ final class HyboxCommand extends AbstractAsyncCommand {
                     Path out = runtime.generateTrendReport(days);
                     if (out == null) {
                         send(context, Tone.WARN, !runtime.config().metricsEnabled()
-                            ? "Metrics disabled; set Metrics.Enabled=true to record trends."
-                            : "No health metrics recorded in the last " + days + " day(s).");
+                            ? "Trends are off. Turn on Metrics history in /hybox settings."
+                            : "No health metrics recorded in the last " + Units.count(days, "day") + ".");
                     } else {
-                        send(context, Tone.OK, "Trend (" + days + "d) · " + HyboxChatFormatter.outputPath(out, context.isPlayer()));
+                        send(context, Tone.OK, "Trend for " + Units.count(days, "day") + " saved: " + HyboxChatFormatter.outputPath(out, context.isPlayer()));
                     }
                 } catch (IOException failure) {
-                    send(context, Tone.ERROR, "Trend report failed; see server log.");
+                    send(context, Tone.ERROR, "Saving the trend failed. The server log has the error.");
                 }
             });
         }
@@ -407,7 +458,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
                 Tone tone = result.startsWith("Reload failed") ? Tone.ERROR
                     : result.contains("Restart required") ? Tone.WARN : Tone.OK;
                 send(context, tone, result.startsWith("Reload failed:") && result.contains("keeping previous config")
-                    ? "Reload failed; previous configuration kept. Check the active configuration." : result);
+                    ? "Reload failed. hybox.json could not be read, so the old settings stay. The server log has the error." : result);
             });
         }
     }

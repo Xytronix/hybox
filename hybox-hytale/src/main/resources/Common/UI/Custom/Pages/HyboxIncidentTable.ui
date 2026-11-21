@@ -1,14 +1,19 @@
-$C = "../Common.ui";
+$H = "HyboxTones.ui";
 Group {
   LayoutMode: Top;
   Anchor: (Bottom: 3);
   Padding: (Horizontal: 10, Top: 6, Bottom: 7);
-  Background: #1a1a1a(0.3);
+  Background: $H.@Panel;
   Group {
     LayoutMode: Left;
-    Label #Name { Anchor: (Width: 350, Right: 12); Style: (FontSize: 12, TextColor: #ffffff, Wrap: true); }
-    Label #Facts { Anchor: (Width: 290, Right: 12); Style: (FontSize: 11, TextColor: #bfcdd5, Wrap: true); }
-    Label #Amount { FlexWeight: 1; Style: (FontSize: 12, TextColor: #7a9cc6, Wrap: true, HorizontalAlignment: End); }
+    Label #Rank { Anchor: (Width: 38, Right: 4); Style: (FontSize: 11, TextColor: $H.@Text3); Visible: false; }
+    Label #Name { FlexWeight: 3; Anchor: (Right: 12); Style: (FontSize: 12, TextColor: $H.@Text, Wrap: true); TextTooltipStyle: $H.@TooltipStyle; }
+    Label #Facts { FlexWeight: 2; Anchor: (Right: 12); Style: (FontSize: 11, TextColor: $H.@Text2, Wrap: true); }
+    Label #Amount { Anchor: (Width: 190); Style: (FontSize: 12, RenderBold: true, TextColor: $H.@Text, Wrap: true, HorizontalAlignment: End); }
   }
-  Label #Details { Anchor: (Top: 4); Style: (FontSize: 11, TextColor: #96a9be, Wrap: true); }
+  $H.@Bar #Share {
+    Anchor: (Width: 350, Height: 6, Top: 5);
+    Visible: false;
+  }
+  Label #Details { Anchor: (Top: 4); Style: (FontSize: 11, TextColor: $H.@Text3, Wrap: true); }
 }
