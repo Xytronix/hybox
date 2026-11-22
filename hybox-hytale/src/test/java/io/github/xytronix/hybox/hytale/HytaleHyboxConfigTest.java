@@ -19,6 +19,31 @@ import io.github.xytronix.hybox.core.config.HyboxConfig;
 class HytaleHyboxConfigTest {
 
     @Test
+    void previousDefaultArtifactListGainsMetrics(@TempDir Path dataDir) throws Exception {
+        Files.writeString(HytaleHyboxConfig.path(dataDir), """
+            {"Version": 1, "Capture": {"Artifacts":
+              ["server", "heartbeats", "worlds", "plugins", "serverLog", "threads", "env", "report", "jfr"]}}
+            """, StandardCharsets.UTF_8);
+
+        HyboxConfig config = HytaleHyboxConfig.loadOrCreate(dataDir, System.getLogger("hytale-config-test"));
+
+        assertEquals(java.util.Set.of("jfr", "report", "env", "threads", "serverLog", "plugins", "worlds", "heartbeats",
+            "server", "metrics"), config.capturePolicy().artifacts());
+    }
+
+    @Test
+    void customArtifactListIsKeptAsWritten(@TempDir Path dataDir) throws Exception {
+        Files.writeString(HytaleHyboxConfig.path(dataDir), """
+            {"Version": 1, "Capture": {"Artifacts": ["jfr", "report", "env", "threads", "serverLog", "plugins", "worlds"]}}
+            """, StandardCharsets.UTF_8);
+
+        HyboxConfig config = HytaleHyboxConfig.loadOrCreate(dataDir, System.getLogger("hytale-config-test"));
+
+        assertEquals(java.util.Set.of("jfr", "report", "env", "threads", "serverLog", "plugins", "worlds"),
+            config.capturePolicy().artifacts());
+    }
+
+    @Test
     void parsesCaptureAndDisabledEventsFields(@TempDir Path dataDir) throws Exception {
         Path configPath = HytaleHyboxConfig.path(dataDir);
         Files.writeString(configPath, """
@@ -693,8 +718,8 @@ class HytaleHyboxConfigTest {
               "Capture": {
                 "HeapHistogram": false, "AllowPluginExtras": true, "LogTailLines": 500,
                 "IncludeServerLog": false, "IncludeServerConfig": false, "IncludeModConfigs": false,
-                "AllowModConfigOptIn": true, "SanitizeLog": true,
-                "Artifacts": ["jfr", "report", "env", "threads", "serverLog", "plugins", "worlds", "heartbeats", "server"]
+                "AllowModConfigOptIn": true,
+                "Artifacts": ["jfr", "report", "env", "threads", "serverLog", "plugins", "worlds", "heartbeats", "server", "metrics"]
               },
               "Retention": {
                 "FailedRecordingMaxCount": 5, "StagingMaxTotalBytes": 536870912, "StagingMaxAge": "PT168H",
