@@ -3,11 +3,8 @@ package io.github.xytronix.hybox.core.health;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import jdk.jfr.consumer.RecordedEvent;
 import jdk.jfr.consumer.RecordedFrame;
@@ -87,50 +84,6 @@ public final class JfrHotThreads {
         "org.spongepowered.", "org.bson", "org.mongodb", "org.slf4j", "org.apache."
     };
 
-    public static LinkedHashMap<String, String> modContribution(Path recording, int limit) {
-        Map<String, long[]> samplesByMod = new HashMap<>();
-        Map<String, Map<String, Long>> methodByMod = new HashMap<>();
-        JfrStackCache<RecordedStackTrace, String[][]> stackMods = new JfrStackCache<>(JfrHotThreads::modFrames);
-        try (RecordingFile file = new RecordingFile(recording)) {
-            while (file.hasMoreEvents()) {
-                RecordedEvent event = file.readEvent();
-                if (!EXECUTION_SAMPLE.equals(event.getEventType().getName())) {
-                    continue;
-                }
-                RecordedStackTrace stack = event.getStackTrace();
-                if (stack == null) {
-                    continue;
-                }
-                String[][] modFrames = stackMods.get(stack);
-                for (String[] modFrame : modFrames) {
-                    methodByMod.computeIfAbsent(modFrame[0], k -> new HashMap<>())
-                        .merge(modFrame[1], 1L, Long::sum);
-                }
-                Set<String> modsInSample = new HashSet<>();
-                for (String[] modFrame : modFrames) {
-                    if (modsInSample.add(modFrame[0])) {
-                        samplesByMod.computeIfAbsent(modFrame[0], k -> new long[1])[0]++;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            return new LinkedHashMap<>();
-        }
-
-        List<Map.Entry<String, long[]>> ordered = new ArrayList<>(samplesByMod.entrySet());
-        ordered.sort((a, b) -> Long.compare(b.getValue()[0], a.getValue()[0]));
-        LinkedHashMap<String, String> out = new LinkedHashMap<>();
-        int count = 0;
-        for (Map.Entry<String, long[]> entry : ordered) {
-            if (count++ >= limit) {
-                break;
-            }
-            long samples = entry.getValue()[0];
-            out.put(entry.getKey(), samples + " samples · " + dominantMethod(methodByMod.get(entry.getKey())));
-        }
-        return out;
-    }
-
     static boolean isEngine(String type) {
         for (String prefix : ENGINE_PREFIXES) {
             if (type.startsWith(prefix)) {
@@ -151,21 +104,6 @@ public final class JfrHotThreads {
         }
         int third = type.indexOf('.', second + 1);
         return third < 0 ? type : type.substring(0, third);
-    }
-
-    private static String[][] modFrames(RecordedStackTrace stack) {
-        List<String[]> out = new ArrayList<>();
-        for (RecordedFrame frame : stack.getFrames()) {
-            if (!frame.isJavaFrame() || frame.getMethod() == null) {
-                continue;
-            }
-            String type = frame.getMethod().getType().getName();
-            if (isEngine(type)) {
-                continue;
-            }
-            out.add(new String[] {modId(type), JfrTimelineParser.cleanType(type) + "." + frame.getMethod().getName()});
-        }
-        return out.toArray(new String[0][]);
     }
 
     private static String topMethod(RecordedStackTrace stack) {

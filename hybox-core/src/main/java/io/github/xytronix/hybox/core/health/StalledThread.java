@@ -138,7 +138,7 @@ public final class StalledThread {
     private static String renderStack(StackTraceElement[] stack) {
         StringBuilder sb = new StringBuilder();
         for (StackTraceElement frame : stack) {
-            sb.append("at ").append(frame).append('\n');
+            sb.append("at ").append(frame).append(FrameLabels.suffix(frame)).append('\n');
         }
         return sb.toString().stripTrailing();
     }

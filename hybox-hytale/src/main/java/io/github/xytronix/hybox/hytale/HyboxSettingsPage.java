@@ -28,6 +28,7 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
     private final World world;
     private final AbstractCommand settingsCommand;
     private final Runnable back;
+    private final String storage;
     private HyboxSettings settings;
     private HyboxSettings original;
     private Feedback feedback = new Feedback("", Tone.OK);
@@ -35,7 +36,7 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
     private boolean dismissed;
 
     private HyboxSettingsPage(HyboxRuntime runtime, PlayerRef playerRef, World world,
-                              AbstractCommand settingsCommand, Runnable back, HyboxSettings settings) {
+                              AbstractCommand settingsCommand, Runnable back, HyboxSettings settings, String storage) {
         super(playerRef, CustomPageLifetime.CanDismiss, PageData.CODEC);
         this.runtime = runtime;
         this.world = world;
@@ -43,6 +44,7 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
         this.back = back;
         this.settings = settings;
         this.original = settings;
+        this.storage = storage;
     }
 
     static void open(HyboxRuntime runtime, Ref<EntityStore> ref, Store<EntityStore> store,
@@ -60,13 +62,14 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
         runtime.submitWorker(() -> {
             try {
                 HyboxSettings settings = HytaleHyboxConfig.read(runtime.dataDir(), LOGGER);
+                String storage = HyboxSettingsRenderer.storage(runtime.storageUsage());
                 world.execute(() -> {
                     if (!ref.isValid() || ref.getStore() != store) return;
                     Player current = store.getComponent(ref, Player.getComponentType());
                     if (current == null || current.getPageManager().getCustomPage() != previousPage) return;
                     if (!settingsCommand.hasPermission(playerRef)) return;
                     current.getPageManager().openCustomPage(ref, store,
-                        new HyboxSettingsPage(runtime, playerRef, world, settingsCommand, back, settings));
+                        new HyboxSettingsPage(runtime, playerRef, world, settingsCommand, back, settings, storage));
                 });
             } catch (RuntimeException failure) {
                 LOGGER.log(System.Logger.Level.WARNING, "Unable to read Hybox settings.", failure);
@@ -85,7 +88,7 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
     public void build(Ref<EntityStore> ref, UICommandBuilder commands, UIEventBuilder events,
                       Store<EntityStore> store) {
         commands.append("Pages/HyboxSettings.ui");
-        HyboxSettingsRenderer.render(settings, feedback, commands, events);
+        HyboxSettingsRenderer.render(settings, storage, feedback, commands, events);
     }
 
     @Override

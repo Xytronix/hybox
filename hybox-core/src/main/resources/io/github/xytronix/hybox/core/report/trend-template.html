@@ -36,7 +36,6 @@
   .ch{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
   .lbl{font-size:13px;color:var(--tx2);font-weight:500}
   .cur{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
-  .cur.dim{font-size:13px;font-weight:400;color:var(--tx3)}
   .sub{font-size:11.5px;color:var(--tx3);margin:2px 0 6px;font-variant-numeric:tabular-nums}
   svg{display:block;width:100%;height:170px;overflow:visible}
   .ax{fill:var(--tx3);font-size:12px;font-variant-numeric:tabular-nums}
@@ -199,9 +198,7 @@ function gridPlotWidth(grid){
 function card(g){
   const t = D.t||[];
   const lines = g.lines.map(l=>({...l, v:D[l.k].buckets, s:D[l.k].observed.count?D[l.k].observed:null}));
-  if(!lines.some(l=>l.s)){
-    return `<div class="card"><div class="ch"><span class="lbl">${g.label}</span><span class="cur dim">no data</span></div></div>`;
-  }
+  if(!lines.some(l=>l.s)) return "";
   let head, extra;
   if(g.lines.length>1){
     head = `<div class="ch"><span class="lbl">${g.label}</span></div>`;
@@ -223,6 +220,9 @@ function renderGrid(){
   const focusedLine=document.activeElement?.dataset?.line||null;
   chartWidth=gridPlotWidth(grid);
   grid.innerHTML=GROUPS.map(card).join("");
+  const empty=GROUPS.filter(g=>!g.lines.some(l=>D[l.k].observed.count)).map(g=>g.label);
+  const note=document.getElementById("nodata");
+  if(note) note.textContent=empty.length?"No data in this range for "+empty.join(", ")+".":"";
   if(focusedLine){
     for(const el of grid.querySelectorAll("[data-line]")){
       if(el.dataset.line===focusedLine){
@@ -251,10 +251,9 @@ function toggleLine(k){
   }
   const inc=(D.incidents||[]).length;
   let html = `<h1>Health trends</h1>`;
-  html += `<div class="meta">Last ${D.days} day(s) · ${D.count.toLocaleString()} samples${inc?` · ${inc} incident${inc>1?"s":""}`:""} · generated ${D.generated}</div>`;
-  html += `<div class="meta">Aggregation: ${D.count.toLocaleString()} recorded samples in ${D.t.length.toLocaleString()} bucket(s). Lines show bucket means; shaded min–max envelopes and vertical ranges preserve observed lows and spikes. Summaries use every available sample, not averages of buckets; last is the latest available observation. Missing values are excluded; empty buckets are gaps. All times are UTC.</div>`;
+  html += `<div class="meta" title="${D.count.toLocaleString()} recorded samples in ${D.t.length.toLocaleString()} buckets. Lines show bucket means. Shaded min to max envelopes and vertical ranges keep observed lows and spikes. Summaries use every sample, not averages of buckets. Last is the latest observation. Missing values are left out and empty buckets are gaps.">Last ${D.days} day${D.days===1?"":"s"} · ${D.count.toLocaleString()} samples${inc?` · ${inc} incident${inc>1?"s":""}`:""} · generated ${D.generated} · all times UTC</div>`;
   if(inc) html += `<div class="pmlegend"><button type="button" class="pmlg" data-inc aria-pressed="true"><span class="smp" aria-hidden="true"></span><span>Incident markers</span></button></div>`;
-  html += `<div class="grid" id="grid"></div>`;
+  html += `<div class="grid" id="grid"></div><div class="meta" id="nodata"></div>`;
   app.innerHTML = html;
   renderGrid();
   document.getElementById("grid").addEventListener("click", e=>{

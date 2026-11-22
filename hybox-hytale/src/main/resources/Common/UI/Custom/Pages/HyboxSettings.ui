@@ -152,6 +152,10 @@ $C.@Container {
             $R.@NumberInput #RetentionMaxAgeDays { @Label = "Age (days)"; }
           }
         }
+        Label #StorageUsage {
+          Anchor: (Height: 34, Top: 4);
+          Style: (FontSize: 11, TextColor: #96a9be, Wrap: true, WrapMaxLines: 2);
+        }
       }
 
       Group {

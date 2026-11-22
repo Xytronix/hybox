@@ -6,6 +6,7 @@ import com.hypixel.hytale.server.core.ui.Value;
 import com.hypixel.hytale.server.core.ui.builder.EventData;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.ui.builder.UIEventBuilder;
+import io.github.xytronix.hybox.core.text.Units;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
@@ -90,7 +91,8 @@ final class HyboxDashboardRenderer {
 
     private static void overview(DashboardModel model, UICommandBuilder commands, UIEventBuilder events) {
         commands.append("#Section", "Pages/HyboxDashboardOverview.ui");
-        for (int i = 0; i < model.tiles().size(); i++) commands.append("#Tiles", "Pages/HyboxDashboardTile.ui");
+        String tile = model.tiles().size() == 4 ? "Pages/HyboxDashboardTileWide.ui" : "Pages/HyboxDashboardTile.ui";
+        for (int i = 0; i < model.tiles().size(); i++) commands.append("#Tiles", tile);
         bind(events, "#ProfileSaveNow", "profile:stop");
         bind(events, "#ProfileCancel", "profile:cancel");
         bind(events, "#SkipWait", "capture:skip");
@@ -119,8 +121,9 @@ final class HyboxDashboardRenderer {
             text(commands, selector + " #TileDetail", tile.detail());
             commands.set(selector + " #SeverityPill.Visible", tile.severity() != null);
             if (tile.severity() != null) {
-                colored(commands, selector + " #Severity", tile.severity(), tile.tone());
-                background(commands, selector + " #SeverityPill", tile.tone(), "Pill");
+                var severityTone = DashboardModel.severityTone(tile.severity());
+                colored(commands, selector + " #Severity", tile.severity(), severityTone);
+                background(commands, selector + " #SeverityPill", severityTone, "Pill");
             }
         }
         commands.set("#ProfileRunning.Visible", model.profile() != null);
@@ -233,8 +236,8 @@ final class HyboxDashboardRenderer {
         else if (heap.message() != null) summary = heap.message();
         else if (snapshot == null) summary = "No heap walk yet. Walk the heap to list the classes using the most memory.";
         else summary = "Taken at " + CAPTURE_TIME.format(heap.takenAt()) + " · "
-            + (snapshot.totalBytes() > 0 ? HyboxChatFormatter.bytes(snapshot.totalBytes()) + " in "
-                + String.format(java.util.Locale.US, "%,d", snapshot.totalInstances()) + " objects · " : "")
+            + (snapshot.totalBytes() > 0 ? Units.bytes(snapshot.totalBytes()) + " in "
+                + Units.number(snapshot.totalInstances()) + " objects · " : "")
             + "top " + heap.rows() + " classes";
         text(commands, "#HeapSummary", summary);
         commands.set("#HeapWalkButton.Text", snapshot == null ? "Walk heap" : "Walk again");
@@ -246,8 +249,8 @@ final class HyboxDashboardRenderer {
             var entry = snapshot.entries().get(i);
             String selector = "#HeapRows[" + i + "]";
             text(commands, selector + " #Key", "#" + (i + 1) + " · " + shortClass(entry.className()));
-            text(commands, selector + " #Value", String.format(java.util.Locale.US, "%,d", entry.instances()) + " objects · "
-                + HyboxChatFormatter.bytes(entry.bytes()) + " · " + HyboxChatFormatter.heapShare(entry, base) + " of heap");
+            text(commands, selector + " #Value", Units.number(entry.instances()) + " objects · "
+                + Units.bytes(entry.bytes()) + " · " + HyboxChatFormatter.heapShare(entry, base) + " of objects found");
             commands.set(selector + " #Value.TooltipText", HyboxChatFormatter.singleLine(entry.className()));
             commands.set(selector + " #Share.Visible", true);
             commands.set(selector + " #Share.Value", (float) Math.max(0, Math.min(1, (double) entry.bytes() / base)));

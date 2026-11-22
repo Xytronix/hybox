@@ -47,14 +47,13 @@ class ReportHtmlTest {
     void rendersSnapshotDataAndHeader() throws Exception {
         HealthSnapshot snap = new HealthSnapshot(
             30,
-            new HealthSnapshot.Cpu(0.5, 0.7, 8),
+            new HealthSnapshot.Cpu(8),
             new HealthSnapshot.Memory(30_000_000_000L, 40_000_000_000L, 42_000_000_000L,
                 500_000_000L, 600_000_000L),
             List.of(new HealthSnapshot.Gc("Shenandoah Pauses", 362, 44)),
             new HealthSnapshot.Sys("Linux 6.8 (amd64)", "OpenJDK 25", 64_000_000_000L, 3_600_000L),
             new HealthSnapshot.Disk(50_000_000_000L, 100_000_000_000L),
-            new HealthSnapshot.Threads(238, Map.of("RUNNABLE", 44, "WAITING", 96),
-                List.of(new HealthSnapshot.RunnableThread("WorldThread - default", "Foo.bar(Foo.java:1)"))),
+            new HealthSnapshot.Threads(238, Map.of("RUNNABLE", 44, "WAITING", 96), List.of()),
             List.of(new HealthSnapshot.World("default", 10, 250, 1200, 25.1, 35.0,
                 List.of("Shebao", "PianoManu"), -1, 33.2, 48.9, 112.5, 5000, 8000)),
             List.of(new HealthSnapshot.HotThread("WorldThread - default", 1234, "AStarBase.computePath")));
@@ -108,12 +107,14 @@ class ReportHtmlTest {
     void usesConciseThreadAndOwnershipNotes() throws Exception {
         String html = render(report(null));
 
-        assertTrue(html.contains("<b>Blocked threads</b> ${blocked} blocked thread${blocked===1?\"\":\"s\"}"
-            + " at capture, waiting to enter a monitor."));
-        assertTrue(html.contains("Deadlock detection returned no result."));
+        assertTrue(html.contains("No thread was waiting for a lock at capture."));
+        assertTrue(html.contains("No deadlock found."));
+        assertFalse(html.contains("waiting to enter a monitor"));
+        assertFalse(html.contains("Deadlock detection returned no result."));
         assertTrue(html.contains("Only <b>${fmt(T)}</b> execution samples; too few to rank threads reliably."));
-        assertTrue(html.contains("sampled code; owner unknown; grouped by package"));
-        assertTrue(html.contains("sampled · owner unknown; grouped by package"));
+        assertTrue(html.contains("samples in each mod's code, by package when the mod is unknown"));
+        assertTrue(html.contains("sampled · by package when the mod is unknown"));
+        assertFalse(html.contains("owner unknown"));
         assertFalse(html.contains("No positive deadlock evidence"));
         assertFalse(html.contains("package fallback is not verified ownership"));
         assertFalse(html.contains("per-thread shares may be unstable"));
@@ -155,21 +156,6 @@ class ReportHtmlTest {
     }
 
     @Test
-    void excludesJdkPackagesFromFallbackModAttribution() throws Exception {
-        String html = render(report(null, List.of(new DiagnosticSection("Mod hot-path contribution (JFR)",
-            Map.of("com.sun.management", "11 samples · com.sun.management.GcInfo.get",
-                "java.util.concurrent", "7 samples · java.util.concurrent.ForkJoinPool.run",
-                "jdk.internal.misc", "6 samples · jdk.internal.misc.Unsafe.park",
-                "sun.nio.ch", "5 samples · sun.nio.ch.Socket.read",
-                "cc.irori.refixes", "585 samples · cc.irori.refixes.Tick.run")))));
-
-        assertTrue(html.contains("\"modCpu\":[[\"cc.irori.refixes\",585,\"cc.irori.refixes.Tick.run\"]]"));
-        String modCpu = html.substring(html.indexOf("\"modCpu\":"), html.indexOf("\"flame\":"));
-        assertFalse(modCpu.contains("com.sun.management"));
-        assertFalse(modCpu.contains("jdk.internal.misc"));
-    }
-
-    @Test
     void emitsRecoveryNoteOnlyForUncleanShutdown() throws Exception {
         IncidentId id = IncidentIds.next(CLOCK);
         IncidentReport recovered = new IncidentReport(new IncidentMetadata(
@@ -194,7 +180,7 @@ class ReportHtmlTest {
 
         assertTrue(html.contains(
             "\"memPools\":[[\"G1 Eden Space\",1024,2048,4096,512],[\"Metaspace\",300,400,-1,-1]]"));
-        assertTrue(html.contains("\"title\":\"Memory pools\""));
+        assertFalse(html.contains("\"title\":\"Memory pools\""));
         assertFalse(html.substring(0, html.indexOf("<script>")).contains("<b>Memory pools</b>"));
     }
 
@@ -230,9 +216,6 @@ class ReportHtmlTest {
         pluginConfig.put("ExampleFeature.Enabled", "true");
         LinkedHashMap<String, String> tickSystems = new LinkedHashMap<>();
         tickSystems.put("EntityTickingSystem @ default", "5.10 12.40 4.80 30.00");
-        LinkedHashMap<String, String> modCpu = new LinkedHashMap<>();
-        modCpu.put("io.github.xytronix.hybox", "412 samples · JfrController.dump");
-        modCpu.put("com.example.plugin", "8123 samples · ExampleSystem.tick");
         LinkedHashMap<String, String> env = new LinkedHashMap<>();
         env.put("ExampleLoader", "installed (1.0.0)");
         env.put("Server name", "ExampleServer");
@@ -255,7 +238,6 @@ class ReportHtmlTest {
             new DiagnosticSection("Server log", Map.of(), log),
             new DiagnosticSection("ExamplePlugin", pluginConfig),
             new DiagnosticSection("Tick systems", tickSystems),
-            new DiagnosticSection("Mod hot-path contribution (JFR)", modCpu),
             new DiagnosticSection("Heap histogram", heapHistogram),
             new DiagnosticSection("Entities", entities),
             new DiagnosticSection("Environment", env),
@@ -279,21 +261,19 @@ class ReportHtmlTest {
         assertTrue(html.contains("ExampleFeature.Enabled"));
         assertTrue(html.contains("\"tickSystems\":[[\"EntityTickingSystem\",\"default\",5.1,12.4,4.8,30.0]]"));
         assertTrue(html.contains("\"tickSystemsNote\":null"));
-        assertTrue(html.contains("\"modCpu\":[[\"com.example.plugin\",8123,\"ExampleSystem.tick\"],"
-            + "[\"io.github.xytronix.hybox\",412,\"JfrController.dump\"]]"));
-        assertTrue(html.contains("\"title\":\"Mod hot-path contribution (JFR)\""));
+        assertTrue(html.contains("\"modCpu\":null"));
         assertTrue(html.contains(
             "\"heapHistogram\":[[\"[B\",1234567,987654321],[\"java.lang.String\",234,5678]]"));
-        assertTrue(html.contains("\"title\":\"Heap histogram\""));
+        assertFalse(html.contains("\"title\":\"Heap histogram\""));
         assertTrue(html.contains("\"entities\":[[\"default\",[[\"Zombie\",12],[\"Cow\",5]]]]"));
-        assertTrue(html.contains("\"title\":\"Entities\""));
+        assertFalse(html.contains("\"title\":\"Entities\""));
         assertTrue(html.contains("\"loaders\":[[\"ExampleLoader\",\"1.0.0\"]]"));
         assertTrue(html.contains("\"server\":\"ExampleServer\""));
         assertTrue(html.contains("\"hytale\":\"0.5.4\""));
         assertTrue(html.contains(
             "\"container\":{\"runtime\":\"Docker\",\"type\":null,\"cpuLimit\":null,\"memLimit\":null}"));
-        assertTrue(html.contains("Container runtime"));
-        assertTrue(html.contains("\"title\":\"Environment\""));
+        assertFalse(html.contains("Container runtime"));
+        assertFalse(html.contains("\"title\":\"Environment\""));
         assertFalse(html.substring(0, html.indexOf("<script>")).contains("<b>Environment</b>"));
     }
 
@@ -316,7 +296,6 @@ class ReportHtmlTest {
         String html = render(report(null, List.of(new DiagnosticSection("Mixins", mixins))));
 
         assertTrue(html.contains("\"conflicts\":[]"));
-        assertTrue(html.contains("\"Conflicts\""));
     }
 
     @Test

@@ -18,7 +18,8 @@ Group {
     Label #State {
       Anchor: (Width: 110, Height: 22, Right: 10);
       Background: #ffffff(0.04);
-      Style: (FontSize: 10, RenderBold: true, TextColor: #96a9be, HorizontalAlignment: Center, VerticalAlignment: Center);
+      Style: (FontSize: 10, RenderBold: true, TextColor: #7a9cc6, HorizontalAlignment: Center, VerticalAlignment: Center);
+      TextTooltipStyle: $H.@TooltipStyle;
     }
     Label #Samples { Anchor: (Width: 110, Right: 10); Style: (FontSize: 11, TextColor: #bfcdd5, HorizontalAlignment: End, VerticalAlignment: Center); }
     Label #Self { Anchor: (Width: 88, Right: 10); Style: (FontSize: 11, TextColor: #7a9cc6, HorizontalAlignment: End, VerticalAlignment: Center); }

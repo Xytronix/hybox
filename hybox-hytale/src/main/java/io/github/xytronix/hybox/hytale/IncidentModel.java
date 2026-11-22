@@ -22,12 +22,10 @@ final class IncidentModel {
     private static final Pattern ENTRY = Pattern.compile("<div class=\"row\"><span class=\"k\">(.*?)</span><span class=\"v\">(.*?)</span></div>", Pattern.DOTALL);
     private static final Pattern PRE = Pattern.compile("<pre\\b[^>]*>(.*?)</pre>", Pattern.DOTALL);
     private final Path bundle;
-    private final JsonObject metadata;
     private final JsonObject data;
 
     IncidentModel(Path bundle, JsonObject metadata, JsonObject data) {
         this.bundle = bundle;
-        this.metadata = metadata;
         this.data = data;
         if (!has("incident") && metadata.has("meta")) data.add("incident", metadata.get("meta").deepCopy());
     }
@@ -119,7 +117,6 @@ final class IncidentModel {
     }
 
     Path bundle() { return bundle; }
-    JsonObject metadata() { return metadata; }
     JsonElement field(String key) { return data.has(key) ? data.get(key) : JsonNull.INSTANCE; }
     boolean has(String key) { return !field(key).isJsonNull(); }
     JsonObject object(String key) { return object(field(key)); }

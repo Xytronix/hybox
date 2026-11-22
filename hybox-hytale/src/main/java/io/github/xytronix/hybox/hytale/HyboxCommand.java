@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import io.github.xytronix.hybox.core.text.Units;
 import io.github.xytronix.hybox.hytale.HyboxChatFormatter.Tone;
 
 final class HyboxCommand extends AbstractAsyncCommand {
@@ -198,8 +199,11 @@ final class HyboxCommand extends AbstractAsyncCommand {
             Instant now = Instant.now();
             long profileSeconds = runtime.profileActive() ? runtime.profileRemainingSeconds() : 0;
             HyboxChatFormatter.statusMessages(health, now, profileSeconds).forEach(context::sendMessage);
+            var usage = runtime.storageUsage();
+            send(context, HyboxChatFormatter.storageTone(usage), HyboxChatFormatter.storageLine(usage));
             if (Boolean.TRUE.equals(context.get(verboseArg))) {
-                HyboxChatFormatter.statusDetails(health, runtime.config(), runtime.configPath(), runtime.incidentDir(), now)
+                HyboxChatFormatter.statusDetails(health, runtime.config(), runtime.configPath(), runtime.incidentDir(), now,
+                        context.isPlayer())
                     .forEach(line -> send(context, Tone.OK, line));
             }
         }
@@ -384,7 +388,7 @@ final class HyboxCommand extends AbstractAsyncCommand {
                     if (out == null) {
                         send(context, Tone.WARN, !runtime.config().metricsEnabled()
                             ? "Metrics disabled; set Metrics.Enabled=true to record trends."
-                            : "No health metrics recorded in the last " + days + " day(s).");
+                            : "No health metrics recorded in the last " + Units.count(days, "day") + ".");
                     } else {
                         send(context, Tone.OK, "Trend (" + days + "d) · " + HyboxChatFormatter.outputPath(out, context.isPlayer()));
                     }

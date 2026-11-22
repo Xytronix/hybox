@@ -19,6 +19,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
+import io.github.xytronix.hybox.core.text.Units;
 
 final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageData> {
     private static final System.Logger LOGGER = System.getLogger(HyboxTrendPage.class.getName());
@@ -217,7 +218,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
                     Path out = runtime.generateTrendReport(reportDays);
                     message = out != null ? "Trend (" + reportDays + "d) · " + HyboxChatFormatter.outputPath(out, true)
                         : !runtime.config().metricsEnabled() ? "Metrics disabled; set Metrics.Enabled=true to record trends."
-                        : "No health metrics recorded in the last " + reportDays + " day(s).";
+                        : "No health metrics recorded in the last " + Units.count(reportDays, "day") + ".";
                 }
             } catch (IOException | RuntimeException failure) {
                 LOGGER.log(System.Logger.Level.WARNING, "Trend report failed.", failure);

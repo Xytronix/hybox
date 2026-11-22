@@ -55,7 +55,7 @@ class HyboxChatFormatterTest {
     void stoppedRecorderAndCaptureFailureAreNotPresentedAsHealthy() {
         var health = new HyboxRuntime.Health(false, NOW, null, false, "idle", null, null,
             CaptureResult.failed("disk full"), "disk full", 0, 0, 0, 0, null, true,
-            new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null));
+            new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null), new HytaleMixins.ProblemCounts(0, 0));
 
         var messages = HyboxChatFormatter.statusMessages(health, NOW, 0);
 
@@ -110,7 +110,7 @@ class HyboxChatFormatterTest {
         String player = HyboxChatFormatter.captureLine(result, directory, true);
         String console = HyboxChatFormatter.captureLine(result, directory, false);
 
-        assertTrue(player.endsWith("incident-" + INCIDENT + ".zip"));
+        assertTrue(player.contains("incident-" + INCIDENT + ".zip. "));
         assertFalse(player.contains("/private/"));
         assertTrue(console.contains(directory.toString()));
         assertEquals("trend.html", HyboxChatFormatter.outputPath(directory.resolve("trend.html"), true));
@@ -128,13 +128,30 @@ class HyboxChatFormatterTest {
     }
 
     @Test
+    void captureResultAndStatusSayWhatRetentionRemovedAndWhatIsInUse() {
+        var result = CaptureResult.captured(new IncidentId(INCIDENT), "Removed 15 bundles older than 7 days.");
+        assertEquals("Captured · incident-" + INCIDENT + ".zip. Removed 15 bundles older than 7 days. "
+            + HyboxChatFormatter.SHARING_NOTE, HyboxChatFormatter.captureLine(result, Path.of("incidents"), true));
+        assertEquals("Captured incident " + INCIDENT + ". Removed 15 bundles older than 7 days.",
+            HyboxChatFormatter.captureMessage(result));
+
+        long mib = 1024L * 1024;
+        var policy = new io.github.xytronix.hybox.core.retention.RetentionPolicy(25, 1024 * mib, Duration.ofHours(168));
+        var usage = new io.github.xytronix.hybox.core.retention.RetentionUsage(16, 640 * mib, 15, 8 * 1024 * mib,
+            100 * 1024 * mib, policy);
+        assertEquals("Storage: 16 of 25 bundles · 640 MiB of 1 GiB · kept for 7 days · 8 GiB free on disk. "
+            + "15 bundles older than 7 days are removed after the next capture.", HyboxChatFormatter.storageLine(usage));
+        assertEquals(HyboxChatFormatter.Tone.WARN, HyboxChatFormatter.storageTone(usage));
+    }
+
+    @Test
     void verboseStatusReportsEachFactOnceIncludingErrors(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
         var config = HytaleHyboxConfig.loadOrCreate(dir, System.getLogger("formatter-test"));
         var health = new HyboxRuntime.Health(true, NOW.minusSeconds(5), "snapshot broke", false, "idle", INCIDENT,
             NOW.minusSeconds(60), CaptureResult.failed("disk full"), "disk full", 0, 0, 0, 5, "Staging budget reached",
-            true, new CallbackExecutor.Health(3, 1, 0, 0, 0, 0, "bad callback"));
+            true, new CallbackExecutor.Health(3, 1, 0, 0, 0, 0, "bad callback"), new HytaleMixins.ProblemCounts(0, 0));
 
-        var lines = HyboxChatFormatter.statusDetails(health, config, dir.resolve("hybox.json"), dir, NOW);
+        var lines = HyboxChatFormatter.statusDetails(health, config, dir.resolve("hybox.json"), dir, NOW, false);
 
         var labels = lines.stream().map(line -> line.substring(0, line.indexOf(':'))).toList();
         assertEquals(labels.size(), labels.stream().distinct().count(), () -> "duplicate rows: " + lines);
@@ -144,10 +161,25 @@ class HyboxChatFormatterTest {
         }
     }
 
+    @Test
+    void verboseStatusForPlayersHidesAbsolutePaths(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+        var config = HytaleHyboxConfig.loadOrCreate(dir, System.getLogger("formatter-test"));
+        var health = health(null, null, new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null));
+
+        String player = String.join("\n",
+            HyboxChatFormatter.statusDetails(health, config, dir.resolve("hybox.json"), dir, NOW, true));
+        String console = String.join("\n",
+            HyboxChatFormatter.statusDetails(health, config, dir.resolve("hybox.json"), dir, NOW, false));
+
+        assertFalse(player.contains(dir.toAbsolutePath().toString()), player);
+        assertTrue(player.contains("hybox.json"), player);
+        assertTrue(console.contains(dir.resolve("hybox.json").toString()), console);
+    }
+
     private static HyboxRuntime.Health health(String snapshotError, String storagePressure,
                                                CallbackExecutor.Health callbacks) {
         return new HyboxRuntime.Health(true, NOW.minusSeconds(5), snapshotError, false, "idle", INCIDENT,
             NOW.minusSeconds(60), CaptureResult.captured(new IncidentId(INCIDENT)), null,
-            0, 0, 0, 5, storagePressure, true, callbacks);
+            0, 0, 0, 5, storagePressure, true, callbacks, new HytaleMixins.ProblemCounts(0, 0));
     }
 }

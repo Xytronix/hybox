@@ -38,6 +38,8 @@ Start with `/hybox status --verbose`. `<...>` marks a part that changes. Message
 | `Preserved recording <path> at <path> for recovery or inspection.` | A recording could not be bundled. Hybox keeps it in `temp/failed/` and retries at the next start. |
 | `Rolling snapshot writer disabled to preserve an unrecovered recording at <path>` | `live/rolling.jfr` from an earlier run could not be moved for recovery. Check permissions on `live/`, then restart. |
 | `Failed to write rolling JFR snapshot.` | Check disk space and permissions on `live/`. |
+| `Retention removed <file> (<size>): <rule>.` | Retention deleted that bundle after a capture. The rule is `age`, `count` or `size`, with the limit that applied. A summary line follows. Raise `Retention.MaxAge`, `MaxCount` or `MaxTotalBytes` to keep more. |
+| `Retention removed failed recording <file> (<size>): <rule>.` | An old recording in `temp/failed/` went over `Retention.FailedRecordingMaxCount`, `StagingMaxAge` or `StagingMaxTotalBytes`. |
 | `Retention would remove newest incident; stopping deletions.` | The newest bundle alone is larger than `Retention.MaxTotalBytes`. Raise the limit, or lower `Jfr.MaxSizeBytes`. |
 | `Failed to delete incident <path>` | Check permissions on `incidents/`. |
 | `Skipping duplicate bundle entry <path> from plugin '<owner>'; the first entry is kept.` | Two attachments share a path. Report it to that plugin's author. |

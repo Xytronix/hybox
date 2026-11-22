@@ -2,6 +2,7 @@ package io.github.xytronix.hybox.hytale;
 
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import java.util.Locale;
+import io.github.xytronix.hybox.core.text.Units;
 
 final class HyboxChartRenderer {
     static final int HOVER_CELLS = 20;
@@ -72,14 +73,7 @@ final class HyboxChartRenderer {
     }
 
     static String value(double number, String unit, int precision) {
-        if (unit.equals("bytes")) {
-            if (number < 0) return "n/a";
-            if (number < 1024) return String.format(Locale.ROOT, "%,.0f B", number);
-            String[] units = {"KiB", "MiB", "GiB", "TiB"};
-            int i = -1;
-            do { number /= 1024; i++; } while (number >= 1024 && i < 3);
-            return String.format(Locale.ROOT, "%.1f ", number) + units[i];
-        }
+        if (unit.equals("bytes")) return Units.bytes(Math.round(number));
         if (unit.equals("GiB")) number /= 1073741824.0;
         if (unit.equals("GB")) number /= 1e9;
         return String.format(Locale.ROOT, "%." + precision + "f", number) + suffix(unit);

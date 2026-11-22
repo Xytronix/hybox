@@ -10,6 +10,10 @@ import java.util.Locale;
 import io.github.xytronix.hybox.core.capture.CaptureResult;
 import io.github.xytronix.hybox.core.capture.HeapHistogram;
 import io.github.xytronix.hybox.core.config.HyboxConfig;
+import io.github.xytronix.hybox.core.env.PathMasker;
+import io.github.xytronix.hybox.core.retention.RetentionText;
+import io.github.xytronix.hybox.core.retention.RetentionUsage;
+import io.github.xytronix.hybox.core.text.Units;
 import io.github.xytronix.hybox.core.trigger.TriggerPolicy;
 
 final class HyboxChatFormatter {
@@ -82,7 +86,7 @@ final class HyboxChatFormatter {
             + (health.captureError() == null ? "" : " · error: " + value(health.captureError())));
         lines.add("Last success: " + value(health.lastSuccess()));
         lines.add("Admission: busy=" + health.busy() + ", dropped=" + health.dropped() + ", rejected=" + health.rejected());
-        lines.add("Storage: " + (!health.storageChecked() ? "not checked yet"
+        lines.add("Recording storage: " + (!health.storageChecked() ? "not checked yet"
             : health.storagePressure() == null ? "healthy" : "under pressure · " + value(health.storagePressure())));
         var callbacks = health.callbacks();
         lines.add("Callbacks: calls=" + callbacks.calls() + ", failures=" + callbacks.failures()
@@ -92,15 +96,13 @@ final class HyboxChatFormatter {
     }
 
     static List<String> statusDetails(HyboxRuntime.Health health, HyboxConfig config, Path configPath,
-                                     Path incidentDir, Instant now) {
+                                     Path incidentDir, Instant now, boolean player) {
         List<String> lines = new ArrayList<>();
         addHealthDetails(lines, health, now);
-        lines.add("Config: " + configPath);
-        lines.add("Incidents: " + incidentDir);
+        lines.add("Config: " + shownPath(configPath, player));
+        lines.add("Incidents: " + shownPath(incidentDir, player));
         if (health.lastOutcome() != null) lines.add("Last outcome: " + captureMessage(health.lastOutcome()));
-        var retention = config.capturePolicy().retention();
-        lines.add("Retention: maxCount=" + retention.maxCount() + ", maxTotalBytes=" + retention.maxTotalBytes()
-            + ", maxAge=" + value(retention.maxAge()));
+        lines.add("Retention: " + RetentionText.limits(config.capturePolicy().retention()) + ".");
         var triggers = config.triggerPolicy();
         lines.add("Trigger timing: cooldown=" + triggers.cooldown() + ", debounce=" + triggers.debounce()
             + ", stallDegradedMs=" + triggers.stallDegradedMs() + ", stallCriticalMs=" + triggers.stallCriticalMs());
@@ -118,7 +120,8 @@ final class HyboxChatFormatter {
 
     static String captureMessage(CaptureResult result) {
         return switch (result.status()) {
-            case CAPTURED -> "Captured incident " + result.incidentId().value();
+            case CAPTURED -> "Captured incident " + result.incidentId().value()
+                + (result.retention() == null ? "" : ". " + result.retention());
             case DISABLED -> "Capture disabled by configuration.";
             case COOLDOWN -> "Capture skipped: cooldown active.";
             case DEBOUNCE -> "Capture skipped: duplicate trigger (debounce).";
@@ -130,15 +133,33 @@ final class HyboxChatFormatter {
         };
     }
 
+    static final String SHARING_NOTE = "Player names, paths and IP addresses are hidden. "
+        + "Check world names and mod data before you share it.";
+
     static String captureLine(CaptureResult result, Path incidentDir, boolean player) {
         if (!result.captured()) return result.status() == CaptureResult.Status.FAILED
             ? "Capture failed; use /hybox status --verbose for details." : captureMessage(result);
         Path bundle = incidentDir.resolve("incident-" + result.incidentId().value() + ".zip");
-        return "Captured · " + outputPath(bundle, player);
+        return "Captured · " + outputPath(bundle, player) + "."
+            + (result.retention() == null ? "" : " " + result.retention()) + " " + SHARING_NOTE;
+    }
+
+    static String storageLine(RetentionUsage usage) {
+        String expired = RetentionText.expired(usage);
+        return "Storage: " + RetentionText.usage(usage) + (usage.lowDisk() ? " · low disk space" : "")
+            + (expired == null ? "" : ". " + expired);
+    }
+
+    static Tone storageTone(RetentionUsage usage) {
+        return usage.lowDisk() || usage.expired() > 0 || usage.nearSizeLimit() ? Tone.WARN : Tone.OK;
     }
 
     static String outputPath(Path path, boolean player) {
         return (player ? path.getFileName() : path).toString();
+    }
+
+    private static String shownPath(Path path, boolean player) {
+        return player ? PathMasker.local().apply(path.toAbsolutePath().toString()) : path.toString();
     }
 
     static List<Trigger> triggers(TriggerPolicy policy, ArmedTriggers armed) {
@@ -186,24 +207,12 @@ final class HyboxChatFormatter {
     }
 
     static String histogramLine(HeapHistogram.Entry entry, long shareBase) {
-        return entry.className() + " · " + String.format(Locale.US, "%,d", entry.instances()) + " objects · "
-            + bytes(entry.bytes()) + " · " + heapShare(entry, shareBase);
+        return entry.className() + " · " + Units.number(entry.instances()) + " objects · "
+            + Units.bytes(entry.bytes()) + " · " + heapShare(entry, shareBase);
     }
 
     static String heapShare(HeapHistogram.Entry entry, long shareBase) {
-        return String.format(Locale.US, "%.1f%%", 100.0 * entry.bytes() / Math.max(1, shareBase));
-    }
-
-    static String bytes(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        String[] units = {"KiB", "MiB", "GiB", "TiB"};
-        double value = bytes;
-        int unit = -1;
-        do {
-            value /= 1024.0;
-            unit++;
-        } while (value >= 1024 && unit < units.length - 1);
-        return String.format(Locale.US, "%.1f %s", value, units[unit]);
+        return Units.percent(entry.bytes(), Math.max(1, shareBase));
     }
 
     static String age(Instant at, Instant now) {

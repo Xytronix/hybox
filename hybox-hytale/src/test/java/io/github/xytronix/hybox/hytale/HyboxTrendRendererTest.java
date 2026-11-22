@@ -70,7 +70,7 @@ class HyboxTrendRendererTest {
         assertFalse(bool(denied, "#SettingsButton.Visible"));
         assertTrue(bool(denied, "#BackButton.Disabled"));
         var empty = render(HyboxTrendModel.from(true, 30, NOW, MetricsLog.Trend.EMPTY, new long[0]), READY);
-        assertEquals("No health metrics recorded in the last 30 day(s).", text(empty, "#EmptyState.Text"));
+        assertEquals("No health metrics recorded in the last 30 days.", text(empty, "#EmptyState.Text"));
         assertFalse(bool(empty, "#SettingsButton.Visible"));
         assertFalse(Arrays.stream(empty.getCommands()).anyMatch(c -> "#Charts".equals(c.selector) && c.type == CustomUICommandType.Append));
     }

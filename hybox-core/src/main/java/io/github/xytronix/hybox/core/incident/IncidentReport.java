@@ -22,10 +22,6 @@ public record IncidentReport(
         diagnostics = diagnostics == null ? List.of() : List.copyOf(diagnostics);
     }
 
-    public IncidentReport(IncidentMetadata meta, Map<String, String> context, HealthSnapshot snapshot) {
-        this(meta, context, snapshot, List.of());
-    }
-
     public IncidentReport(IncidentMetadata meta, Map<String, String> context) {
         this(meta, context, null, List.of());
     }

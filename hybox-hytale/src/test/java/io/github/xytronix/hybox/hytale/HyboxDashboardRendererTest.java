@@ -254,17 +254,18 @@ class HyboxDashboardRendererTest {
 
     @Test
     void saveNowShowsSavingUntilTheCaptureStepsTakeOver() {
-        var waiting = DashboardModel.from(health(false), NOW, null, List.of(), "", List.of(), "", "", true,
+        var waiting = DashboardModel.from(health(false), DashboardModelTest.STORAGE, NOW, null, List.of(), "", List.of(), "", "", true,
             "", false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         assertTrue(waiting.profileSaving());
         var commands = new UICommandBuilder();
         HyboxDashboardRenderer.render(waiting, "overview", commands, new UIEventBuilder());
         assertTrue(bool(commands, "#ProfileSaving.Visible"));
         assertFalse(bool(commands, "#NothingRunning.Visible"));
-        var capturing = DashboardModel.from(health(true), NOW, null, List.of(), "", List.of(), "", "", true,
+        var capturing = DashboardModel.from(health(true), DashboardModelTest.STORAGE, NOW, null, List.of(), "", List.of(), "", "", true,
             "", false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         assertFalse(capturing.profileSaving(), "Capture steps replace the saving card once the bundle is being written");
-        var stillProfiling = DashboardModel.from(health(false), NOW, new DashboardModel.Profile(NOW, Duration.ofMinutes(5), NOW, null),
+        var stillProfiling = DashboardModel.from(health(false), DashboardModelTest.STORAGE, NOW,
+            new DashboardModel.Profile(NOW, Duration.ofMinutes(5), NOW, null),
             List.of(), "", List.of(), "", "", true, "", false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         assertFalse(stillProfiling.profileSaving());
     }
@@ -333,7 +334,7 @@ class HyboxDashboardRendererTest {
                 && "Pages/HyboxIncidentRow.ui".equals(command.text)).count());
         assertTrue(bool(commands, "#HeapRows[0] #Share.Visible"));
         assertEquals(0.6, org.bson.BsonDocument.parse(command(commands, "#HeapRows[0] #Share.Value").data).getNumber("0").doubleValue(), 1e-6);
-        assertTrue(string(commands, "#HeapRows[0] #Value.Text").endsWith("60.0% of heap"));
+        assertTrue(string(commands, "#HeapRows[0] #Value.Text").endsWith("60.0% of objects found"));
         assertEquals("Walk again", string(commands, "#HeapWalkButton.Text"));
         assertTrue(string(commands, "#HeapSummary.Text").startsWith("Taken at 12:00:00 UTC"));
         for (var command : commands.getCommands()) {
@@ -358,7 +359,7 @@ class HyboxDashboardRendererTest {
 
     private static HyboxRuntime.Health health(boolean capturing) {
         return new HyboxRuntime.Health(true, NOW, null, capturing, capturing ? "collecting" : "idle", null, null, null, null,
-            0, 0, 0, 0, null, true, new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null));
+            0, 0, 0, 0, null, true, new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null), new HytaleMixins.ProblemCounts(0, 0));
     }
 
     private static boolean bool(UICommandBuilder commands, String selector) {

@@ -47,7 +47,7 @@ class BundleReportTest {
             assertTrue(html.contains("2026-01-11T02:00:00Z"));
 
             assertTrue(html.contains("Quote &quot;here&quot;"));
-            assertTrue(html.contains("C:\\temp\\file<br>Line two"));
+            assertTrue(html.contains("temp\\file<br>Line two"));
 
             assertFalse(html.contains("<script src="));
             assertFalse(html.contains("<link"));
@@ -71,7 +71,7 @@ class BundleReportTest {
             assertTrue(markup.contains("JFR recording unavailable: "));
             assertTrue(markup.contains("empty, unreadable, or contains no usable events"));
             assertTrue(markup.contains("Quote &quot;here&quot;"));
-            assertTrue(markup.contains("C:\\temp\\file<br>Line two"));
+            assertTrue(markup.contains("temp\\file<br>Line two"));
             assertTrue(markup.contains("world-one"));
             assertTrue(markup.contains("20260111-020000.000Z-abcdef"));
         }
@@ -146,9 +146,9 @@ class BundleReportTest {
             new IncidentId("20260111-020000.000Z-abcdef"),
             clock.instant(),
             Severity.DEGRADED,
-            "Trigger: \"quoted\" and path C:\\temp\\file",
+            "Trigger: \"quoted\" and path temp\\file",
             "world-one",
-            "Quote \"here\" and backslash C:\\temp\\file\nLine two"
+            "Quote \"here\" and backslash temp\\file\nLine two"
         );
         return new IncidentReport(meta);
     }
