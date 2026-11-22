@@ -112,7 +112,7 @@ public final class JfrController implements AutoCloseable {
             created.setMaxSize(Math.max(0L, maxSizeBytes));
             if (maxAge.isZero() && maxSizeBytes <= 0L) {
                 logger.log(System.Logger.Level.WARNING,
-                    "JFR recording has no age or size cap (both unlimited); the on-disk recording can grow until it "
+                    "JFR recording has no age or size cap (both unlimited). The recording on disk can grow until it "
                     + "fills the disk. Set Jfr.MaxAge or Jfr.MaxSizeBytes to a positive value to bound it.");
             }
             enableMarkerEvent(created);

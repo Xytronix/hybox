@@ -66,6 +66,10 @@ final class HytaleBundleExtrasProvider implements BundleExtrasProvider {
         extras.add(new BundleAttachment("extras/heartbeats.txt",
             buildHeartbeatsText().getBytes(StandardCharsets.UTF_8)));
         extras.addAll(threadDumpAttachments(spacedDumps.get(), liveDumpAllowed.getAsBoolean()));
+        String mixins = HytaleMixins.methodMapText();
+        if (mixins != null) {
+            extras.add(new BundleAttachment("extras/mixins.txt", mixins.getBytes(StandardCharsets.UTF_8)));
+        }
 
         if (includeServerLog.getAsBoolean() && logTailLines.getAsInt() > 0) {
             String logTail = nameMasker.maskText(buildServerLogTail(report));

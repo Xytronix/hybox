@@ -1,11 +1,13 @@
+$H = "HyboxTones.ui";
+
 Group {
   LayoutMode: Left;
   Anchor: (Height: 39, Bottom: 4);
   Padding: (Horizontal: 12, Vertical: 6);
-  Background: #7a9cc6(0.06);
+  Background: $H.@Panel;
   Label #Trigger {
     Anchor: (Width: 190);
-    Style: (FontSize: 13, TextColor: #d3e3ed, VerticalAlignment: Center);
+    Style: (FontSize: 13, TextColor: $H.@Text, VerticalAlignment: Center);
   }
   Group {
     LayoutMode: Left;
@@ -13,12 +15,12 @@ Group {
     Group #StatePill {
       LayoutMode: CenterMiddle;
       Anchor: (Width: 94, Height: 24, Top: 1);
-      Background: #7a9cc6(0.16);
-      Label #Armed { Style: (FontSize: 10, RenderBold: true, TextColor: #80c991); }
+      Background: $H.@NeutralPill;
+      Label #Armed { Style: (FontSize: 10, RenderBold: true, TextColor: $H.@Good); }
     }
   }
   Label #Threshold {
     FlexWeight: 1;
-    Style: (FontSize: 12, TextColor: #b7cedd, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 2);
+    Style: (FontSize: 12, TextColor: $H.@Text2, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 2);
   }
 }

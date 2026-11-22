@@ -91,8 +91,7 @@ public final class DiscordWebhookNotifier implements IncidentNotifier {
 
     private String buildPayload(IncidentReport report) throws IOException {
         IncidentMetadata meta = report.meta();
-        String scope = meta.world() == null ? "unknown" : meta.world();
-        String content = "[" + meta.severity().name() + "] " + meta.headline() + " (scope: " + scope + ")";
+        String content = meta.severity().name() + ": " + meta.headline();
 
         StringWriter writer = new StringWriter();
         JsonWriter json = new JsonWriter(writer);

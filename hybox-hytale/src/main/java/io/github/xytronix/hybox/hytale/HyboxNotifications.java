@@ -19,7 +19,7 @@ final class HyboxNotifications {
 
     static void completed(PlayerRef requester, CaptureResult result, boolean profile) {
         if (requester == null) return;
-        Message message = Message.raw((profile ? "Hybox profile · " : "Hybox · ")
+        Message message = Message.raw((profile ? "Hybox profile: " : "Hybox: ")
             + HyboxChatFormatter.captureMessage(result));
         NotificationUtil.sendNotification(requester.getPacketHandler(), message, style(result));
     }

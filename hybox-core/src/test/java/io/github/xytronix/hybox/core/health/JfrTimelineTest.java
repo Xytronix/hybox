@@ -7,7 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import jdk.jfr.Category;
+import jdk.jfr.Event;
+import jdk.jfr.Name;
 import jdk.jfr.Recording;
+import jdk.jfr.StackTrace;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import io.github.xytronix.hybox.core.jfr.HyboxConnectionEvent;
@@ -74,6 +80,92 @@ class JfrTimelineTest {
         assertNull(timeline.heapCommittedSeries());
         assertTrue(timeline.swapTotal() <= 0);
         assertTrue(timeline.netOthers().isEmpty());
+    }
+
+    @Test
+    void playerTotalsDoNotCountAWorldAfterItStopsReporting(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("recording.jfr");
+        try (Recording recording = new Recording()) {
+            recording.enable(HyboxWorldTickEvent.class).withoutStackTrace();
+            recording.start();
+            for (int i = 0; i < 12; i++) {
+                boolean inInstance = i >= 4 && i < 8;
+                worldTick("default", inInstance ? 0 : 1, 100);
+                if (inInstance) {
+                    worldTick("instance-forgotten-temple", 1, 40);
+                }
+                Thread.sleep(300);
+            }
+            recording.dump(target);
+        }
+
+        JfrTimeline timeline = JfrTimeline.parse(target);
+
+        assertNotNull(timeline);
+        for (double players : timeline.playersSeries()) {
+            assertEquals(1.0, players, 0.001);
+        }
+        double[] entities = timeline.entitiesSeries();
+        assertEquals(100.0, entities[0], 0.001);
+        assertEquals(100.0, entities[entities.length - 1], 0.001);
+        assertEquals(140.0, java.util.Arrays.stream(entities).max().orElseThrow(), 0.001);
+    }
+
+    @Test
+    void playerTotalsUseTheUniverseCountDuringAWorldTransfer(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("recording.jfr");
+        try (Recording recording = new Recording()) {
+            recording.enable(HyboxWorldTickEvent.class).withoutStackTrace();
+            recording.start();
+            for (int i = 0; i < 12; i++) {
+                boolean inTransfer = i >= 4 && i < 8;
+                worldTick("default", inTransfer ? 1 : 2, 100, 2);
+                worldTick("instance-forgotten-temple", 0, 40, 2);
+                Thread.sleep(300);
+            }
+            recording.dump(target);
+        }
+
+        JfrTimeline timeline = JfrTimeline.parse(target);
+
+        assertNotNull(timeline);
+        for (double players : timeline.playersSeries()) {
+            assertEquals(2.0, players, 0.001);
+        }
+    }
+
+    @Test
+    void slowIoLimitIsTheLowestFileThresholdInTheRecording(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("recording.jfr");
+        try (Recording recording = new Recording()) {
+            recording.enable(HyboxWorldTickEvent.class).withoutStackTrace();
+            recording.enable("jdk.ActiveSetting");
+            recording.enable("jdk.FileRead").withThreshold(java.time.Duration.ofMillis(10));
+            recording.enable("jdk.FileWrite").withThreshold(java.time.Duration.ofMillis(20));
+            recording.start();
+            for (int i = 0; i < 3; i++) {
+                worldTick("default", 1, 100);
+                Thread.sleep(100);
+            }
+            recording.dump(target);
+        }
+
+        assertEquals(10, JfrTimeline.parse(target).slowIoThresholdMs());
+    }
+
+    private static void worldTick(String world, int players, int entities) {
+        worldTick(world, players, entities, -1);
+    }
+
+    private static void worldTick(String world, int players, int entities, int onlinePlayers) {
+        HyboxWorldTickEvent event = new HyboxWorldTickEvent();
+        event.world = world;
+        event.tps = 30;
+        event.mspt = 5;
+        event.players = players;
+        event.onlinePlayers = onlinePlayers;
+        event.entities = entities;
+        event.commit();
     }
 
     @Test
@@ -242,6 +334,141 @@ class JfrTimelineTest {
         assertNull(never.series());
         assertEquals(0.0, never.total(), 0.001);
         assertNull(metric(timeline, "radius").uncharted());
+    }
+
+    @Name("testmod.Metric")
+    @Category({"Mods", "TestMod"})
+    @StackTrace(false)
+    static final class ModMetric extends Event {
+        String name;
+        String kind;
+        double value;
+    }
+
+    @Name("testmod.Metric")
+    @Category({"Mods", "TestMod"})
+    @StackTrace(false)
+    static final class ModMetricOtherLoader extends Event {
+        String name;
+        String kind;
+        double value;
+    }
+
+    @Name("testmod.Action")
+    @Category({"Mods", "TestMod"})
+    @StackTrace(false)
+    static final class ModAction extends Event {
+        String category;
+        String message;
+    }
+
+    @Name("testmod.Setting")
+    @Category({"Mods", "TestMod"})
+    @StackTrace(false)
+    static final class ModSetting extends Event {
+        String name;
+        String value;
+    }
+
+    @Name("other.Metric")
+    @Category({"Tools", "TestMod"})
+    @StackTrace(false)
+    static final class OtherCategoryMetric extends Event {
+        String name;
+        String kind;
+        double value;
+    }
+
+    @Name("io.github.xytronix.hybox.TestModMetric")
+    @Category({"Mods", "Hybox"})
+    @StackTrace(false)
+    static final class HyboxNamedMetric extends Event {
+        String name;
+        String kind;
+        double value;
+    }
+
+    @Test
+    void readsModEventsByCategoryAndFieldNames(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("recording.jfr");
+        try (Recording recording = new Recording()) {
+            recording.start();
+            ModMetric froze = new ModMetric();
+            froze.name = "froze";
+            froze.kind = "counter";
+            froze.value = 4;
+            froze.commit();
+            ModMetric radius = new ModMetric();
+            radius.name = "radius";
+            radius.kind = "gauge";
+            radius.value = 8;
+            radius.commit();
+            modSetting("Version", "1.0");
+            modSetting("Mode", "fast");
+            ModAction action = new ModAction();
+            action.category = "Watchdog";
+            action.message = "restarted world 'default'";
+            action.commit();
+            OtherCategoryMetric other = new OtherCategoryMetric();
+            other.name = "ignored";
+            other.kind = "gauge";
+            other.value = 1;
+            other.commit();
+            HyboxNamedMetric own = new HyboxNamedMetric();
+            own.name = "ignored";
+            own.kind = "gauge";
+            own.value = 1;
+            own.commit();
+            Thread.sleep(120);
+            ModMetricOtherLoader later = new ModMetricOtherLoader();
+            later.name = "froze";
+            later.kind = "counter";
+            later.value = 6;
+            later.commit();
+            ModMetric lower = new ModMetric();
+            lower.name = "radius";
+            lower.kind = "gauge";
+            lower.value = 5;
+            lower.commit();
+            modSetting("Mode", "slow");
+            recording.dump(target);
+        }
+
+        JfrTimeline timeline = JfrTimeline.parse(target);
+
+        assertNotNull(timeline);
+        assertEquals(List.of("TestMod/froze", "TestMod/radius"),
+            timeline.pluginMetrics().stream().map(JfrTimeline.PluginMetric::name).toList());
+        JfrTimeline.PluginMetric counter = metric(timeline, "TestMod/froze");
+        assertEquals("count", counter.kind());
+        assertEquals("TestMod", counter.mod());
+        assertEquals(2, counter.events());
+        assertEquals(10.0, counter.total(), 0.001);
+        assertTrue(Double.isNaN(counter.cumulative()));
+        assertNotNull(counter.series());
+        JfrTimeline.PluginMetric gauge = metric(timeline, "TestMod/radius");
+        assertEquals("gauge", gauge.kind());
+        assertEquals(5.0, gauge.total(), 0.001);
+
+        assertEquals(1, timeline.modActions().size());
+        JfrTimeline.ModAction recorded = timeline.modActions().getFirst();
+        assertEquals("TestMod", recorded.mod());
+        assertEquals("Watchdog", recorded.category());
+        assertEquals("restarted world 'default'", recorded.message());
+
+        assertEquals(1, timeline.modSettings().size());
+        JfrTimeline.ModSettings settings = timeline.modSettings().getFirst();
+        assertEquals("TestMod", settings.mod());
+        assertEquals(Map.of("Version", "1.0", "Mode", "slow"), settings.values());
+        assertEquals(List.of("Version", "Mode"), List.copyOf(settings.values().keySet()));
+        assertTrue(timeline.pluginEvents().isEmpty());
+    }
+
+    private static void modSetting(String name, String value) {
+        ModSetting setting = new ModSetting();
+        setting.name = name;
+        setting.value = value;
+        setting.commit();
     }
 
     @Test
@@ -432,6 +659,11 @@ class JfrTimelineTest {
         assertEquals("main", JfrTimelineParser.normalizeThreadName("main"));
         assertEquals("Worker", JfrTimelineParser.normalizeThreadName("Worker"));
         assertEquals("io-worker", JfrTimelineParser.normalizeThreadName("io-worker-0"));
+        assertEquals("quiche-conn-*",
+            JfrTimelineParser.normalizeThreadName("quiche-conn-0b7fd9ff9045524f5ffa3225b9f7c3c000000000"));
+        assertEquals("cache-deadbeefcafe", JfrTimelineParser.normalizeThreadName("cache-deadbeefcafe"));
+        assertEquals("hash-0123456789a", JfrTimelineParser.normalizeThreadName("hash-0123456789a"));
+        assertNull(JfrTimelineParser.idGroup("Thread-12"));
     }
 
     private static int countNodes(JfrTimeline.Flame node) {

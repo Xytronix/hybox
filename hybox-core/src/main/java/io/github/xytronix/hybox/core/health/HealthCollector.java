@@ -9,20 +9,15 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 public final class HealthCollector {
-    private static final int MAX_RUNNABLE = 1000;
-
     private HealthCollector() {
     }
 
     public static HealthSnapshot.Cpu cpu() {
-        com.sun.management.OperatingSystemMXBean os = sunOsBean();
-        double process = os == null ? -1 : os.getProcessCpuLoad();
-        double system = os == null ? -1 : os.getCpuLoad();
-        int cores = Runtime.getRuntime().availableProcessors();
-        return new HealthSnapshot.Cpu(process, system, cores);
+        return new HealthSnapshot.Cpu(Runtime.getRuntime().availableProcessors());
     }
 
     public static HealthSnapshot.Memory memory() {
@@ -61,21 +56,12 @@ public final class HealthCollector {
     }
 
     public static HealthSnapshot.Threads threads() {
-        Map<Thread, StackTraceElement[]> all = Thread.getAllStackTraces();
+        Set<Thread> all = Thread.getAllStackTraces().keySet();
         Map<String, Integer> byState = new TreeMap<>();
-        List<HealthSnapshot.RunnableThread> runnable = new ArrayList<>();
-        for (Map.Entry<Thread, StackTraceElement[]> entry : all.entrySet()) {
-            Thread t = entry.getKey();
-            String state = t.getState().name();
-            byState.merge(state, 1, Integer::sum);
-            if (t.getState() == Thread.State.RUNNABLE && runnable.size() < MAX_RUNNABLE) {
-                StackTraceElement[] stack = entry.getValue();
-                String top = stack.length > 0 ? stack[0].toString() : "<no frame>";
-                runnable.add(new HealthSnapshot.RunnableThread(t.getName(), top));
-            }
+        for (Thread thread : all) {
+            byState.merge(thread.getState().name(), 1, Integer::sum);
         }
-        runnable.sort((a, b) -> a.name().compareToIgnoreCase(b.name()));
-        return new HealthSnapshot.Threads(all.size(), new LinkedHashMap<>(byState), runnable, deadlocked());
+        return new HealthSnapshot.Threads(all.size(), new LinkedHashMap<>(byState), deadlocked());
     }
 
     public static List<String> deadlocked() {

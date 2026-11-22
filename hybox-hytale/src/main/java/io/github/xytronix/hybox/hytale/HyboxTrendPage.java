@@ -19,6 +19,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
+import io.github.xytronix.hybox.core.text.Units;
 
 final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageData> {
     private static final System.Logger LOGGER = System.getLogger(HyboxTrendPage.class.getName());
@@ -57,7 +58,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
                 Ref<EntityStore> ref = playerRef.getReference();
                 if (ref != null && ref.isValid() && active(ref, ref.getStore())) sendUpdate(commands, false);
             }
-        }, failure -> LOGGER.log(System.Logger.Level.WARNING, "Chart images unavailable; showing native charts.", failure));
+        }, failure -> LOGGER.log(System.Logger.Level.WARNING, "Chart images failed to render. Charts are shown as bars.", failure));
     }
 
     static CompletableFuture<Void> open(CommandContext context, HyboxRuntime runtime, int days, AbstractCommand rootCommand) {
@@ -115,7 +116,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
             }
         }, () -> world.execute(() -> {
             if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN,
-                "Hybox worker is busy or stopping; try /hybox trend again."));
+                "Hybox is busy. Try again in a moment."));
             result.complete(null);
         }));
         return result;
@@ -190,7 +191,7 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
             } catch (RuntimeException failure) {
                 loadFailed(ref, store, expected, "Unable to load trends: " + failure.getMessage());
             }
-        }, () -> loadFailed(ref, store, expected, "Hybox worker is busy or stopping; try /hybox trend again."));
+        }, () -> loadFailed(ref, store, expected, "Hybox is busy. Try again in a moment."));
     }
 
     private void loadFailed(Ref<EntityStore> ref, Store<EntityStore> store, int expected, String message) {
@@ -215,16 +216,16 @@ final class HyboxTrendPage extends InteractiveCustomUIPage<HyboxTrendPage.PageDa
                     message = "Trends require permission to use /hybox trend.";
                 } else {
                     Path out = runtime.generateTrendReport(reportDays);
-                    message = out != null ? "Trend (" + reportDays + "d) · " + HyboxChatFormatter.outputPath(out, true)
-                        : !runtime.config().metricsEnabled() ? "Metrics disabled; set Metrics.Enabled=true to record trends."
-                        : "No health metrics recorded in the last " + reportDays + " day(s).";
+                    message = out != null ? "Trend report for " + Units.count(reportDays, "day") + " saved: " + HyboxChatFormatter.outputPath(out, true)
+                        : !runtime.config().metricsEnabled() ? "Trends are off. Turn on Metrics history in /hybox settings."
+                        : "No health metrics recorded in the last " + Units.count(reportDays, "day") + ".";
                 }
             } catch (IOException | RuntimeException failure) {
                 LOGGER.log(System.Logger.Level.WARNING, "Trend report failed.", failure);
-                message = "Trend report failed; see server log.";
+                message = "Trend report failed. The server log has the error.";
             }
             saved(ref, store, message);
-        }, () -> saved(ref, store, "Hybox worker is busy or stopping; try /hybox trend again."));
+        }, () -> saved(ref, store, "Hybox is busy. Try again in a moment."));
     }
 
     private void saved(Ref<EntityStore> ref, Store<EntityStore> store, String message) {
