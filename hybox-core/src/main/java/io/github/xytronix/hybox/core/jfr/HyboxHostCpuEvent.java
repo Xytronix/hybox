@@ -7,7 +7,7 @@ import jdk.jfr.Name;
 import jdk.jfr.StackTrace;
 
 @Name(HyboxHostCpuEvent.NAME)
-@Label("Host CPU Sample")
+@Label("Machine CPU Sample")
 @Category("Hybox")
 @StackTrace(false)
 public final class HyboxHostCpuEvent extends Event {

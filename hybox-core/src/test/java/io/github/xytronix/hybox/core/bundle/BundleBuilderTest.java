@@ -1,6 +1,7 @@
 package io.github.xytronix.hybox.core.bundle;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -15,7 +16,12 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import jdk.jfr.Recording;
+import jdk.jfr.consumer.RecordedEvent;
+import jdk.jfr.consumer.RecordingFile;
 import org.junit.jupiter.api.Test;
+import io.github.xytronix.hybox.core.env.PathMasker;
+import io.github.xytronix.hybox.core.jfr.HyboxPluginEvent;
 import org.junit.jupiter.api.io.TempDir;
 import io.github.xytronix.hybox.core.incident.IncidentId;
 import io.github.xytronix.hybox.core.incident.IncidentIds;
@@ -45,7 +51,7 @@ class BundleBuilderTest {
             ZipEntry osEntry = zip.getEntry("env/os.txt");
 
             assertNotNull(incidentEntry);
-            assertNotNull(recordingEntry);
+            assertNull(recordingEntry);
             assertNotNull(jvmEntry);
             assertNotNull(osEntry);
 
@@ -59,17 +65,67 @@ class BundleBuilderTest {
             assertTrue(json.contains("\\t"));
             assertTrue(json.contains("\\r"));
 
-            byte[] zippedRecording = zip.getInputStream(recordingEntry).readAllBytes();
-            assertArrayEquals(recordingBytes, zippedRecording);
-
             String jvmInfo = new String(zip.getInputStream(jvmEntry).readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(jvmInfo.contains("java.runtime.version="));
             assertTrue(jvmInfo.contains("java.vm.name="));
+            assertFalse(jvmInfo.contains(System.getProperty("java.home")), jvmInfo);
 
             String osInfo = new String(zip.getInputStream(osEntry).readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(osInfo.contains("os.name="));
             assertTrue(osInfo.contains("os.arch="));
         }
+    }
+
+    @Test
+    void sharedRecordingMasksPrivateText(@TempDir Path tempDir) throws Exception {
+        Path recording = tempDir.resolve("recording.jfr");
+        try (Recording jfr = new Recording()) {
+            jfr.enable(HyboxPluginEvent.class).withoutStackTrace();
+            jfr.enable("jdk.InitialEnvironmentVariable");
+            jfr.enable("jdk.InitialSystemProperty");
+            jfr.start();
+            plugin("/home/fakeuser/server/universe/worlds/default");
+            plugin("FakePlayer joined");
+            plugin("kept event");
+            Thread listener = new Thread(() -> plugin("listener event"), "quiche-listener-203.0.113.9/203.0.113.9:5520");
+            listener.start();
+            listener.join();
+            jfr.dump(recording);
+        }
+
+        Clock clock = Clock.fixed(Instant.parse("2024-05-06T07:08:09.010Z"), ZoneOffset.UTC);
+        Path outputZip = tempDir.resolve("private.zip");
+        new BundleBuilder(clock, System.getLogger("bundle-test"), null,
+            text -> text.replace("FakePlayer", "player-1"), new PathMasker("/home/fakeuser", "/srv/fake"))
+            .build(simpleReport(clock), recording, outputZip, List.of(), java.util.Set.of("jfr"));
+
+        Path shared = tempDir.resolve("shared.jfr");
+        try (ZipFile zip = new ZipFile(outputZip.toFile())) {
+            Files.write(shared, zip.getInputStream(zip.getEntry("recording.jfr")).readAllBytes());
+        }
+        String raw = new String(Files.readAllBytes(shared), StandardCharsets.ISO_8859_1);
+        for (String secret : List.of("fakeuser", "FakePlayer", "203.0.113.9", System.getProperty("user.home"))) {
+            assertFalse(raw.contains(secret), secret);
+        }
+        List<String> messages = new java.util.ArrayList<>();
+        List<String> threads = new java.util.ArrayList<>();
+        for (RecordedEvent event : RecordingFile.readAllEvents(shared)) {
+            assertFalse(event.getEventType().getName().startsWith("jdk.Initial"), event.getEventType().getName());
+            if (event.hasField("message")) {
+                messages.add(event.getString("message"));
+                threads.add(event.getThread().getJavaName());
+            }
+        }
+        assertEquals(List.of("********** joined", "**************/server/universe/worlds/default", "kept event",
+            "listener event"), messages.stream().sorted().toList());
+        assertTrue(threads.contains("quiche-listener-" + "*".repeat(28)), threads.toString());
+    }
+
+    private static void plugin(String message) {
+        HyboxPluginEvent event = new HyboxPluginEvent();
+        event.category = "test";
+        event.message = message;
+        event.commit();
     }
 
     @Test
@@ -97,7 +153,10 @@ class BundleBuilderTest {
     @Test
     void artifacts_jfrOnlyExcludesOthers(@TempDir Path tempDir) throws Exception {
         Path recording = tempDir.resolve("recording.jfr");
-        Files.write(recording, new byte[] {1, 2, 3});
+        try (Recording jfr = new Recording()) {
+            jfr.start();
+            jfr.dump(recording);
+        }
 
         Clock clock = Clock.fixed(Instant.parse("2024-05-06T07:08:09.010Z"), ZoneOffset.UTC);
         IncidentReport report = simpleReport(clock);

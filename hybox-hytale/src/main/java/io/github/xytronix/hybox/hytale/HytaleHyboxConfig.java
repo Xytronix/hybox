@@ -117,7 +117,7 @@ final class HytaleHyboxConfig {
             raw = configFile.load().join();
         } catch (Exception e) {
             throw new IllegalStateException("Failed to load Hybox config from " + configPath
-                + "; the existing configuration was not replaced.", e);
+                + ". The existing configuration was not replaced.", e);
         }
         HyboxConfig loaded = Objects.requireNonNull(raw, "Loaded configuration").toCoreConfig(logger);
         if (!existed) {
@@ -409,7 +409,7 @@ final class HytaleHyboxConfig {
             Objects.requireNonNull(configFile.load().join(), "Loaded configuration");
         } catch (RuntimeException failure) {
             throw new IllegalStateException("Failed to load Hybox config from " + path(dataDir)
-                + "; the existing configuration was not replaced.", failure);
+                + ". The existing configuration was not replaced.", failure);
         }
         return configFile;
     }
@@ -581,7 +581,7 @@ final class HytaleHyboxConfig {
             if (stallCriticalMs < stallDegradedMs) {
                 logger.log(
                     System.Logger.Level.WARNING,
-                    String.format("Config Trigger.StallCriticalMs (%d) is < Trigger.StallDegradedMs (%d); clamping.",
+                    String.format("Config Trigger.StallCriticalMs (%d) is < Trigger.StallDegradedMs (%d). Clamping.",
                         stallCriticalMs, stallDegradedMs)
                 );
                 stallCriticalMs = stallDegradedMs;
@@ -601,7 +601,7 @@ final class HytaleHyboxConfig {
             if (tickAvgCriticalMs < tickAvgDegradedMs) {
                 logger.log(
                     System.Logger.Level.WARNING,
-                    String.format("Config Trigger.TickAvgCriticalMs (%d) is < Trigger.TickAvgDegradedMs (%d); clamping.",
+                    String.format("Config Trigger.TickAvgCriticalMs (%d) is < Trigger.TickAvgDegradedMs (%d). Clamping.",
                         tickAvgCriticalMs, tickAvgDegradedMs)
                 );
                 tickAvgCriticalMs = tickAvgDegradedMs;
@@ -664,7 +664,7 @@ final class HytaleHyboxConfig {
             if (maxAge != null && maxAge.isNegative()) {
                 logger.log(
                     System.Logger.Level.WARNING,
-                    String.format("Config Retention.MaxAge is negative; using default %s.", DEFAULT_RETENTION_MAX_AGE)
+                    String.format("Config Retention.MaxAge is negative. Using default %s.", DEFAULT_RETENTION_MAX_AGE)
                 );
                 maxAge = DEFAULT_RETENTION_MAX_AGE;
             }
@@ -744,7 +744,7 @@ final class HytaleHyboxConfig {
                     threadDumpInterval
                 );
             } catch (RuntimeException e) {
-                logger.log(System.Logger.Level.WARNING, "Invalid Hybox config; falling back to defaults.", e);
+                logger.log(System.Logger.Level.WARNING, "Invalid Hybox config. Falling back to defaults.", e);
                 return defaultCoreConfig();
             }
         }
@@ -757,7 +757,7 @@ final class HytaleHyboxConfig {
         ) {
             if (value == null || value.isNegative()) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be >= 0; using default %s.", key, defaultValue));
+                    String.format("Config %s must be >= 0. Using default %s.", key, defaultValue));
                 return defaultValue;
             }
             return value;
@@ -766,7 +766,7 @@ final class HytaleHyboxConfig {
         private static long positiveLong(long value, long defaultValue, String key, System.Logger logger) {
             if (value <= 0L) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be > 0; using default %d.", key, defaultValue));
+                    String.format("Config %s must be > 0. Using default %d.", key, defaultValue));
                 return defaultValue;
             }
             return value;
@@ -805,7 +805,7 @@ final class HytaleHyboxConfig {
                     kinds.add(TriggerKind.valueOf(name.trim().toUpperCase(Locale.ROOT)));
                 } catch (IllegalArgumentException e) {
                     logger.log(System.Logger.Level.WARNING,
-                        String.format("Config %s has unknown trigger kind '%s'; ignoring.", key, name));
+                        String.format("Config %s has unknown trigger kind '%s'. Ignoring it.", key, name));
                 }
             }
             return kinds;
@@ -814,7 +814,7 @@ final class HytaleHyboxConfig {
         private static long nonNegativeLong(long value, long defaultValue, String key, System.Logger logger) {
             if (value < 0L) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be >= 0; using default %d.", key, defaultValue));
+                    String.format("Config %s must be >= 0. Using default %d.", key, defaultValue));
                 return defaultValue;
             }
             return value;
@@ -823,7 +823,7 @@ final class HytaleHyboxConfig {
         private static int percentInt(int value, int defaultValue, String key, System.Logger logger) {
             if (value < 0 || value > 100) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be within 0..100 (0 = disabled); using default %d.",
+                    String.format("Config %s must be within 0..100 (0 = disabled). Using default %d.",
                         key, defaultValue));
                 return defaultValue;
             }
@@ -833,7 +833,7 @@ final class HytaleHyboxConfig {
         private static int nonNegativeInt(int value, int defaultValue, String key, System.Logger logger) {
             if (value < 0) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be >= 0; using default %d.", key, defaultValue));
+                    String.format("Config %s must be >= 0. Using default %d.", key, defaultValue));
                 return defaultValue;
             }
             return value;
@@ -842,7 +842,7 @@ final class HytaleHyboxConfig {
         private static String nonBlankString(String value, String defaultValue, String key, System.Logger logger) {
             if (value == null || value.isBlank()) {
                 logger.log(System.Logger.Level.WARNING,
-                    String.format("Config %s must be non-blank; using default %s.", key, defaultValue));
+                    String.format("Config %s must be non-blank. Using default %s.", key, defaultValue));
                 return defaultValue;
             }
             return value.trim();

@@ -9,12 +9,15 @@ import java.util.zip.Deflater;
 
 final class HyboxChartImage {
     static final int WIDTH = 880, HEIGHT = 96, TOP = 6, BASELINE = 95;
-    private static final int LINE = 0x7a9cc6, INCIDENT = 0xef8181;
-    private static final int[] STATES = {0xacb9ca, 0x80c991, 0x7a9cc6, 0xefbd62, 0xef8181};
-    private static final int[] FLAME = {0x7a9cc6, 0x3686b4, 0xe69a27, 0x777b85};
-    private static final float[] FLAME_ALPHA = {0.6f, 0.8f, 0.8f, 0.8f};
+    static final int LINE = 0xffd21f, INCIDENT = 0xf0626b;
+    static final int[] STATES = {-1, 0x4cc38a, 0xa29d93, 0x6b665e, 0xf0626b};
+    private static final int[] FLAME = {0xbdb8ad, 0xd9c48c, 0xffd21f, 0x8f8a81};
 
     record FlameRect(int left, int top, int width, int height, int kind) {}
+
+    static String hex(int rgb) {
+        return String.format(java.util.Locale.ROOT, "#%06x", rgb);
+    }
 
     private final int width, height;
     private final float[] r, g, b, a;
@@ -48,7 +51,7 @@ final class HyboxChartImage {
             for (int i = from; i < Math.min(n, to); i++) counts[Math.max(0, Math.min(STATES.length - 1, states[i]))]++;
             int state = 0;
             for (int candidate = 1; candidate < counts.length; candidate++) if (counts[candidate] > counts[state]) state = candidate;
-            image.span(x, 0, height, STATES[state], 0.8f);
+            if (STATES[state] >= 0) image.span(x, 0, height, STATES[state], 1f);
         }
         return image.encode();
     }
@@ -58,7 +61,7 @@ final class HyboxChartImage {
         for (FlameRect frame : frames) {
             int kind = Math.max(0, Math.min(FLAME.length - 1, frame.kind()));
             for (int x = Math.max(0, frame.left()); x < Math.min(width, frame.left() + frame.width()); x++) {
-                image.span(x, frame.top(), frame.top() + frame.height(), FLAME[kind], FLAME_ALPHA[kind]);
+                image.span(x, frame.top(), frame.top() + frame.height(), FLAME[kind], 1f);
             }
         }
         return image.encode();
@@ -86,7 +89,7 @@ final class HyboxChartImage {
             double yHigh = base - (base - top) * Math.max(0, Math.min(1, high / scale));
             double yLow = base - (base - top) * Math.max(0, Math.min(1, low / scale));
             double yMid = Double.isNaN(centre) ? (yHigh + yLow) / 2 : base - (base - top) * Math.max(0, Math.min(1, centre / scale));
-            span(x, yMid, base, LINE, 0.16f);
+            span(x, yMid, base, LINE, 0.1f);
             double from = Math.min(yHigh, Double.isNaN(previous) ? yHigh : previous), to = Math.max(yLow, Double.isNaN(previous) ? yLow : previous);
             span(x, from - 0.75, to + 0.75, LINE, 1f);
             previous = yMid;
