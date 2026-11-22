@@ -113,7 +113,7 @@ final class HytaleHealthScheduler {
         try {
             universe = Universe.get();
         } catch (Exception e) {
-            logger.log(System.Logger.Level.WARNING, "Universe.get() failed; heartbeats disabled until restart.", e);
+            logger.log(System.Logger.Level.WARNING, "Universe.get() failed. Heartbeats are off until restart.", e);
             return;
         }
 

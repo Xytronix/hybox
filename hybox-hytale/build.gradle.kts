@@ -12,6 +12,8 @@ plugins {
 
 val hytaleServerVersion = providers
     .gradleProperty("hytaleServerVersion")
+val hytaleServerRange = providers
+    .gradleProperty("hytaleServerRange")
 
 repositories {
     mavenCentral()
@@ -30,9 +32,9 @@ dependencies {
 
 tasks.named<ProcessResources>("processResources") {
     inputs.property("pluginVersion", rootProject.version.toString())
-    inputs.property("hytaleVersion", hytaleServerVersion)
+    inputs.property("hytaleServerRange", hytaleServerRange)
     filesMatching("manifest.json") {
-        expand(mapOf("version" to rootProject.version.toString(), "hytaleVersion" to hytaleServerVersion.get()))
+        expand(mapOf("version" to rootProject.version.toString(), "hytaleServerRange" to hytaleServerRange.get()))
     }
 }
 

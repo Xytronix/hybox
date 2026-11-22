@@ -4,7 +4,7 @@ Settings live in `mods/Xytronix_Hybox/hybox.json`, written with defaults on firs
 
 Keys marked "restart" take effect at the next server start. All others apply on reload.
 
-The settings page covers the numeric and on/off keys of `Trigger`, `Retention`, `Metrics` and `Jfr`, plus `Capture.Enabled`, with tighter ranges than the file. It cannot set `0` for the `Retention` limits, `Jfr.MaxAge`, `Jfr.MaxSizeBytes` or the percent keys.
+The settings page covers the numeric and on/off keys of `Trigger`, `Retention`, `Metrics` and `Jfr`, plus `Capture.Enabled`. Each number has an allowed range, listed in [Allowed ranges](#allowed-ranges) under the names the page uses. A value above `0` that is outside its range is clamped to the nearest allowed value at start and on reload. Hybox logs one warning per value with the old and new value, and leaves `hybox.json` as it is. `0` keeps its meaning from the tables below, so the page cannot set `0` for the `Retention` limits, `Jfr.MaxAge`, `Jfr.MaxSizeBytes` or the percent keys.
 
 Durations are ISO-8601 strings such as `"PT10S"`, `"PT15M"` or `"PT168H"`. Sizes are bytes. Leave `Version` at `1`.
 
@@ -16,6 +16,41 @@ An invalid value logs a [warning](troubleshooting.md#configuration) and uses the
 | --- | --- |
 | `Capture.Artifacts` gained `metrics`. | None for the old default list of nine names: Hybox reads it as including `metrics`. A list you changed yourself is kept as written, so add `"metrics"` to keep metrics files in bundles. |
 | `Capture.SanitizeLog` was removed. | A leftover key is ignored. The server log is always masked. |
+| Settings now have [allowed ranges](#allowed-ranges). | None. A value outside its range is used as the nearest allowed value, with a warning in the server log. Change it in the file or on the settings page to silence the warning. |
+
+## Allowed ranges
+
+| Settings page name | Key | Range |
+| --- | --- | --- |
+| Heartbeat stall: Degraded, Critical | `Trigger.StallDegradedMs`, `Trigger.StallCriticalMs` | 500 ms to 10 minutes |
+| Slow ticks: Degraded, Critical | `Trigger.TickAvgDegradedMs`, `Trigger.TickAvgCriticalMs` | 10 ms to 10 seconds |
+| Heap pressure: Heap used | `Trigger.HeapPressurePct` | 50% to 100% |
+| Heap pressure: Sustain | `Trigger.HeapPressureSustain` | 0 seconds to 1 hour |
+| GC pressure: GC time | `Trigger.GcPressurePct` | 1% to 90% |
+| GC pressure: Window | `Trigger.GcPressureWindow` | 10 seconds to 1 hour |
+| CPU saturation: CPU used | `Trigger.CpuSaturationPct` | 10% to 100% |
+| CPU saturation: Sustain | `Trigger.CpuSaturationSustain` | 0 seconds to 1 hour |
+| Network saturation: In, Out | `Trigger.NetInMbps`, `Trigger.NetOutMbps` | 0 to 100000 Mbit/s |
+| Network saturation: Sustain | `Trigger.NetSustain` | 0 seconds to 1 hour |
+| Player drop: Player loss | `Trigger.PlayerDropPct` | 10% to 100% |
+| Player drop: Window | `Trigger.PlayerDropWindow` | 10 seconds to 1 hour |
+| Player drop: Min players | `Trigger.PlayerDropMinPlayers` | 0 to 1000 |
+| Log errors: Repeat window | `Trigger.LogErrorDedupeWindow` | 0 seconds to 1 day |
+| Cooldown | `Trigger.Cooldown` | 0 seconds to 1 hour |
+| Debounce | `Trigger.Debounce` | 0 seconds to 1 hour |
+| Capture and storage: Max bundles | `Retention.MaxCount` | 1 to 1000 |
+| Capture and storage: Total | `Retention.MaxTotalBytes` | 64 MiB to 1 TiB |
+| Capture and storage: Age | `Retention.MaxAge` | 1 to 365 days |
+| Metrics history: Keep | `Metrics.RetentionDays` | 1 to 365 days |
+| Incident evidence: Max wait | `Jfr.PostIncidentMaxWait` | 0 seconds to 10 minutes |
+| Incident evidence: Dump count | `Jfr.ThreadDumpCount` | 0 to 20 |
+| Incident evidence: Dump every | `Jfr.ThreadDumpInterval` | 1 second to 2 minutes |
+| Recording: History | `Jfr.MaxAge` | 5 minutes to 1 day |
+| Recording: Size | `Jfr.MaxSizeBytes` | 16 MiB to 8 GiB |
+| Recording: Sample every | `Jfr.SampleInterval` | 5 seconds to 5 minutes |
+| Recording: Snapshot | `Jfr.SnapshotInterval` | 0 minutes to 1 day |
+
+The Recording settings apply after a restart. Once you save one on the settings page, the page shows "Needs a restart" with the setting names until the server restarts.
 
 ## Jfr
 
@@ -57,6 +92,8 @@ An invalid value logs a [warning](troubleshooting.md#configuration) and uses the
 ## Retention
 
 All keys apply on reload. Retention never deletes the newest bundle. For byte and count limits, `0` means no limit. Hitting a staging or repository limit makes Hybox refuse new captures.
+
+Old bundles are deleted only right after a new bundle is saved, never at startup. Each deleted bundle gets a server log line with its file name and the rule that removed it, and the capture message tells the player, for example "Removed 15 bundles older than 7 days". `/hybox status`, the Settings page and the Storage tile show how much is in use next to these limits.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |

@@ -5,7 +5,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.stream.JsonReader;
+import io.github.xytronix.hybox.core.health.FrameLabels;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.StringReader;
@@ -21,15 +23,27 @@ final class IncidentModel {
     private static final Pattern CARD = Pattern.compile("<div class=\"kvcard\"[^>]*><div class=\"kvh\"><b>(.*?)</b></div><div class=\"kv\">(.*?)(?=<div class=\"kvcard\"|$)", Pattern.DOTALL);
     private static final Pattern ENTRY = Pattern.compile("<div class=\"row\"><span class=\"k\">(.*?)</span><span class=\"v\">(.*?)</span></div>", Pattern.DOTALL);
     private static final Pattern PRE = Pattern.compile("<pre\\b[^>]*>(.*?)</pre>", Pattern.DOTALL);
+    private static final Pattern BLOCKED = Pattern.compile("Blocked in <code>(.*?)</code>(, [^<]*)?", Pattern.DOTALL);
+    private static final String WRAPPED = "$mixinextras$wrapped$";
     private final Path bundle;
-    private final JsonObject metadata;
     private final JsonObject data;
+    private final String headline;
 
     IncidentModel(Path bundle, JsonObject metadata, JsonObject data) {
         this.bundle = bundle;
-        this.metadata = metadata;
         this.data = data;
-        if (!has("incident") && metadata.has("meta")) data.add("incident", metadata.get("meta").deepCopy());
+        JsonElement meta = metadata.get("meta");
+        JsonElement stored = object(meta).get("headline");
+        this.headline = stored != null && stored.isJsonPrimitive() ? stored.getAsString().strip() : "";
+        if (!has("incident") && metadata.has("meta")) data.add("incident", meta.deepCopy());
+        for (JsonElement item : array("diag")) {
+            for (JsonElement row : array(object(item).get("entries"))) {
+                JsonArray pair = array(row);
+                if (pair.size() > 1 && text(pair.get(0)).equals("Blocked in") && pair.get(1).isJsonPrimitive()) {
+                    pair.set(1, new JsonPrimitive(frame(pair.get(1).getAsString())));
+                }
+            }
+        }
     }
 
     static IncidentModel load(Path bundleZip) throws IOException {
@@ -54,11 +68,12 @@ final class IncidentModel {
             if (!data.has("diag")) {
                 JsonArray diagnostics = legacyDiagnostics(html);
                 boolean hasCapturedDiagnostics = !diagnostics.isEmpty();
-                var blocked = Pattern.compile("Blocked in <code>(.*?)</code>", Pattern.DOTALL).matcher(html);
+                var blocked = BLOCKED.matcher(html);
                 if (diagnostics.isEmpty() && blocked.find()) {
                     JsonObject stalled = new JsonObject(); stalled.addProperty("title", "Stalled thread");
                     JsonArray entries = new JsonArray(); JsonArray frame = new JsonArray();
-                    frame.add("Blocked in"); frame.add(plain(blocked.group(1))); entries.add(frame);
+                    String label = blocked.group(2) == null ? "" : plain(blocked.group(2)).stripTrailing();
+                    frame.add("Blocked in"); frame.add(plain(blocked.group(1)) + label); entries.add(frame);
                     stalled.add("entries", entries); diagnostics.add(stalled);
                 }
                 for (var entry : java.util.Collections.list(zip.entries())) {
@@ -118,14 +133,24 @@ final class IncidentModel {
         return numeric.appendTail(decoded).toString();
     }
 
+    static String frame(String shown) {
+        if (shown == null || !shown.contains(WRAPPED)) return shown;
+        int note = shown.indexOf(", ");
+        if (note < 0) return FrameLabels.display(shown);
+        String method = shown.substring(0, note);
+        int dot = method.lastIndexOf('.');
+        String stripped = dot <= 0 ? method : method.substring(0, dot + 1) + FrameLabels.originalMethod(method.substring(dot + 1));
+        return stripped + shown.substring(note);
+    }
+
     Path bundle() { return bundle; }
-    JsonObject metadata() { return metadata; }
     JsonElement field(String key) { return data.has(key) ? data.get(key) : JsonNull.INSTANCE; }
     boolean has(String key) { return !field(key).isJsonNull(); }
     JsonObject object(String key) { return object(field(key)); }
     JsonArray array(String key) { return array(field(key)); }
     String text(String key) { return text(field(key)); }
     String id() { return text(object("incident"), "id"); }
+    String headline() { return headline; }
     Set<String> nonNullFields() {
         Set<String> fields = new LinkedHashSet<>();
         data.entrySet().stream().filter(entry -> !entry.getValue().isJsonNull()).forEach(entry -> fields.add(entry.getKey()));

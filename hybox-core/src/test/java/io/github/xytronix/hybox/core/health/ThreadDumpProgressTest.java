@@ -23,7 +23,7 @@ class ThreadDumpProgressTest {
         assertEquals(1, sections.size());
         DiagnosticSection s = sections.get(0);
         assertEquals("Thread progress", s.title());
-        assertTrue(s.entries().get("Verdict").contains("no progress"), s.entries().toString());
+        assertTrue(s.entries().get("Verdict").contains("did not move"), s.entries().toString());
         assertTrue(s.entries().containsKey("worker"), s.entries().toString());
     }
 
@@ -34,7 +34,7 @@ class ThreadDumpProgressTest {
         List<DiagnosticSection> sections = ThreadDumpProgress.appendTo(List.of(), List.of(d1, d2));
 
         assertEquals(1, sections.size());
-        assertTrue(sections.get(0).entries().get("Verdict").contains("advanced"), sections.toString());
+        assertTrue(sections.get(0).entries().get("Verdict").contains("Every thread moved"), sections.toString());
         assertFalse(sections.get(0).entries().containsKey("worker"), sections.toString());
     }
 
@@ -45,7 +45,7 @@ class ThreadDumpProgressTest {
             ThreadDumpProgress.appendTo(List.of(), List.of(dump(body), dump(body)));
 
         assertEquals(1, sections.size());
-        assertTrue(sections.get(0).entries().get("Verdict").contains("advanced"), sections.toString());
+        assertTrue(sections.get(0).entries().get("Verdict").contains("Every thread moved"), sections.toString());
         assertFalse(sections.get(0).entries().containsKey("pool-1"), sections.toString());
     }
 

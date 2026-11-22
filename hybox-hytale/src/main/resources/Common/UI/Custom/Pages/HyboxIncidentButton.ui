@@ -1,15 +1,15 @@
 $C = "../Common.ui";
 $H = "HyboxTones.ui";
 @SelectedStyle = (
-  Default: (Background: #ffffff(0.08), LabelStyle: (FontSize: 12, RenderBold: true, TextColor: #ffffff, HorizontalAlignment: Start, VerticalAlignment: Center)),
-  Hovered: (Background: #ffffff(0.08), LabelStyle: (FontSize: 12, RenderBold: true, TextColor: #ffffff, HorizontalAlignment: Start, VerticalAlignment: Center)),
-  Pressed: (Background: #ffffff(0.06), LabelStyle: (FontSize: 12, RenderBold: true, TextColor: #ffffff, HorizontalAlignment: Start, VerticalAlignment: Center)),
+  Default: (Background: $H.@AccentTint, LabelStyle: (FontSize: 12, RenderBold: true, TextColor: $H.@Accent, HorizontalAlignment: Start, VerticalAlignment: Center)),
+  Hovered: (Background: $H.@AccentTint, LabelStyle: (FontSize: 12, RenderBold: true, TextColor: $H.@Accent, HorizontalAlignment: Start, VerticalAlignment: Center)),
+  Pressed: (Background: $H.@AccentTint, LabelStyle: (FontSize: 12, RenderBold: true, TextColor: $H.@Accent, HorizontalAlignment: Start, VerticalAlignment: Center)),
   Sounds: $C.@ButtonSounds
 );
 @DefaultStyle = (
-  Default: (Background: #ffffff(0.04), LabelStyle: (FontSize: 12, TextColor: #bfcdd5, HorizontalAlignment: Start, VerticalAlignment: Center)),
-  Hovered: (Background: #ffffff(0.08), LabelStyle: (FontSize: 12, TextColor: #ffffff, HorizontalAlignment: Start, VerticalAlignment: Center)),
-  Pressed: (Background: #ffffff(0.06), LabelStyle: (FontSize: 12, TextColor: #ffffff, HorizontalAlignment: Start, VerticalAlignment: Center)),
+  Default: (Background: $H.@Bg2, LabelStyle: (FontSize: 12, TextColor: $H.@Text2, HorizontalAlignment: Start, VerticalAlignment: Center)),
+  Hovered: (Background: $H.@PanelHover, LabelStyle: (FontSize: 12, TextColor: $H.@Text, HorizontalAlignment: Start, VerticalAlignment: Center)),
+  Pressed: (Background: $H.@Panel2, LabelStyle: (FontSize: 12, TextColor: $H.@Text, HorizontalAlignment: Start, VerticalAlignment: Center)),
   Sounds: $C.@ButtonSounds
 );
 $C.@SecondaryTextButton #Button {
