@@ -4,14 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>__TITLE__</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%230b0b0b'/%3E%3Cg fill='%23FFD21F' stroke='%230b0b0b' stroke-width='12' stroke-linejoin='round'%3E%3Cpath d='M136 230 L256 170 L186 136 L66 196 Z'/%3E%3Cpath d='M136 230 L256 170 L256 290 Z' fill='%239A7600'/%3E%3Cpath d='M256 170 L376 230 L256 290 Z' fill='%23C79A00'/%3E%3Cpath d='M256 170 L376 230 L446 196 L326 136 Z'/%3E%3Cpath d='M270 40 L216 142 L254 142 L232 222 L306 108 L266 108 L302 40 Z'/%3E%3Cpath d='M136 230 L256 290 L256 432 L136 372 Z'/%3E%3Cpath d='M256 290 L376 230 L376 372 L256 432 Z'/%3E%3Cpath d='M136 230 L256 290 L200 334 L80 274 Z'/%3E%3Cpath d='M256 290 L376 230 L432 274 L312 334 Z'/%3E%3C/g%3E%3C/svg%3E">
 <style>
   :root{
-    --bg:#121317; --bg2:#16181d; --panel:#1b1e24; --panel2:#21242c; --panelh:#262a33;
-    --border:#2a2e37; --border2:#363c47; --border3:#454c5a;
-    --tx:#d6dae2; --tx2:#aab2bf; --tx3:#9aa6b5; --tx4:#8f9ba8;
-    --good:#5bd68b; --warn:#e6b34a; --bad:#f0626b; --crit:#ff5d6c; --info:#62a8ea;
-    --blue:#62a8ea; --violet:#a98be0; --teal:#46cfc0; --amber:#e6b34a; --pink:#ef7aa5;
-    --accent:#62a8ea;
+    --bg:#0f0f0f; --bg2:#141414; --panel:#191919; --panel2:#1f1f1f; --panelh:#262626; --code:#0b0b0b;
+    --border:#2b2b2b; --border2:#383838; --border3:#474747;
+    --tx:#ece9e2; --tx2:#bdb8ad; --tx3:#a29d93; --tx4:#948f86;
+    --accent:#ffd21f; --accent-h:#ffe066; --on-accent:#0b0b0b;
+    --good:#4cc38a; --warn:#ff8a3d; --bad:#f0626b; --crit:#ff4d5e; --info:#6aa9e9;
+    --violet:#a98be0; --teal:#3fcfbf; --gc:var(--violet); --neutral:#8f8a81;
+    --s1:var(--accent); --s2:#6aa9e9; --s3:var(--violet); --s4:var(--teal); --s5:#e88fd0; --s6:#a3d977; --s7:#d8d3c8;
     --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
     --sans:system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;
     --r:9px;
@@ -25,25 +27,27 @@
   html{scroll-behavior:smooth}
   body{margin:0;background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:13.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
-  ::selection{background:rgba(98,168,234,.28)}
+  ::selection{background:rgba(255,210,31,.3);color:var(--tx)}
   svg{display:block}
   button,input,select{font:inherit}
+  input::placeholder{color:var(--tx4);opacity:1}
   button{color:inherit;background:none;border:0;padding:0;text-align:inherit;cursor:pointer}
   button:disabled{cursor:default;color:var(--tx3)}
-  :focus-visible{outline:2px solid var(--accent)!important;outline-offset:3px}
+  :focus-visible{outline:2px solid var(--accent)!important;outline-offset:2px}
+  .tscroll :focus-visible,.codewrap :focus-visible,.kvcard :focus-visible,.ttwrap :focus-visible,.logscroll :focus-visible{outline-offset:-2px}
   [hidden]{display:none!important}
   .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
   .mono{font-family:var(--mono)}
 
   .wrap{display:grid;grid-template-columns:248px minmax(0,1fr);max-width:1560px;margin:0 auto;min-height:100vh}
-  .nav{position:sticky;top:0;align-self:start;height:100vh;border-right:1px solid var(--border);padding:0;overflow-y:auto;background:linear-gradient(180deg,var(--bg2),var(--bg))}
+  .nav{position:sticky;top:0;align-self:start;height:100vh;border-right:1px solid var(--border);padding:0;overflow-y:auto;background:var(--bg2)}
   .main{min-width:0;padding:0 40px 140px}
   .menu-toggle{display:none}
   .main,.sbody,.card,.chartcard,.kvcard,.diag>*,.mgrid>*,.syscols>*,.charts2>*{min-width:0}
   .main{overflow-wrap:anywhere}
 
   .brand{display:flex;align-items:center;gap:11px;padding:20px 20px 16px;border-bottom:1px solid var(--border)}
-  .brand .glyph{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#2b303a,#15171c);border:1px solid var(--border2);display:grid;place-items:center;color:var(--crit);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+  .brand .logo{width:34px;height:34px;flex:none}
   .brand b{font-size:13px;letter-spacing:.07em;color:var(--tx);display:block}
   .brand small{display:block;color:var(--tx4);font-size:12px;letter-spacing:.08em;margin-top:1px}
   .navlist{list-style:none;margin:0;padding:10px 12px}
@@ -51,27 +55,29 @@
   .navlist a .nic{color:var(--tx4);display:grid;place-items:center;width:16px;height:16px;flex:none}
   .navlist a:hover{background:var(--panel);color:var(--tx)}
   .navlist a:hover .nic{color:var(--tx2)}
-  .navlist a.on{background:var(--panel2);color:#fff;box-shadow:inset 2px 0 0 var(--accent)}
+  .navlist a.on{background:var(--panel2);color:var(--tx);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
   .navlist a.on .nic{color:var(--accent)}
   .navlist a .nct{margin-left:auto;color:var(--tx4);font-size:12px;font-family:var(--mono)}
   .navfoot{padding:16px 20px;color:var(--tx4);font-size:12px;line-height:1.8;border-top:1px solid var(--border);margin-top:6px}
   .navfoot b{color:var(--tx3)}
+  .navfoot .nw{white-space:nowrap}
+  .navfoot p{margin:8px 0 0;line-height:1.55}
 
   header{padding:30px 0 24px;border-bottom:1px solid var(--border)}
   .hl-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
   .badge{font-weight:700;font-size:11px;letter-spacing:.12em;padding:6px 12px;border-radius:6px;display:inline-flex;align-items:center;gap:8px}
-  .badge.warn{background:rgba(230,179,74,.12);color:var(--warn);border:1px solid rgba(230,179,74,.34)}
-  .badge.bad{background:rgba(240,98,107,.12);color:var(--bad);border:1px solid rgba(240,98,107,.34)}
-  .badge.good{background:rgba(98,168,234,.12);color:var(--blue);border:1px solid rgba(98,168,234,.34)}
+  .badge.warn{background:rgba(255,138,61,.08);color:var(--warn);border:1px solid rgba(255,138,61,.45)}
+  .badge.crit{background:rgba(255,77,94,.08);color:var(--crit);border:1px solid rgba(255,77,94,.5)}
+  .badge.info{background:rgba(106,169,233,.08);color:var(--info);border:1px solid rgba(106,169,233,.45)}
   .badge .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
   .pill{font-size:11.5px;color:var(--tx2);background:var(--panel);border:1px solid var(--border);padding:5px 11px;border-radius:20px;display:inline-flex;gap:7px;align-items:center}
   .pill b{color:var(--tx)}
   .incid{color:var(--tx3);font-size:12px;margin-left:auto;font-family:var(--mono)}
   .incid b{color:var(--tx2)}
-  h1{font-size:29px;font-weight:680;letter-spacing:-.015em;margin:6px 0 2px;color:#eef1f6;line-height:1.2;overflow-wrap:anywhere}
+  h1{font-size:29px;font-weight:680;letter-spacing:-.015em;margin:6px 0 2px;color:var(--tx);line-height:1.2;overflow-wrap:anywhere}
   h1 .ms{color:var(--warn)}
   .subhead{color:var(--tx2);font-size:13.5px;margin-top:6px;overflow-wrap:anywhere}
-  .subhead code{font-family:var(--mono);color:var(--tx);background:rgba(255,255,255,.05);padding:1px 6px;border-radius:5px;font-size:12px}
+  .subhead code{font-family:var(--mono);color:var(--tx);background:rgba(255,255,255,.06);padding:1px 6px;border-radius:5px;font-size:12px}
 
   .envstrip{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
   .echip{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:9px 13px;position:relative;min-width:0;max-width:100%}
@@ -81,19 +87,21 @@
 
   section{padding:30px 0;border-bottom:1px solid var(--border);scroll-margin-top:8px}
   .section-heading{margin:0 0 20px}
-  .sh{display:flex;align-items:center;gap:13px;width:100%;cursor:pointer;user-select:none;font-size:16px;font-weight:650;color:#eaecf1;letter-spacing:.005em}
-  .sh .sic{width:26px;height:26px;border-radius:7px;background:var(--panel);border:1px solid var(--border);display:grid;place-items:center;color:var(--accent);flex:none}
+  .sh{display:flex;align-items:center;gap:13px;width:100%;cursor:pointer;user-select:none;font-size:16px;font-weight:650;color:var(--tx);letter-spacing:.005em}
+  .sh .sic{width:26px;height:26px;border-radius:7px;background:var(--panel);border:1px solid var(--border);display:grid;place-items:center;color:var(--tx2);flex:none}
   .sh .num{font-size:12px;color:var(--tx4);font-family:var(--mono)}
   .sh .sub{color:var(--tx4);font-size:12px;font-weight:400;margin-left:2px}
   .sh .chev{margin-left:auto;color:var(--tx4);transition:.2s}
+  .sh:hover .sic{border-color:var(--border3);color:var(--tx)}
+  .sh:hover .chev{color:var(--tx)}
   section.collapsed .chev{transform:rotate(-90deg)}
   section.collapsed .sbody{display:none}
 
   .lead{color:var(--tx2);font-size:13.5px;line-height:1.65;margin:-6px 0 20px;max-width:880px}
   .lead b{color:var(--tx)}
-  .lead .hot{color:var(--warn);font-weight:600}
+  .lead .hot{color:var(--tx);font-weight:600}
 
-  .recording-scope{display:none;color:var(--warn);border:1px solid rgba(230,179,74,.35);border-radius:5px;padding:3px 7px;font-size:12px;font-weight:500;line-height:1.5;margin:0 0 12px}
+  .recording-scope{display:none;color:var(--info);border:1px solid rgba(106,169,233,.45);border-radius:5px;padding:3px 7px;font-size:12px;font-weight:500;line-height:1.5;margin:0 0 12px}
   .has-time-filter .recording-scope{display:inline-flex}
   .cth .recording-scope{margin:0}
   .filter-empty{padding:18px;color:var(--tx2);border:1px solid var(--border);border-radius:8px}
@@ -101,25 +109,26 @@
   .diag{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px}
   @media(max-width:1080px){.diag{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px}
-  .card.glow{box-shadow:0 0 0 1px rgba(230,179,74,.12),0 14px 40px rgba(0,0,0,.32);border-color:rgba(230,179,74,.28)}
   .card h3{margin:0 0 12px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--tx3);display:flex;align-items:center;gap:8px}
-  .card h3 .ic{color:var(--warn)}
+  .card h3 .ic{color:var(--tx3)}
   .diagtext{font-size:13.5px;color:var(--tx);line-height:1.7}
-  .diagtext b{color:#fff}
-  .diagtext code{font-family:var(--mono);font-size:12px;color:var(--teal);background:rgba(70,207,192,.08);padding:1px 6px;border-radius:5px}
+  .diagtext b{color:var(--tx)}
+  .diagtext code{font-family:var(--mono);font-size:12px;color:var(--teal);background:rgba(63,207,191,.08);padding:1px 6px;border-radius:5px}
   .findings{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:9px}
   .findings li{display:flex;gap:11px;font-size:12.5px;color:var(--tx2);line-height:1.5;align-items:flex-start}
-  .findings li .fi{flex:none;margin-top:1px}
+  .findings li .fi{flex:none;margin-top:1px;color:var(--tx3)}
   .findings li b{color:var(--tx)}
-  .verdict{display:flex;flex-direction:column;gap:13px}
-  .vrow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border)}
-  .vrow:last-child{border-bottom:0;padding-bottom:0}
-  .vrow .vk{color:var(--tx3);font-size:11.5px}
-  .vrow .vv{color:var(--tx);font-size:12.5px;text-align:right;font-weight:500}
-  .vv.bad{color:var(--bad)} .vv.warn{color:var(--warn)} .vv.good{color:var(--good)}
-  .tagrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px}
-  .tag{font-size:12px;font-family:var(--mono);color:var(--tx2);background:var(--panel2);border:1px solid var(--border2);padding:3px 8px;border-radius:5px}
-  .tag.ok{color:var(--good);border-color:rgba(91,214,139,.28)} .tag.no{color:var(--tx4)}
+  .diag.one{grid-template-columns:1fr}
+  details.adv{margin-top:16px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg2)}
+  details.adv>summary{cursor:pointer;list-style:none;padding:12px 15px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--tx3);display:flex;gap:8px;align-items:baseline;border-radius:var(--r)}
+  details.adv>summary:hover,details.adv[open]>summary{color:var(--tx)}
+  details.adv>summary:hover::before{color:var(--tx)}
+  details.adv>summary::-webkit-details-marker{display:none}
+  details.adv>summary::before{content:"\25B8";color:var(--tx4);font-size:10px;transition:.15s}
+  details.adv[open]>summary::before{transform:rotate(90deg)}
+  details.adv>summary small{text-transform:none;letter-spacing:0;font-size:12px;color:var(--tx4)}
+  details.adv>.advbody{padding:0 15px 15px}
+  details.adv>.advbody>:first-child{margin-top:0}
 
   .factstrip{display:flex;gap:10px;flex-wrap:wrap;margin:-2px 0 16px}
   .factstrip .pill svg{color:var(--tx4)}
@@ -131,13 +140,14 @@
   .mstats b{color:var(--tx2);font-weight:600}
   .mstats .mnow b{color:var(--tx);font-size:12.5px}
   .mstats .mnow .mu2{color:var(--tx4);font-size:12px}
-  .mstats .msep{padding:0 5px;color:var(--border3)}
+  .mstats .msep{padding:0 5px;color:var(--tx4)}
   .mstats .munit{color:var(--tx4);margin-left:4px}
   .mstats b.v-warn{color:var(--warn)}
-  .v-good{color:var(--good)} .v-warn{color:var(--warn)} .v-bad{color:var(--bad)} .v-info{color:var(--blue)}
+  .v-good{color:var(--good)} .v-warn{color:var(--warn)} .v-bad{color:var(--bad)}
+  .vword{font-family:var(--sans);font-size:11.5px;margin-left:4px}
 
   [data-tip]{cursor:help}
-  #tipbox{position:fixed;display:none;max-width:min(300px,calc(100vw - 16px));background:#0b0c0f;border:1px solid var(--border3);border-radius:7px;padding:8px 11px;
+  #tipbox{position:fixed;display:none;max-width:min(300px,calc(100vw - 16px));background:var(--code);border:1px solid var(--border3);border-radius:7px;padding:8px 11px;
     font-size:12px;font-weight:400;line-height:1.5;color:var(--tx2);text-transform:none;letter-spacing:0;text-align:left;z-index:99;
     box-shadow:0 14px 34px rgba(0,0,0,.55);white-space:normal;pointer-events:none;overflow-wrap:anywhere;font-family:var(--sans)}
   thead th .thl{cursor:help}
@@ -153,13 +163,13 @@
   .axlab{fill:var(--tx4);font-size:12px;font-family:var(--mono)}
   .gridline{stroke:var(--border);stroke-width:1;stroke-dasharray:2 4}
   .ch-guide,.ch-dot{transition:opacity .08s;pointer-events:none}
-  .chtip{position:absolute;transform:translate(-50%,calc(-100% - 9px));background:#0b0c0f;border:1px solid var(--border3);border-radius:6px;padding:5px 9px;font-size:12px;font-family:var(--mono);color:var(--tx2);pointer-events:none;z-index:6;box-shadow:0 8px 22px rgba(0,0,0,.55);text-align:left;max-width:100%;overflow-wrap:anywhere}
-  .chtip b{color:#fff}
+  .chtip{position:absolute;transform:translate(-50%,calc(-100% - 9px));background:var(--code);border:1px solid var(--border3);border-radius:6px;padding:5px 9px;font-size:12px;font-family:var(--mono);color:var(--tx2);pointer-events:none;z-index:6;box-shadow:0 8px 22px rgba(0,0,0,.55);text-align:left;max-width:100%;overflow-wrap:anywhere}
+  .chtip b{color:var(--tx)}
   .chtip[hidden]{display:none}
   .chtip .ctl{display:flex;gap:6px;align-items:center;margin-top:3px;font-size:12px;line-height:1.35}
   .chtip .ctl .cdot{width:6px;height:6px;border-radius:50%;flex:none}
   .chtip .ctl .ctxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:290px}
-  .chtip .ctl.cinc .ctxt{color:#f0626b}
+  .chtip .ctl.cinc .ctxt{color:var(--bad)}
   .chtip .ctl.cmore .ctxt{color:var(--tx4)}
 
   .wbars{display:flex;flex-direction:column;gap:10px}
@@ -169,8 +179,8 @@
   .wbar .wn span{overflow-wrap:anywhere}
   .wbar.stall .wn{color:var(--warn)}
   .wbar .wt{height:13px;background:var(--bg2);border-radius:4px;overflow:hidden;border:1px solid var(--border)}
-  .wbar .wf{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--blue),#3f7fc0)}
-  .wbar.stall .wf{background:linear-gradient(90deg,var(--warn),#b8862f)}
+  .wbar .wf{height:100%;border-radius:4px;background:var(--s1)}
+  .wbar.stall .wf{background:var(--warn)}
   .wbar .wv{text-align:right;color:var(--tx3);font-family:var(--mono);font-size:12px}
 
   .donutwrap{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
@@ -183,12 +193,14 @@
   .tbar input{background:var(--bg2);border:1px solid var(--border2);color:var(--tx);font-family:var(--mono);font-size:12px;padding:7px 11px 7px 32px;border-radius:7px;width:100%;min-width:0}
   .tbar .srch{position:relative;flex:0 1 250px;min-width:0;max-width:100%}
   .tbar .srch .si{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--tx4)}
-  .tbar input:focus{border-color:var(--blue)}
+  .tbar input:hover,.flamebar input:hover{border-color:var(--border3)}
+  .tbar input:focus,.flamebar input:focus{border-color:var(--accent)}
   .tbar .chip{font-size:12px;color:var(--tx2);background:var(--panel);border:1px solid var(--border);padding:5px 10px;border-radius:20px}
   .tbar .count{color:var(--tx4);font-size:12px;margin-left:auto;font-family:var(--mono)}
   .tbar .chip.tog{cursor:pointer;transition:.12s}
-  .tbar .chip.tog:hover{border-color:var(--border3);color:var(--tx)}
-  .tbar .chip.tog.on{background:var(--panel2);border-color:var(--blue);color:#cfe2f8}
+  .tbar .chip.tog:hover{border-color:var(--border3);background:var(--panelh);color:var(--tx)}
+  .tbar .chip.tog.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+  .tbar .chip.tog.on:hover{background:var(--accent-h);border-color:var(--accent-h)}
 
   .tscroll{border:1px solid var(--border);border-radius:var(--r);overflow:auto;max-width:100%}
   .tcap{max-height:540px;overflow:auto}
@@ -197,23 +209,23 @@
   thead .sortbtn{font:inherit;text-transform:inherit;letter-spacing:inherit;display:inline-flex;align-items:center;min-height:24px}
   thead th.sortable{cursor:pointer;user-select:none}
   thead th.r{text-align:right}
-  thead th.sortable:hover{color:var(--tx)}
-  thead th .ar{opacity:0;font-size:9px;margin-left:4px;color:var(--blue)}
+  thead th.sortable:hover,thead th.asc,thead th.desc{color:var(--tx)}
+  thead th .ar{opacity:0;font-size:9px;margin-left:4px;color:var(--accent)}
   thead th.asc .ar,thead th.desc .ar{opacity:1}
   thead th.asc .ar::after{content:"▲"} thead th.desc .ar::after{content:"▼"}
   tbody td{padding:8px 13px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--mono);font-size:11.5px}
   tbody tr:last-child td{border-bottom:0}
-  tbody tr:hover td{background:rgba(255,255,255,.022)}
+  tbody tr:hover td{background:rgba(255,255,255,.03)}
   td.r{text-align:right}
   .rank{color:var(--tx4);width:30px}
   .nm{color:var(--tx);font-family:var(--sans);font-weight:500}
   .cls{color:var(--violet)} .leaf{color:var(--tx)}
   .pkg{color:var(--tx4)}
   .st{font-size:12px;font-weight:600;letter-spacing:.04em;padding:2px 7px;border-radius:4px;border:1px solid}
-  .st.RUNNABLE{color:var(--good);border-color:rgba(91,214,139,.3);background:rgba(91,214,139,.07)}
-  .st.WAITING{color:var(--blue);border-color:rgba(98,168,234,.3);background:rgba(98,168,234,.07)}
-  .st.TIMED_WAITING{color:var(--violet);border-color:rgba(169,139,224,.3);background:rgba(169,139,224,.07)}
-  .st.BLOCKED{color:var(--bad);border-color:rgba(240,98,107,.3);background:rgba(240,98,107,.07)}
+  .st.RUNNABLE{color:var(--good);border-color:rgba(76,195,138,.4);background:rgba(76,195,138,.07)}
+  .st.WAITING{color:var(--info);border-color:rgba(106,169,233,.4);background:rgba(106,169,233,.07)}
+  .st.TIMED_WAITING{color:var(--violet);border-color:rgba(169,139,224,.4);background:rgba(169,139,224,.07)}
+  .st.BLOCKED{color:var(--bad);border-color:rgba(240,98,107,.45);background:rgba(240,98,107,.07)}
   .st.NEUTRAL{color:var(--tx3);border-color:var(--border2)}
   .pcount{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--tx3);background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:0 7px;line-height:18px;vertical-align:middle}
   .pcount .plk{display:inline-flex;color:var(--tx4)}
@@ -222,15 +234,15 @@
   .pcount[data-tip]{cursor:help}
   .pcount.z{color:var(--tx3)}
   .pct{color:var(--tx3)}
-  tr.hl td{background:rgba(230,179,74,.06)!important}
+  tr.hl td{background:rgba(255,138,61,.07)!important}
   .nm.stallname{color:var(--warn);cursor:help}
   .vtag{font-family:var(--mono);color:var(--tx2)}
   .corebadge{font-size:12px;color:var(--tx4);font-family:var(--sans)}
 
   .mname{display:flex;align-items:center;gap:7px;cursor:pointer}
   .mname .exp{color:var(--tx4);font-size:9px;transition:.15s;flex:none;width:9px}
-  .mname:hover .exp{color:var(--blue)}
-  tr.open .mname .exp{transform:rotate(90deg);color:var(--blue)}
+  .mname:hover .exp{color:var(--tx)}
+  tr.open .mname .exp{transform:rotate(90deg);color:var(--accent)}
   .mpath{margin:8px 0 2px 16px;border-left:1px solid var(--border2);padding:2px 0 2px 0}
   .mpath[hidden]{display:none}
   .mpath .plab{display:block;font-family:var(--sans);font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--tx4);margin:0 0 5px 12px}
@@ -242,7 +254,7 @@
   @media(max-width:1080px){.syscols{grid-template-columns:1fr}}
   .kvcard{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
   .kvcard .kvh{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--border);background:var(--bg2)}
-  .kvcard .kvh .ic{color:var(--accent)} .kvcard .kvh b{font-size:12.5px;color:var(--tx)}
+  .kvcard .kvh .ic{color:var(--tx3)} .kvcard .kvh b{font-size:12.5px;color:var(--tx)}
   .kvcard .kvh small{color:var(--tx4);font-size:12px;margin-left:auto;font-family:var(--mono)}
   .kv .row{display:flex;justify-content:space-between;gap:16px;padding:9px 16px;font-size:12px;border-bottom:1px solid var(--border)}
   .kv .row:last-child{border-bottom:0}
@@ -251,22 +263,23 @@
 
   .codewrap{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:14px}
   .codehd{display:flex;align-items:center;gap:11px;padding:12px 15px;background:var(--bg2);width:100%;user-select:none}
-  .codehd .ic{color:var(--accent)}
+  .codehd .ic{color:var(--tx3)}
   .codehd .fn{color:var(--tx);font-size:12.5px;font-weight:600;overflow-wrap:anywhere}
   .codehd .chev2{margin-left:auto;color:var(--tx4);transition:.2s}
+  .codehd:hover .chev2,.codehd:hover .ic{color:var(--tx)}
   .codewrap.closed .chev2{transform:rotate(-90deg)}
   .codewrap.closed pre{display:none}
-  pre{margin:0;padding:15px 17px;font-size:11.8px;line-height:1.7;color:var(--tx2);overflow-x:auto;background:#0e0f13;max-height:460px;overflow-y:auto;font-family:var(--mono)}
-  .jk{color:var(--blue)} .js{color:var(--good)} .jn{color:var(--amber)} .jb{color:var(--violet)} .jp{color:var(--tx4)}
+  pre{margin:0;padding:15px 17px;font-size:11.8px;line-height:1.7;color:var(--tx2);overflow-x:auto;background:var(--code);max-height:460px;overflow-y:auto;font-family:var(--mono)}
+  .jk{color:var(--s2)} .js{color:var(--teal)} .jn{color:var(--s5)} .jb{color:var(--violet)} .jp{color:var(--tx4)}
 
   .lvl{font-size:12px;font-weight:600;letter-spacing:.04em;padding:1px 7px;border-radius:4px;border:1px solid;flex:none}
-  .lvl.WARN{color:var(--warn);border-color:rgba(230,179,74,.3);background:rgba(230,179,74,.07)}
-  .lvl.ERROR{color:var(--bad);border-color:rgba(240,98,107,.3);background:rgba(240,98,107,.07)}
-  .lvl.INFO{color:var(--blue);border-color:rgba(98,168,234,.3);background:rgba(98,168,234,.07)}
+  .lvl.WARN{color:var(--warn);border-color:rgba(255,138,61,.4);background:rgba(255,138,61,.07)}
+  .lvl.ERROR{color:var(--bad);border-color:rgba(240,98,107,.45);background:rgba(240,98,107,.07)}
+  .lvl.INFO{color:var(--info);border-color:rgba(106,169,233,.4);background:rgba(106,169,233,.07)}
   .lvl.OTHER{color:var(--tx3);border-color:var(--border2);background:var(--bg2)}
-  .logscroll{max-height:560px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r);background:#0e0f13;padding:6px 0}
+  .logscroll{max-height:560px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--code);padding:6px 0}
   .lline{display:flex;gap:10px;align-items:flex-start;padding:3px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.6}
-  .lline:hover{background:rgba(255,255,255,.025)}
+  .lline:hover{background:rgba(255,255,255,.03)}
   .lline.lERROR{box-shadow:inset 2px 0 0 var(--bad)}
   .lline.lWARN{box-shadow:inset 2px 0 0 var(--warn)}
   .lline .lsrc{color:var(--teal);flex:0 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -274,16 +287,17 @@
   .logdet summary{cursor:pointer;list-style:none;display:flex;gap:8px;align-items:baseline}
   .logdet summary::-webkit-details-marker{display:none}
   .logdet summary::before{content:"\25B8";color:var(--tx4);font-size:10px;transition:.15s}
+  .logdet summary:hover .logmore{color:var(--accent-h);text-decoration:underline}
   .logdet[open] summary::before{transform:rotate(90deg)}
   .logdet .logfirst{flex:1;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
-  .logmore{color:var(--blue);font-size:12px;white-space:nowrap}
-  .logpre{white-space:pre;overflow-x:auto;background:#0b0c10;border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin:7px 0 2px;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--tx2);max-height:300px;overflow-y:auto}
-  .repeat{font-size:12px;font-weight:600;color:var(--amber);border:1px solid rgba(214,164,74,.4);border-radius:3px;padding:0 5px;margin-left:6px;white-space:nowrap;cursor:help;flex:none}
+  .logmore{color:var(--accent);font-size:12px;white-space:nowrap}
+  .logpre{white-space:pre;overflow-x:auto;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin:7px 0 2px;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--tx2);max-height:300px;overflow-y:auto}
+  .repeat{font-size:12px;font-weight:600;color:var(--tx2);border:1px solid var(--border3);border-radius:3px;padding:0 5px;margin-left:6px;white-space:nowrap;cursor:help;flex:none}
 
   .mxchip{display:inline-block;font-size:12px;font-family:var(--mono);color:var(--tx2);background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:0 6px;line-height:17px;margin:2px 3px 2px 0}
-  .mxchip.warnchip{color:var(--warn);border-color:rgba(230,179,74,.4)}
-  .ovltag{font-size:12px;font-family:var(--sans);color:var(--warn);border:1px solid rgba(230,179,74,.4);border-radius:3px;padding:0 4px;margin-left:6px;vertical-align:1px}
-  .mxconf{background:rgba(230,179,74,.07);border:1px solid rgba(230,179,74,.3);border-radius:8px;margin:10px;padding:10px 12px;font-size:12px;color:var(--tx2)}
+  .mxchip.warnchip{color:var(--warn);border-color:rgba(255,138,61,.45)}
+  .ovltag{font-size:12px;font-family:var(--sans);color:var(--warn);border:1px solid rgba(255,138,61,.45);border-radius:3px;padding:0 4px;margin-left:6px;vertical-align:1px}
+  .mxconf{background:rgba(255,138,61,.06);border:1px solid rgba(255,138,61,.35);border-radius:8px;margin:10px;padding:10px 12px;font-size:12px;color:var(--tx2)}
   .mxconf .mxchd{display:flex;gap:8px;align-items:center;color:var(--warn);font-weight:600}
   .mxconf .mxchd svg{flex:none}
   .mxconf .mxcsub{margin:3px 0 0 24px;font-size:11.5px;color:var(--tx3)}
@@ -294,117 +308,136 @@
   .mxcrow code{font-family:var(--mono);font-size:11px;color:var(--tx2);overflow-wrap:anywhere}
   .mxcrow .mxchips{margin-top:1px}
   .mxok{margin:10px 12px;font-size:11.5px;color:var(--good);display:flex;gap:7px;align-items:center}
+  a.pill{text-decoration:none}
+  .pill.bad{color:var(--bad);border-color:rgba(240,98,107,.5)} .pill.bad b{color:var(--bad)}
+  .pill.warn{color:var(--warn);border-color:rgba(255,138,61,.5)} .pill.warn b{color:var(--warn)}
+  a.pill:hover{background:var(--panelh)}
+  .mxlab{display:inline-block;font-size:11px;font-family:var(--sans);color:var(--violet);border:1px solid rgba(169,139,224,.45);border-radius:3px;padding:0 4px;margin-left:6px;vertical-align:1px;white-space:normal;line-height:16px}
+  .mxlab.hyb{color:var(--teal);border-color:rgba(63,207,191,.45)}
+  .mxconf.bad{background:rgba(240,98,107,.06);border-color:rgba(240,98,107,.4)}
+  .mxconf.bad .mxchd{color:var(--bad)}
+  .mxprob{margin:9px 0 0 24px}
+  .mxprob .lvl{margin-right:6px}
+  .mxprob .mxpsrc{color:var(--tx3);font-family:var(--mono);font-size:11px;margin-left:6px}
+  .mxprob .mxpdet{color:var(--tx3);font-family:var(--mono);font-size:11px;margin-top:2px;overflow-wrap:anywhere}
+  .sha{font-family:var(--mono);color:var(--tx2)}
   .subnote{font-size:12px;color:var(--tx3);margin:2px 0 12px;line-height:1.5}
-  .wf.al{background:linear-gradient(90deg,var(--teal),#2d9a8f)}
+  .wf.al{background:var(--s2)}
   .cf{display:inline-flex;align-items:center;gap:6px;color:var(--accent);border:1px solid var(--border2);padding:3px 8px;border-radius:5px;font-family:var(--sans);font-size:12px;transition:.12s}
-  .cf:hover{background:var(--panel2);border-color:var(--border3);color:#8cc2f5}
+  .cf:hover{background:var(--panelh);border-color:var(--accent);color:var(--accent-h)}
 
-  .alert{background:rgba(240,98,107,.08);border:1px solid rgba(240,98,107,.32);border-radius:8px;padding:9px 12px;margin:10px 0 0;font-size:12px}
+  .alert{background:rgba(240,98,107,.06);border:1px solid rgba(240,98,107,.4);border-radius:8px;padding:9px 12px;margin:10px 0 0;font-size:12px}
   .alert ul{margin:6px 0 0;padding-left:18px}
   .alert li{margin:3px 0;font-family:var(--mono);font-size:11.5px;color:var(--bad)}
 
   .copybtn{display:inline-flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--border2);color:var(--tx2);font-family:var(--sans);font-size:11.5px;padding:6px 11px;border-radius:7px;cursor:pointer;transition:.12s}
-  .copybtn:hover{border-color:var(--border3);color:var(--tx)}
-  .copybtn.ok{color:var(--good);border-color:rgba(91,214,139,.4)}
+  .copybtn:hover{background:var(--panelh);border-color:var(--border3);color:var(--tx)}
+  .copybtn.ok{color:var(--good);border-color:rgba(76,195,138,.5)}
+  .copybtn.fail{color:var(--bad);border-color:rgba(240,98,107,.5)}
 
-  .zoomband{position:absolute;top:0;bottom:0;background:rgba(98,168,234,.13);border-left:1px solid rgba(98,168,234,.55);border-right:1px solid rgba(98,168,234,.55);pointer-events:none;z-index:3}
-  #presetrow{display:none;position:sticky;top:0;z-index:70;background:rgba(18,19,23,.94);backdrop-filter:blur(5px);border-bottom:1px solid var(--border);padding:9px 0;align-items:center;gap:8px;flex-wrap:wrap}
+  .zoomband{position:absolute;top:0;bottom:0;background:rgba(255,210,31,.1);border-left:1px solid rgba(255,210,31,.6);border-right:1px solid rgba(255,210,31,.6);pointer-events:none;z-index:3}
+  #presetrow{display:none;position:sticky;top:0;z-index:70;background:rgba(15,15,15,.95);backdrop-filter:blur(5px);border-bottom:1px solid var(--border);padding:9px 0;align-items:center;gap:8px;flex-wrap:wrap}
   #presetrow .plab2{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--tx4);margin-right:3px}
   .pchip{font-size:12px;color:var(--tx2);background:var(--panel);border:1px solid var(--border);padding:4px 12px;border-radius:20px;cursor:pointer;transition:.12s;font-family:var(--mono)}
-  .pchip:hover{border-color:var(--border3);color:var(--tx)}
-  .pchip.on{background:var(--panel2);border-color:var(--blue);color:#cfe2f8}
+  .pchip:hover{border-color:var(--border3);background:var(--panelh);color:var(--tx)}
+  .pchip.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+  .pchip.on:hover{background:var(--accent-h);border-color:var(--accent-h)}
   body.has-presets section{scroll-margin-top:52px}
-  #zoomchip{position:fixed;right:18px;bottom:18px;max-width:calc(100vw - 36px);z-index:80;display:none;align-items:center;gap:7px;background:#0b0c0f;border:1px solid var(--border3);color:var(--tx);font-family:var(--mono);font-size:12px;padding:8px 13px;border-radius:20px;cursor:pointer;box-shadow:0 10px 28px rgba(0,0,0,.5)}
-  #zoomchip:hover{border-color:var(--blue);color:#cfe2f8}
-  .evlink{color:var(--blue);font-size:12px;margin-left:7px}
-  .evlink:hover{text-decoration:underline}
+  #zoomchip{position:fixed;right:18px;bottom:18px;max-width:calc(100vw - 36px);z-index:80;display:none;align-items:center;gap:7px;background:var(--code);border:1px solid var(--border3);color:var(--tx);font-family:var(--mono);font-size:12px;padding:8px 13px;border-radius:20px;cursor:pointer;box-shadow:0 10px 28px rgba(0,0,0,.5)}
+  #zoomchip:hover{border-color:var(--accent);background:var(--panelh)}
+  .evlink{color:var(--accent);font-size:12px;margin-left:7px}
+  .evlink:hover,ol.nextsteps a:hover{color:var(--accent-h);text-decoration:underline}
   ol.nextsteps{margin:8px 0 0;padding-left:19px}
   ol.nextsteps li{margin:7px 0;font-size:12.5px;color:var(--tx2);line-height:1.5}
-  ol.nextsteps a{color:var(--blue)}
+  ol.nextsteps a{color:var(--accent)}
   ol.nextsteps code{font-family:var(--mono);font-size:11px;color:var(--teal)}
   .cmdpre{white-space:pre-wrap;overflow-wrap:anywhere}
   .wbar .wn span.tnc{display:block;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .cwarn{display:flex;gap:9px;align-items:flex-start;background:rgba(230,179,74,.08);border:1px solid rgba(230,179,74,.32);border-radius:8px;padding:10px 13px;margin-top:14px;font-size:12.5px;color:var(--tx2);line-height:1.5}
+  .cwarn{display:flex;gap:9px;align-items:flex-start;background:rgba(255,138,61,.06);border:1px solid rgba(255,138,61,.4);border-radius:8px;padding:10px 13px;margin-top:14px;font-size:12.5px;color:var(--tx2);line-height:1.5}
   .cwarn svg{flex:none;color:var(--warn);margin-top:1px}
   .cwarn b{color:var(--warn)}
   .cmpwrap{margin-top:16px}
   .cmpwrap td.r{font-variant-numeric:tabular-nums}
-  .cmpwrap .v-good{color:var(--good)} .cmpwrap .v-bad{color:var(--bad)}
+  .cmpwrap .v-good{color:var(--good)} .cmpwrap .v-bad{color:var(--bad)} .cmpwrap .v-warn{color:var(--warn)}
   .chlegend{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:-6px 0 16px;font-size:12px;color:var(--tx3);font-family:var(--sans)}
   .chlegend .ls{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;max-width:100%}
-  .chlegend .smp{width:20px;height:0;display:inline-block;border-top:2px solid var(--blue)}
+  .chlegend .smp{width:20px;height:0;display:inline-block;border-top:2px solid var(--s1)}
   .chlegend .smp.dsh{border-top:1px dashed var(--bad)}
   .chlegend .smp.evs{border-top:1px dashed var(--tx3)}
-  .chlegend .edot{width:5px;height:5px;border-radius:50%;display:inline-block;margin-left:2px}
-  .chlegend .evtog{width:24px;height:24px;cursor:pointer;border:1px solid var(--border3);border-radius:4px;display:inline-grid;place-items:center}
-  .chlegend .evtog:hover{border-color:var(--tx2)}
-  .chlegend .evtog.off{background:var(--bg2);border-style:dashed}
+  .chlegend .edot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+  .chlegend .evtog{height:24px;padding:0 9px;cursor:pointer;border:1px solid var(--border3);border-radius:12px;display:inline-flex;align-items:center;gap:6px;color:var(--tx2);transition:.12s}
+  .chlegend .evtog:hover{border-color:var(--tx3);background:var(--panelh);color:var(--tx)}
+  .chlegend .evtog.off{background:var(--bg2);border-style:dashed;color:var(--tx3);text-decoration:line-through}
   .chlegend .evtog.off .edot{background:transparent!important;border:1px solid var(--tx3)}
   .chlegend .evmaster{cursor:pointer}
   .chlegend .evmaster:hover{color:var(--tx)}
   .chlegend .evmaster.off{text-decoration:line-through}
   .chlegend .evmore{margin-left:6px;color:var(--tx4);font-style:italic;cursor:help}
   .pmlegend .pmlg{cursor:pointer}
+  .pmlegend .pmlg:hover,.flamelg .flgtog:hover{color:var(--tx)}
   .pmlegend .pmlg.off{text-decoration:line-through}
   .bbar{display:inline-block;width:54px;height:7px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden;vertical-align:1px;margin-right:7px}
   .bbar i{display:block;height:100%}
   .modmeth{font-family:var(--mono);font-size:12px;color:var(--tx4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
   .modthr{font-family:var(--mono);font-size:12px;color:var(--tx4);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #totop{position:fixed;right:18px;bottom:62px;z-index:80;width:38px;height:38px;border-radius:50%;display:none;align-items:center;justify-content:center;background:#0b0c0f;border:1px solid var(--border3);color:var(--tx2);cursor:pointer;box-shadow:0 10px 28px rgba(0,0,0,.5);transition:.12s;padding:0}
-  #totop:hover{border-color:var(--blue);color:#cfe2f8}
+  #totop{position:fixed;right:18px;bottom:62px;z-index:80;width:38px;height:38px;border-radius:50%;display:none;align-items:center;justify-content:center;background:var(--code);border:1px solid var(--border3);color:var(--tx2);cursor:pointer;box-shadow:0 10px 28px rgba(0,0,0,.5);transition:.12s;padding:0}
+  #totop:hover{border-color:var(--accent);background:var(--panelh);color:var(--tx)}
   .tnc2{display:inline-block;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
   .pmlegend{display:flex;gap:12px;flex-wrap:wrap;margin:-2px 0 8px;font-size:12px;color:var(--tx2);font-family:var(--sans)}
   .pmlegend .pmlg{display:inline-flex;align-items:center;gap:5px}
   .pmlegend .edot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
   .chlegend .evcount{color:var(--tx4);margin-left:4px}
-  .ovltag.badtag{color:var(--bad);border-color:rgba(240,98,107,.45)}
+  .ovltag.badtag{color:var(--bad);border-color:rgba(240,98,107,.5)}
   .mstats .pml b{font-weight:600}
   .flamebar{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
   .flamebar .srch{position:relative;flex:0 1 300px;min-width:0;max-width:100%}
   .flamebar .srch .si{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--tx4)}
   .flamebar input{background:var(--bg2);border:1px solid var(--border2);color:var(--tx);font-family:var(--mono);font-size:12px;padding:7px 11px 7px 32px;border-radius:7px;width:100%;min-width:0}
-  .flamebar input:focus{border-color:var(--blue)}
   .flamelg{display:inline-flex;gap:11px;align-items:center}
   .flamelg .flg{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--tx3)}
   .flamelg .fsw{width:10px;height:10px;border-radius:2px;display:inline-block}
   .thlink{cursor:pointer;border-bottom:1px dotted var(--tx4)}
-  .thlink:hover{color:var(--blue);border-bottom-color:var(--blue)}
-  tr.thsel td{background:rgba(98,168,234,.12)}
-  tr.thsel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
+  .thlink:hover{color:var(--tx);border-bottom-color:var(--tx)}
+  tr.thsel td{background:rgba(255,210,31,.08)}
+  tr.thsel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
   .flamelg .flgtog{cursor:pointer}
   .flamelg .flgtog.off{text-decoration:line-through}
   .ttlabel[data-flamegroup]{cursor:pointer}
-  .ttlabel[data-flamegroup]:hover{color:var(--blue)}
-  .ttlabel.thsel{color:var(--blue)}
+  .ttlabel[data-flamegroup]:hover{color:var(--tx);background:var(--panel)}
+  .ttlabel.thsel{color:var(--accent);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
   .tbar.wsel{margin:14px 0 0}
   .tbar .wsl{color:var(--tx4);font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:2px}
   .mpath .pf .thmn{color:var(--tx4);margin-left:10px}
   .fcrumb{font-size:12px;font-family:var(--mono);color:var(--tx2);background:var(--panel);border:1px solid var(--border);padding:4px 12px;border-radius:20px;cursor:pointer;max-width:min(420px,100%);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .fcrumb:hover{border-color:var(--blue);color:#cfe2f8}
+  .fcrumb:hover{border-color:var(--border3);background:var(--panelh);color:var(--tx)}
   .fnote{font-size:12px;color:var(--tx4);font-family:var(--mono);margin-left:auto}
-  #flamecv{display:block;width:100%;border:1px solid var(--border);border-radius:var(--r);background:#0e0f13}
+  #flamecv{display:block;width:100%;border:1px solid var(--border);border-radius:var(--r);background:var(--code)}
   .ttlegend{display:flex;gap:14px;align-items:center;font-size:12px;color:var(--tx3);margin:0 0 8px;font-family:var(--sans);flex-wrap:wrap}
   .ttlegend .edot{width:7px;height:7px;border-radius:2px;display:inline-block;margin-right:5px;vertical-align:0}
-  .ttwrap{display:flex;border:1px solid var(--border);border-radius:var(--r);background:#0e0f13;overflow:auto;max-height:366px;margin-bottom:18px}
+  .ttwrap{display:flex;border:1px solid var(--border);border-radius:var(--r);background:var(--code);overflow:auto;max-height:366px;margin-bottom:18px}
   .ttlabels{flex:none;width:190px;border-right:1px solid var(--border);padding:5px 0}
   .ttlabel{display:block;width:100%;height:22px;line-height:22px;font-family:var(--mono);font-size:12px;color:var(--tx3);padding:0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ttcv{flex:1;min-width:0;padding:5px 8px}
   #ttcanvas{display:block;width:100%}
-  .gchint{color:var(--warn);font-size:12px;font-family:var(--mono)}
+  .gchint{color:var(--tx3);font-size:12px;font-family:var(--sans);display:inline-flex;align-items:center;gap:6px}
+  .gchint .edot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
   .gctog,.inctog{cursor:pointer;user-select:none}
-  .gctog:hover,.inctog:hover{filter:brightness(1.2)}
+  .gctog:hover,.inctog:hover{color:var(--tx)}
   .gctog.off,.inctog.off{text-decoration:line-through}
   .state-note{flex:1 1 220px;min-width:0;color:var(--tx3);font-size:12px;line-height:1.7}
   .flame-controls,.timeline-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
   .flame-controls label,.timeline-controls label{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%}
   .flame-controls select,.timeline-controls select{min-width:0;max-width:100%;flex:1;background:var(--bg2);color:var(--tx);border:1px solid var(--border2);padding:6px;border-radius:5px}
+  .flame-controls select:hover,.timeline-controls select:hover{border-color:var(--border3)}
   .flame-controls label{flex:1 1 280px}
-  .timeline-controls input{min-width:0;max-width:100%}
+  .timeline-controls input{min-width:0;max-width:100%;accent-color:var(--accent)}
   #flamevalue,#ttvalue{display:block;font:12px var(--mono);color:var(--tx2);overflow-wrap:anywhere;margin:8px 0}
   button[aria-disabled="true"]{color:var(--tx3);cursor:default;border-style:dashed}
   @media(max-width:800px){
     .wrap{display:block}
     .menu-toggle{display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:90;background:var(--bg2);border-bottom:1px solid var(--border2);width:100%;padding:12px 16px}
+    .menu-toggle:hover{background:var(--panel)}
+    .menu-toggle .logo{width:22px;height:22px;flex:none}
     .nav{display:none;position:fixed;top:46px;left:0;width:min(320px,100%);height:calc(100dvh - 46px);z-index:85;border-right:1px solid var(--border2);box-shadow:8px 10px 24px rgba(0,0,0,.4)}
     .nav.open{display:block}
     .main{padding:0 16px 110px}
@@ -428,11 +461,12 @@
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><symbol id="hbx-logo" viewBox="0 0 512 512"><rect width="512" height="512" rx="96" fill="#0b0b0b"/><g fill="#FFD21F" stroke="#0b0b0b" stroke-width="12" stroke-linejoin="round"><path d="M136 230 L256 170 L186 136 L66 196 Z"/><path d="M136 230 L256 170 L256 290 Z" fill="#9A7600"/><path d="M256 170 L376 230 L256 290 Z" fill="#C79A00"/><path d="M256 170 L376 230 L446 196 L326 136 Z"/><path d="M270 40 L216 142 L254 142 L232 222 L306 108 L266 108 L302 40 Z"/><path d="M136 230 L256 290 L256 432 L136 372 Z"/><path d="M256 290 L376 230 L376 372 L256 432 Z"/><path d="M136 230 L256 290 L200 334 L80 274 Z"/><path d="M256 290 L376 230 L432 274 L312 334 Z"/></g></symbol></svg>
 <div class="wrap">
-  <button type="button" class="menu-toggle" id="menu-toggle" aria-expanded="false" aria-controls="report-nav">HYBOX <span>Report menu</span></button>
+  <button type="button" class="menu-toggle" id="menu-toggle" aria-expanded="false" aria-controls="report-nav"><svg class="logo" aria-hidden="true" focusable="false"><use href="#hbx-logo"/></svg>HYBOX <span>Report menu</span></button>
   <nav class="nav" id="report-nav" aria-label="Report sections">
     <div class="brand">
-      <div class="glyph" id="brandGlyph"></div>
+      <svg class="logo" aria-hidden="true" focusable="false"><use href="#hbx-logo"/></svg>
       <div><b>HYBOX</b><small>INCIDENT REPORT</small></div>
     </div>
     <ul class="navlist" id="navlist"></ul>
@@ -490,9 +524,14 @@ function splitMethod(m){
 }
 function shortMethod(s){const i=s.lastIndexOf(".");return i<0?esc(s):`<span class="cls">${esc(s.slice(0,i))}</span>.${esc(s.slice(i+1))}`;}
 function leafName(m){const p=String(m).split(".");return p.length>=2?p.slice(-2).join("."):m;}
-function pathHtml(callers){
+function mixinTag(label){return label?` <span class="mxlab">${esc(label)}</span>`:"";}
+function isHyboxThread(name){return String(name).startsWith("hybox-");}
+function isHyboxMod(id){const s=String(id);return s==="Xytronix:Hybox"||s.startsWith("io.github.xytronix.hybox");}
+function hyboxTag(on){return on?` <span class="mxlab hyb" data-tip="Hybox's own work, not your server">Hybox itself</span>`:"";}
+function adv(note,body){return body?`<details class="adv"><summary>Advanced${note?` <small>${esc(note)}</small>`:""}</summary><div class="advbody">${body}</div></details>`:"";}
+function pathHtml(callers,labels){
   if(!callers||!callers.length) return "";
-  const items=callers.map((c,i)=>`<div class="pf" style="padding-left:${12+i*12}px"><span class="arr">↑</span>${shortMethod(c)}</div>`).join("");
+  const items=callers.map((c,i)=>`<div class="pf" style="padding-left:${12+i*12}px"><span class="arr">↑</span>${shortMethod(c)}${mixinTag(labels&&labels[i])}</div>`).join("");
   return `<div class="mpath" hidden><span class="plab">called by</span>${items}</div>`;
 }
 function thc(label,tip,o){o=o||{};const cls=[(o.r?"r":""),(o.sort?"sortable":""),(o.def||"")].filter(Boolean).join(" ");
@@ -526,7 +565,10 @@ function colorJson(s){
 let CHART_ID=0; const CHARTS={};
 let flameRender=null, ttRender=null;
 let ZOOM=null;
-const ECOL={error:"#f0626b",warn:"#e6b34a",gc:"#a98be0",plugin:"#46cfc0",conn:"#62a8ea"};
+const CSSV=getComputedStyle(document.documentElement), cssv=n=>CSSV.getPropertyValue("--"+n).trim();
+const SERIES=[1,2,3,4,5,6,7].map(k=>cssv("s"+k));
+const PAL={tx:cssv("tx"),tx4:cssv("tx4"),ink:cssv("on-accent"),code:cssv("code"),neutral:cssv("neutral"),good:cssv("good"),warn:cssv("warn"),bad:cssv("bad"),info:cssv("info"),gc:cssv("gc"),violet:cssv("violet"),teal:cssv("teal")};
+const ECOL={error:PAL.bad,warn:PAL.warn,gc:PAL.gc,plugin:PAL.teal,conn:PAL.info};
 const EVTYPES={error:true,warn:true,gc:true,plugin:true,conn:true};
 const EVOFF=new Set();
 let GCHL=true;
@@ -536,13 +578,13 @@ const zoomKey=()=>ZOOM?ZOOM.a.toFixed(4)+":"+ZOOM.b.toFixed(4):"f";
 const clamp01=v=>Math.max(0,Math.min(1,v));
 function globalClock(f){
   if(!DV.span) return null;
-  const t0=clockToSec(DV.span.from), t1=clockToSec(DV.span.to);
+  const t0=hmsToSec(DV.span.from), t1=hmsToSec(DV.span.to);
   const sp=((t1-t0)+86400)%86400||(t1-t0);
-  return secToClock(t0+clamp01(f)*sp);
+  return secToHms(Math.round(t0+clamp01(f)*sp));
 }
 function sstat(a){let mn=a[0],mx=a[0],s=0;for(const v of a){if(v<mn)mn=v;if(v>mx)mx=v;s+=v;}return{min:mn,avg:s/a.length,max:mx};}
 function markerInZoom(){const f=has(D.incident.markerFrac)?D.incident.markerFrac:1;return !ZOOM||(f>=ZOOM.a-1e-9&&f<=ZOOM.b+1e-9);}
-function lineChart(series,{h=160,color="#62a8ea",unit="%",max=null,times=null,decimals=1,marker=null,multi=null,gcIdx=false,zero=false}={}){
+function lineChart(series,{h=160,color=SERIES[0],unit="%",max=null,times=null,decimals=1,marker=null,multi=null,gcIdx=false,zero=false}={}){
   const id="ch"+(++CHART_ID);
   CHARTS[id]={series:multi?multi[0].series:series,lineDefs:multi,o:{h,color,unit,max,times,decimals,marker,gcIdx,zero}};
   return `<div class="chartholder" data-chart="${id}" tabindex="0" role="group" aria-describedby="${id}-keys ${id}-value" style="min-height:${h}px"></div>`;
@@ -619,12 +661,12 @@ function renderChart(el){
     const gf=o.marker.frac!=null?clamp01(o.marker.frac):1;
     const vis=gf>=za-1e-9&&gf<=zb+1e-9;
     let xr=null;
-    const mcol=o.marker.kind==='profile'?'#46cfc0':'#f0626b';
+    const mcol=o.marker.kind==='profile'?PAL.info:PAL.bad;
     if(INCHL&&o.marker.frac!=null&&o.marker.kind!=='profile'){
       const t0=Math.max(gf,za), t1=Math.min(1,zb);
       if(t1>t0+1e-6){
         const xa=fx(t0), xb=fx(t1);
-        tint=`<rect class="inctint" x="${xa.toFixed(1)}" y="${padT}" width="${(xb-xa).toFixed(1)}" height="${(h-padT-padB).toFixed(1)}" fill="#f0626b" fill-opacity="0.05" pointer-events="none"/>`;
+        tint=`<rect class="inctint" x="${xa.toFixed(1)}" y="${padT}" width="${(xb-xa).toFixed(1)}" height="${(h-padT-padB).toFixed(1)}" fill="${PAL.bad}" fill-opacity="0.05" pointer-events="none"/>`;
       }
     }
     if(vis){
@@ -659,7 +701,7 @@ function renderChart(el){
     if(lines.length){
       lane=`<g class="evlines" pointer-events="none" opacity=".45">`
         +lines.map(b=>{const x=Math.round(b.sx/b.n)+0.5;
-          return `<line class="evline" x1="${x}" y1="${padT}" x2="${x}" y2="${h-padB}" stroke="${ECOL[b.top]||"#9aa1ad"}" stroke-width="1" stroke-dasharray="4 4"/>`;}).join("")
+          return `<line class="evline" x1="${x}" y1="${padT}" x2="${x}" y2="${h-padB}" stroke="${ECOL[b.top]||PAL.neutral}" stroke-width="1" stroke-dasharray="4 4"/>`;}).join("")
         +`</g>`;
     }
   }
@@ -678,10 +720,10 @@ function renderChart(el){
           segs+=`M ${a.x} ${a.y} L ${b.x} ${b.y} L ${c.x} ${c.y} `;
         });
       });
-      gcOver=`<path class="gcseg" d="${segs}" fill="none" stroke="#e6b34a" stroke-width="2.2" stroke-linejoin="round" pointer-events="none"/>`;
+      gcOver=`<path class="gcseg" d="${segs}" fill="none" stroke="${PAL.gc}" stroke-width="2.2" stroke-linejoin="round" pointer-events="none"/>`;
     }
   }
-  const dots=defs.map((d,k)=>`<circle class="ch-dot" data-ln="${k}" r="3.4" fill="${d.color}" stroke="#0e0f13" stroke-width="1.4" opacity="0"${lineOn(k)?"":" display=\"none\""}/>`).join("");
+  const dots=defs.map((d,k)=>`<circle class="ch-dot" data-ln="${k}" r="3.4" fill="${d.color}" stroke="${PAL.code}" stroke-width="1.4" opacity="0"${lineOn(k)?"":" display=\"none\""}/>`).join("");
   const chartTitle=el.closest(".chartcard")?.querySelector(".ctt")?.textContent||"Time series";
   el.setAttribute("aria-label",chartTitle);
   el.innerHTML=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">${grid}${tint}${lane}${mk}${paths}${gcOver}<line class="ch-guide" x1="0" y1="${padT}" x2="0" y2="${h-padB}" stroke="${o.color}" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>${dots}</svg><div class="chtip" hidden></div><span class="sr-only" id="${el.dataset.chart}-keys">Left and right arrows explore samples. Home and End select endpoints. Plus and minus zoom around the selected sample; 0 resets zoom. Escape dismisses values.</span><span class="sr-only chartvalue" id="${el.dataset.chart}-value" aria-live="polite"></span>`;
@@ -804,15 +846,15 @@ function renderHoverAt(el,cfg,i){
   }
   const lines=[];
   if(cfg.mark&&incNear){
-    lines.push(`<div class="ctl cinc"><span class="cdot" style="background:${cfg.mark.kind==='profile'?'#46cfc0':'#f0626b'}"></span><span class="ctxt">${cfg.mark.kind==='profile'?'profile':'incident'} · ${esc(cfg.mark.label)}</span></div>`);
+    lines.push(`<div class="ctl cinc"><span class="cdot" style="background:${cfg.mark.kind==='profile'?PAL.info:PAL.bad}"></span><span class="ctxt">${cfg.mark.kind==='profile'?'profile':'incident'} · ${esc(cfg.mark.label)}</span></div>`);
   }
   if(cfg.gcSet&&cfg.gcSet.has(i)){
-    lines.push(`<div class="ctl"><span class="cdot" style="background:#e6b34a"></span><span class="ctxt">GC pause in this interval</span></div>`);
+    lines.push(`<div class="ctl"><span class="cdot" style="background:${PAL.gc}"></span><span class="ctxt">GC pause in this interval</span></div>`);
   }
   if(hit&&hit.length){
     hit.slice(0,3).forEach(evn=>{
       const lbl=String(evn[2]);
-      lines.push(`<div class="ctl"><span class="cdot" style="background:${ECOL[evn[1]]||"#9aa1ad"}"></span><span class="ctxt">${esc(String(evn[1]).toUpperCase())} ${esc(lbl.length>64?lbl.slice(0,64)+"…":lbl)}</span></div>`);
+      lines.push(`<div class="ctl"><span class="cdot" style="background:${ECOL[evn[1]]||PAL.neutral}"></span><span class="ctxt">${esc(String(evn[1]).toUpperCase())} ${esc(lbl.length>64?lbl.slice(0,64)+"…":lbl)}</span></div>`);
     });
     if(hit.length>3){
       const c={};
@@ -1010,7 +1052,7 @@ function donut(segs,{size=132,thick=20}={}){
   segs.forEach(s=>{ const len=circ*s.v/total;
     ring+=`<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.c}" stroke-width="${thick}" stroke-dasharray="${len.toFixed(2)} ${(circ-len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 ${c} ${c})"/>`;
     off+=len; });
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc(segs.map(s=>s.k+': '+s.v).join(', '))}">${ring}<text x="${c}" y="${c-2}" text-anchor="middle" fill="#eaecf1" font-size="22" font-family="ui-monospace,Menlo,monospace" font-weight="600">${total}</text><text x="${c}" y="${c+15}" text-anchor="middle" fill="#8f9ba8" font-size="12">THREADS</text></svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc(segs.map(s=>s.k+': '+s.v).join(', '))}">${ring}<text x="${c}" y="${c-2}" text-anchor="middle" fill="${PAL.tx}" font-size="22" font-family="ui-monospace,Menlo,monospace" font-weight="600">${total}</text><text x="${c}" y="${c+15}" text-anchor="middle" fill="${PAL.tx4}" font-size="12">THREADS</text></svg>`;
 }
 
 const I = {
@@ -1044,16 +1086,12 @@ const I = {
   disk:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>'
 };
 
-$("#brandGlyph").innerHTML = '<span style="color:var(--crit)">'+I.warn+'</span>';
-
 const DV=(()=>{
   const worlds=D.worlds||[];
   const sampled=worlds.filter(w=>has(w.samples)&&w.samples>0);
   const ranked=[...sampled].sort((a,b)=>b.samples-a.samples);
   const stalled=worlds.find(w=>w.stalled)||null;
   const rankedAll=[...worlds].sort((a,b)=>(b.samples||0)-(a.samples||0));
-  const ts=D.threadStates||null;
-  const blocked=ts?(ts.BLOCKED||0):null;
   const ser=D.series||{};
   const heapG=ser.heap?ser.heap.map(gib):null;
   const rssG=ser.rss?ser.rss.map(gb):null;
@@ -1064,10 +1102,7 @@ const DV=(()=>{
     stalledRank: stalled?rankedAll.indexOf(stalled)+1:0,
     topThread:(D.hotThreads&&D.hotThreads[0])||null,
     topMethod:(D.hotMethods&&D.hotMethods[0])||null,
-    blocked, deadlock:Array.isArray(D.deadlocked)&&D.deadlocked.length>0,
-    memBasis:(D.sys&&D.sys.container&&has(D.sys.container.memLimit)&&D.sys.container.memLimit>0)?"container limit":"machine RAM",
-    memLimitBytes:(D.sys&&D.sys.container&&has(D.sys.container.memLimit)&&D.sys.container.memLimit>0)?D.sys.container.memLimit:((D.sys&&has(D.sys.ramTotal)&&D.sys.ramTotal>0)?D.sys.ramTotal:null),
-    memPct:(D.ram&&has(D.ram.rssLast)&&D.sys)?(()=>{const l=(D.sys.container&&has(D.sys.container.memLimit)&&D.sys.container.memLimit>0)?D.sys.container.memLimit:((has(D.sys.ramTotal)&&D.sys.ramTotal>0)?D.sys.ramTotal:null);return l?100*D.ram.rssLast/l:null;})():null,
+    deadlock:Array.isArray(D.deadlocked)&&D.deadlocked.length>0,
     lowLoad:(D.incident.samples||0)<300,
     heapG, rssG, diskG, hostMemG,
     win:has(D.incident.windowSec)?Math.floor(D.incident.windowSec/60)+"m "+String(D.incident.windowSec%60).padStart(2,"0")+"s":null,
@@ -1080,7 +1115,6 @@ const DV=(()=>{
     samples:D.incident.samples||null
   };
 })();
-const sevClass = D.incident.severity==="CRITICAL"?"bad":D.incident.severity==="DEGRADED"?"warn":"good";
 
 function modOfConfig(cfg){
   const base=String(cfg).toLowerCase().replace(/\.mixins\.json$/,"").replace(/^_+/,"");
@@ -1121,7 +1155,7 @@ const MIXCONF=(()=>{
   return {list,byConfig,modInfo};
 })();
 
-$("#navfoot").innerHTML = `Generated offline by Hybox${D.hyboxVersion?" v"+esc(D.hyboxVersion):""}<br>Self-contained report · ${esc((D.incident.created||"").split(" ")[0])}`;
+$("#navfoot").innerHTML = `Generated offline by Hybox${D.hyboxVersion?" v"+esc(D.hyboxVersion):""}<br>Self-contained report · <span class="nw">${esc((D.incident.created||"").split(" ")[0])}</span><p>Player names, paths and IP addresses in this report are hidden.</p>`;
 (function(){
   const slot=$("#copySlot");
   if(slot){ slot.innerHTML=`<button type="button" class="copybtn" id="copyMd">${I.copy} Copy as Markdown</button>`; }
@@ -1224,7 +1258,8 @@ function comparisonHtml(){
         const isBad=(bad==="up"&&d>0)||(bad==="down"&&d<0);
         cls=isBad?"v-bad":"v-good";
       }
-      delta=`<span class="${cls}">${d>0?"+":""}${Math.abs(d)>=100?d.toFixed(0):d.toFixed(1)}%</span>`;
+      const word={"v-bad":"worse","v-good":"better","v-warn":"high"}[cls];
+      delta=`<span class="${cls}">${d>0?"+":""}${Math.abs(d)>=100?d.toFixed(0):d.toFixed(1)}%${word?`<span class="vword">${word}</span>`:""}</span>`;
     }
     return `<tr data-cmp="${esc(l)}" data-base="${base.toFixed(4)}" data-inc="${inc.toFixed(4)}"><td class="nm">${esc(l)}</td><td class="r">${base.toFixed(dec)} ${esc(u)}</td><td class="r">${inc.toFixed(dec)} ${esc(u)}</td><td class="r">${delta}</td></tr>`;
   }
@@ -1246,106 +1281,35 @@ function comparisonHtml(){
       .forEach(x=>{rows+=cmpRow(x.ts.name,sliceAvg(x.ts.series,0,b1),sliceAvg(x.ts.series,ia,1),"ms",1,"up");});
   }
   if(!rows) return "";
-  return `<div class="card cmpwrap" id="cmpcard"><h3><span class="ic" style="color:var(--blue)">${I.clock}</span> Baseline vs ${term} window</h3>
+  return `<div class="card cmpwrap" id="cmpcard"><h3><span class="ic">${I.clock}</span> Baseline vs ${term} window</h3>
     <div class="subnote">Average over the calm window vs the ${term} window. Calm: the first ${Math.round(b1*100)}% of the recording; ${term}: from just before the marker${recov?" through recovery":" to the end of the capture"}.</div>
-    <div class="tscroll"><table><thead><tr>${thc("Metric","Series averaged over each window")}${thc("Baseline avg","Average over the calm window",{r:true})}${thc((term==="profile"?"Profile":"Incident")+" avg","Average from just before the "+term+(recov?" through recovery":" to the end of the capture"),{r:true})}${thc("Delta","Red when the change direction is bad for this metric; grey under ±5%.",{r:true})}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    <div class="tscroll"><table><thead><tr>${thc("Metric","Series averaged over each window")}${thc("Baseline avg","Average over the calm window",{r:true})}${thc((term==="profile"?"Profile":"Incident")+" avg","Average from just before the "+term+(recov?" through recovery":" to the end of the capture"),{r:true})}${thc("Delta","Marked worse or better when the change is 5% or more in a direction that matters for this metric.",{r:true})}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 function diagnosisHtml(){
-  if(!has(D.findings)) return legacyDiagnosisHtml();
   const f=D.findings, cmp=comparisonHtml();
   if(!f.evidence.length) return cmp;
-  const links={cpu:"#cpu",methods:"#methods",worlds:"#worlds",memory:"#memory",states:"#states",metrics:"#metrics",system:"#system",plugins:"#plugins",config:"#config",log:"#log"};
+  const links={cpu:"#cpu",methods:"#methods",worlds:"#worlds",memory:"#memory",states:"#states",metrics:"#metrics",system:"#system",plugins:"#plugins",mixins:"#mixins",config:"#config",log:"#log"};
   const spans=(items,entry)=>items.map(s=>{
     const value=esc(s[0]), styled=s[1]==="b"?`<b>${value}</b>`:s[1]==="code"?`<code>${value}</code>`:value;
     return entry&&links[entry.section]&&s[0]===entry.label?`<a href="${links[entry.section]}">${styled}</a>`:styled;
   }).join("");
-  const ev=f.evidence.map(e=>`<li><span class="fi" style="color:var(--warn)">${I.fire}</span><span>${spans(e.spans)}${links[e.section]?` <a class="evlink" href="${links[e.section]}">${esc(e.label)} ↗</a>`:""}</span></li>`);
+  const ev=f.evidence.map(e=>`<li><span class="fi">${I.fire}</span><span>${spans(e.spans)}${links[e.section]?` <a class="evlink" href="${links[e.section]}">${esc(e.label)} ↗</a>`:""}</span></li>`);
   const stepHtml=f.steps.map(e=>`<li>${spans(e.spans,e)}</li>`).join("");
-  const left=`<div class="card glow"><h3><span class="ic">${I.warn}</span> Evidence</h3>
+  const left=`<div class="card"><h3><span class="ic">${I.warn}</span> Evidence</h3>
     <div class="diagtext">${spans(f.intro)}</div>
     <ul class="findings">${ev.join("")}</ul></div>`;
-  const severityClass=f.severity==="CRITICAL"?"bad":f.severity==="DEGRADED"?"warn":"good";
-  const vrows=[];
-  vrows.push(`<div class="vrow"><span class="vk">Severity</span><span class="vv ${severityClass}">${esc(f.severity)}</span></div>`);
-  vrows.push(`<div class="vrow"><span class="vk">Investigation direction</span><span class="vv">${esc(f.direction)}</span></div>`);
-  vrows.push(`<div class="subnote">${esc(f.caveat)}</div>`);
-  const tags=f.tags.map(t=>`<span class="tag">${esc(t)}</span>`);
-  const right=`<div class="card"><h3><span class="ic" style="color:var(--blue)">${I.pulse}</span> Assessment</h3>
-    <div class="verdict">${vrows.join("")}</div>
-    ${stepHtml?`<div style="margin-top:14px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--tx3)">Next steps</div><ol class="nextsteps">${stepHtml}</ol>`:""}
-    ${tags.length?`<div class="tagrow" style="margin-top:12px">${tags.join("")}</div>`:""}</div>`;
-  return `<div class="diag">${left}${right}</div>`+cmp;
-}
-function legacyDiagnosisHtml(){
-  const T=DV.samples, ser=D.series||{};
-  const ev=[];
-  const row=(html,link,label)=>ev.push(`<li><span class="fi" style="color:var(--warn)">${I.fire}</span><span>${html}${link?` <a class="evlink" href="${link}">${label} ↗</a>`:""}</span></li>`);
-  if(DV.topWorld&&T) row(`<code>WorldThread - ${esc(DV.topWorld.name)}</code> produced <b>${pct(DV.topWorld.samples,T).toFixed(1)}%</b> of ${fmt(T)} CPU samples, the largest world-thread share.`,"#cpu","CPU &amp; load");
-  if(DV.topMethod&&T) row(`Top frame <code>${esc(leafName(DV.topMethod[1]))}</code> holds <b>${pct(DV.topMethod[0],T).toFixed(2)}%</b> of samples (${fmt(DV.topMethod[0])} hits).`,"#methods","hot methods");
-  if(DV.stalled&&has(DV.stalled.samples)&&T) row(`The stalled world <code>${esc(worldLabel(DV.stalled.name))}</code> drew <b>${pct(DV.stalled.samples,T).toFixed(1)}%</b> of samples, #${DV.stalledRank} of ${DV.worlds.length} by CPU.`,"#worlds","worlds");
-  if(D.gc) row(`${esc(DV.gcName||"GC")} ran <b>${D.gc.collections}</b> collections, longest pause <b>${D.gc.maxPauseMs} ms</b> (${D.gc.totalPauseMs} ms total).`,"#memory","memory &amp; GC");
-  if(DV.deadlock) row(`The JVM detected a deadlock involving <b>${D.deadlocked.length}</b> thread${D.deadlocked.length===1?"":"s"}.`,"#states","deadlocked threads");
-  if(DV.blocked!=null) row(`<b>${DV.blocked}</b> thread(s) were BLOCKED at capture.`,"#states","thread states");
-  if(D.cpu&&has(D.cpu.machMax)) row(`Machine CPU peaked at <b>${D.cpu.machMax.toFixed(1)}%</b>${has(D.cpu.machAvg)?` (average ${D.cpu.machAvg.toFixed(1)}%)`:""}.`,"#cpu","CPU &amp; load");
-  if(D.ram&&has(DV.memPct)) row(`Process RSS <b>${gb(D.ram.rssLast).toFixed(1)} GB</b> of ${gb(DV.memLimitBytes).toFixed(1)} GB ${DV.memBasis} (${DV.memPct.toFixed(0)}%)${D.heap&&has(D.heap.max)&&D.heap.max>0?`; heap peaked at <b>${gib(D.heap.peak).toFixed(1)}</b> of ${gib(D.heap.max).toFixed(1)} GiB`:""}.`,"#memory","memory &amp; GC");
-  let exSpike=null;
-  if(ser.exceptions&&ser.exceptions.length>=10){
-    const arr=ser.exceptions, st=sstat(arr);
-    let maxI=0; arr.forEach((v,i)=>{if(v>arr[maxI])maxI=i;});
-    if(st.avg>0&&arr[maxI]>5*st.avg&&maxI>=Math.floor(arr.length*0.9)) exSpike={v:arr[maxI],avg:st.avg};
-  }
-  if(exSpike) row(`<b>${fmt(exSpike.v)}</b> exceptions/interval right before the incident, <b>${(exSpike.v/exSpike.avg).toFixed(0)}×</b> the window average of ${exSpike.avg.toFixed(1)}.`,"#metrics","key metrics");
-  const allocLead=(D.alloc&&D.alloc.bySubsystem&&D.alloc.bySubsystem.length&&!String(D.alloc.bySubsystem[0][0]).startsWith("Other"))?D.alloc.bySubsystem[0]:null;
-  if(allocLead) row(`<b>${esc(allocLead[0])}</b> leads allocation pressure at <b>${fmtBytes(allocLead[1])}</b> sampled.`,"#memory","allocation");
-  const cRisk=containerRisk();
-  if(cRisk) row(`Heap -Xmx <b>${gib(cRisk.xmx).toFixed(1)} GiB</b> is at or above the container memory limit of <b>${gib(cRisk.lim).toFixed(1)} GiB</b>; the JVM can be OOM-killed before GC reacts.`,"#system","system");
-  const incompatN=(D.plugins||[]).filter(p=>p&&p[5]==="INCOMPATIBLE").length;
-  if(incompatN) row(`<b>${incompatN}</b> installed mod${incompatN===1?" declares":"s declare"} a server version range that excludes the running server.`,"#plugins","plugins");
-  const cmp=comparisonHtml();
-  if(!ev.length) return cmp;
-
-  const direction=DV.deadlock?"Inspect the detected deadlock and lock ownership":
-    DV.topWorld?"Inspect the busiest world thread alongside tick timing":
-    "Correlate stacks and timing in recording.jfr using JDK Mission Control";
-
-  const steps=[];
-  if(DV.deadlock) steps.push(`Inspect the ${D.deadlocked.length} detected deadlocked thread${D.deadlocked.length===1?"":"s"} and their lock owners (<a href="#states">thread states</a>)`);
-  else if(DV.blocked>0) steps.push(`Investigate lock contention in the ${DV.blocked} blocked thread(s) (<a href="#states">thread states</a>)`);
-  if(DV.topWorld) steps.push(`Profile <code>WorldThread - ${esc(DV.topWorld.name)}</code> in JDK Mission Control (recording.jfr)`);
-  const topSub=(D.subsystems||[]).find(x=>!String(x[0]).startsWith("Other"));
-  if(topSub&&T) steps.push(`Review the ${esc(topSub[0])} hot path: ${fmt(topSub[1])} samples, ${pct(topSub[1],T).toFixed(1)}% of samples (<a href="#methods">hot methods</a>)`);
-  if(MIXCONF.list&&MIXCONF.list.length) steps.push(`Inspect the ${MIXCONF.list.length} class${MIXCONF.list.length===1?"":"es"} patched by multiple mixin configs (<a href="#config">mixins</a>)`);
-  if(exSpike) steps.push(`Trace the exception burst in the <a href="#log">server log</a> tail`);
-  const stepHtml=steps.slice(0,3).map(s=>`<li>${s}</li>`).join("");
-
-  const intro=has(D.incident.stallMs)&&D.incident.worldShort
-    ? `<code>${esc(D.incident.trigger)}</code> fired after <b>${esc(D.incident.worldShort)}</b> missed its heartbeat by <b>${fmt(D.incident.stallMs)} ms</b>.`
-    : `<code>${esc(D.incident.trigger)}</code> fired at ${esc(D.incident.created)}.`;
-  const left=`<div class="card glow"><h3><span class="ic">${I.warn}</span> Evidence</h3>
-    <div class="diagtext">${intro}</div>
-    <ul class="findings">${ev.join("")}</ul></div>`;
-
-  const vrows=[];
-  vrows.push(`<div class="vrow"><span class="vk">Severity</span><span class="vv ${sevClass}">${esc(D.incident.severity)}</span></div>`);
-  vrows.push(`<div class="vrow"><span class="vk">Investigation direction</span><span class="vv">${esc(direction)}</span></div>`);
-  vrows.push(`<div class="subnote">Correlate CPU share, blocked threads and short GC pauses with timing and stacks.</div>`);
-  const tags=[];
-  if(D.gc&&has(D.gc.maxPauseMs)) tags.push(`<span class="tag">Longest recorded GC pause: ${D.gc.maxPauseMs} ms</span>`);
-  if(DV.deadlock) tags.push(`<span class="tag">Deadlock detected</span>`);
-  const right=`<div class="card"><h3><span class="ic" style="color:var(--blue)">${I.pulse}</span> Assessment</h3>
-    <div class="verdict">${vrows.join("")}</div>
-    ${stepHtml?`<div style="margin-top:14px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--tx3)">Next steps</div><ol class="nextsteps">${stepHtml}</ol>`:""}
-    ${tags.length?`<div class="tagrow" style="margin-top:12px">${tags.join("")}</div>`:""}</div>`;
-  return `<div class="diag">${left}${right}</div>`+cmp;
+  const right=stepHtml?`<div class="card"><h3><span class="ic">${I.pulse}</span> Next steps</h3><ol class="nextsteps">${stepHtml}</ol></div>`:"";
+  return `<div class="diag${right?"":" one"}">${left}${right}</div>`+cmp;
 }
 
 function statsInner(o){
   const d=autoDec(o.min,o.max,o.dec), f=v=>Number(v).toFixed(d);
+  const flag=(cls,word)=>cls?`<span class="vword ${cls}">${word}</span>`:"";
   const parts=[];
   if(has(o.now)) parts.push(`<span class="mnow" data-stat="now">${o.nowLabel||"now"} <b${o.nowCls?` class="${o.nowCls}"`:""}>${f(o.now)}</b>${o.nowSuffix||""}</span>`);
-  parts.push(`<span data-stat="min">min <b${o.minCls?` class="${o.minCls}"`:""}>${f(o.min)}</b></span>`);
+  parts.push(`<span data-stat="min">min <b${o.minCls?` class="${o.minCls}"`:""}>${f(o.min)}</b>${flag(o.minCls,"low")}</span>`);
   parts.push(`<span data-stat="avg">avg <b>${f(o.avg)}</b></span>`);
-  parts.push(`<span data-stat="max">max <b${o.maxCls?` class="${o.maxCls}"`:""}>${f(o.max)}</b></span>`);
+  parts.push(`<span data-stat="max">max <b${o.maxCls?` class="${o.maxCls}"`:""}>${f(o.max)}</b>${flag(o.maxCls,"high")}</span>`);
   let out=parts.join('<span class="msep">·</span>');
   if(o.unitLabel) out+=` <span class="munit">${esc(o.unitLabel)}</span>`;
   if(o.extra) out+=`<span class="msep">·</span>${o.extra}`;
@@ -1354,14 +1318,14 @@ function statsInner(o){
 function legendHtml(withGc){
   const parts=[`<span class="ls"><span class="smp"></span>metric</span>`];
   if(has(D.incident.markerFrac)) parts.push(`<button type="button" class="ls inctog" data-inctog aria-pressed="${INCHL}" data-tip="toggle the incident marker line and window tint"><span class="smp dsh"></span>incident</button>`);
-  else if(has(D.incident.profileFrac)) parts.push(`<button type="button" class="ls inctog" data-inctog aria-pressed="${INCHL}" data-tip="toggle the profile-start marker"><span class="smp dsh" style="border-color:#46cfc0"></span>profile start</button>`);
+  else if(has(D.incident.profileFrac)) parts.push(`<button type="button" class="ls inctog" data-inctog aria-pressed="${INCHL}" data-tip="toggle the profile-start marker"><span class="smp dsh" style="border-color:${PAL.info}"></span>profile start</button>`);
   if(D.events&&D.events.length){
     parts.push(`<span class="ls"><button type="button" class="evmaster" data-evmaster aria-pressed="true" data-tip="hide or show event lines in this section"><span class="smp evs"></span> events</button> `
-      +["error","warn","gc","plugin","conn"].map(t=>`<button type="button" class="evtog" data-evtype="${t}" aria-pressed="true" aria-label="${t==="conn"?"Connection":t} events" data-tip="toggle ${t==="conn"?"connection":t} events"><span class="edot" style="background:${ECOL[t]}"></span></button>`).join("")
+      +[["error","errors","error"],["warn","warnings","warning"],["gc","GC","GC"],["plugin","plugins","plugin"],["conn","connections","connection"]].map(([t,label,word])=>`<button type="button" class="evtog" data-evtype="${t}" aria-pressed="true" data-tip="toggle ${word} events"><span class="edot" style="background:${ECOL[t]}"></span>${label}</button>`).join("")
       +`<span class="evcount"></span>${(has(D.eventsHidden)&&D.eventsHidden>0)?`<span class="evmore" data-tip="${D.eventsHidden} earlier event${D.eventsHidden===1?"":"s"} exceeded the on-chart cap and are not shown">+${D.eventsHidden} earlier</span>`:""}</span>`);
   }
   if(withGc&&Array.isArray(D.gcOverlap)&&D.gcOverlap.length){
-    parts.push(`<button type="button" class="ls gctog" data-gctog aria-pressed="${GCHL}" data-tip="toggle the amber GC-overlap highlight"><span class="edot" style="background:#e6b34a"></span> GC overlap</button>`);
+    parts.push(`<button type="button" class="ls gctog" data-gctog aria-pressed="${GCHL}" data-tip="toggle the GC overlap highlight"><span class="edot" style="background:${PAL.gc}"></span> GC overlap</button>`);
   }
   return `<div class="chlegend">${parts.join("")}</div>`;
 }
@@ -1379,8 +1343,9 @@ function metricsHtml(){
     const cid="ch"+CHART_ID;
     const html0=statBuilder(series,false);
     CHARTS[cid].mkStats=statBuilder; CHARTS[cid].statHtml0=html0;
-    const hint=(chartOpts&&chartOpts.gcIdx&&Array.isArray(D.gcOverlap)&&D.gcOverlap.length)?`<button type="button" class="gchint gctog" data-gctog aria-pressed="${GCHL}" data-tip="toggle the amber GC-overlap highlight">amber = GC overlap</button>`:"";
-    cards.push(`<div class="chartcard mcard"><div class="cth"><span class="ctt"${tip?` data-tip="${esc(tip)}"`:""}><span class="cic">${ic}</span>${title}</span><span class="mstats" data-stats="${cid}">${html0}</span>${hint}</div>${chart}</div>`);
+    const hint=(chartOpts&&chartOpts.gcIdx&&Array.isArray(D.gcOverlap)&&D.gcOverlap.length)?`<button type="button" class="gchint gctog" data-gctog aria-pressed="${GCHL}" data-tip="toggle the GC overlap highlight"><span class="edot" style="background:${PAL.gc}"></span>GC overlap</button>`:"";
+    const legend=chartOpts&&chartOpts.multi?`<div class="pmlegend">${chartOpts.multi.map((l,k)=>`<button type="button" class="pmlg" data-pml="${cid}:${k}" aria-pressed="true" data-tip="${esc(l.tip||l.name)}"><span class="edot" style="background:${l.color}"></span>${esc(l.name)}</button>`).join(" ")}</div>`:"";
+    cards.push(`<div class="chartcard mcard"><div class="cth"><span class="ctt"${tip?` data-tip="${esc(tip)}"`:""}><span class="cic">${ic}</span>${title}</span><span class="mstats" data-stats="${cid}">${html0}</span>${hint}</div>${legend}${chart}</div>`);
   };
 
   if(ser.mspt){
@@ -1389,8 +1354,8 @@ function metricsHtml(){
       ?` Stalled world ${worldLabel(sw.name)}: ${[has(sw.msptP95)?"p95 "+sw.msptP95.toFixed(1)+" ms":null,has(sw.msptMax)?"max "+sw.msptMax.toFixed(1)+" ms":null].filter(Boolean).join(", ")}.`:"";
     const tw=D.tps?(D.worlds||[]).find(w=>w.name===D.tps.world):null;
     card(I.bolt,`Tick interval${D.tps?` · ${esc(worldLabel(D.tps.world))}`:""}`,
-      `Milliseconds per tick${has(D.incident.stallMs)?"; the spike at the marker is the triggering stall":""}. Amber pieces overlap a GC pause.${tickWhy}${swPct}`,
-      ser.mspt,{color:"#f0626b",unit:" ms",decimals:1,gcIdx:true},
+      `Milliseconds per tick${has(D.incident.stallMs)?"; the spike at the marker is the triggering stall":""}. Highlighted pieces overlap a GC pause.${tickWhy}${swPct}`,
+      ser.mspt,{color:SERIES[0],unit:" ms",decimals:1,gcIdx:true},
       (s,z)=>{const st=sstat(s);const stall=has(D.incident.stallMs)&&markerInZoom();
         const ex=[];
         if(!z&&tw&&has(tw.msptMax)&&tw.msptMax>st.max) ex.push(`<span data-stat="worst" data-tip="Worst single tick in the window. The chart averages ticks per bucket, so single-tick spikes flatten out.">worst tick <b>${tw.msptMax.toFixed(1)} ms</b></span>`);
@@ -1401,68 +1366,74 @@ function metricsHtml(){
   }
   if(ser.tps){
     const target=(D.tps&&has(D.tps.target))?D.tps.target:null;
-    card(I.pulse,`Tick rate${D.tps?` · ${esc(worldLabel(D.tps.world))}`:""}`,
-      `Measured tick rate sampled by Hybox over the window${target?`, against the ${target} TPS target`:""}.${tickWhy}`,
-      ser.tps,{color:"#5bd68b",unit:" tps",decimals:1,max:target},
+    const worlds=(Array.isArray(D.worldTps)?D.worldTps:[]).filter(w=>w&&w.name&&w.series&&w.series.length>=2);
+    const main=D.tps?worlds.find(w=>w.name===D.tps.world):null;
+    const others=worlds.filter(w=>w!==main).slice(0,7);
+    const multi=main&&others.length?[main,...others].map((w,k)=>({name:shortWorld(w.name),tip:w.name,series:w.series,color:SERIES[k%SERIES.length],dec:1})):null;
+    const more=multi&&worlds.length>multi.length?` Showing the ${multi.length} busiest of ${worlds.length} worlds.`:"";
+    card(I.pulse,multi?"Tick rate by world":`Tick rate${D.tps?` · ${esc(worldLabel(D.tps.world))}`:""}`,
+      `Measured tick rate sampled by Hybox over the window${target?`, against the ${target} TPS target`:""}.${multi?` The numbers are for ${worldLabel(D.tps.world)}. Click a world to hide its line.${more}`:tickWhy}`,
+      ser.tps,{color:SERIES[0],unit:" tps",decimals:1,max:target,multi},
       (s,z)=>{const st=sstat(s);
         const min=(!z&&D.tps&&has(D.tps.min))?D.tps.min:st.min;
         const avg=(!z&&D.tps&&has(D.tps.avg))?D.tps.avg:st.avg;
-        return statsInner({now:s[s.length-1],nowSuffix:target?`<span class="mu2">/${target}</span>`:"",
+        return statsInner({now:s[s.length-1],nowLabel:multi?esc(shortWorld(D.tps.world))+" now":null,nowSuffix:target?`<span class="mu2">/${target}</span>`:"",
           min,avg,max:st.max,dec:1,unitLabel:"tps",minCls:(target&&min<0.9*target)?"v-warn":null});});
   }
   if(allZero(ser.players)) flatZero.push("Players online");
   else if(ser.players){
     card(I.players,"Players online","Concurrent players over the window; per-world detail in Worlds.",
-      ser.players,{color:"#5bd68b",unit:"",decimals:0},
+      ser.players,{color:SERIES[0],unit:"",decimals:0},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:(!z&&has(D.incident.players))?D.incident.players:s[s.length-1],
           min:st.min,avg:st.avg,max:st.max,dec:0,unitLabel:"players"});});
   }
   {
-    const cl=[["connects",ser.connects,"#62a8ea"],["joins",ser.joins,"#5bd68b"],["leaves",ser.leaves,"#e6b34a"]]
+    const cl=[["connects",ser.connects],["joins",ser.joins],["leaves",ser.leaves]]
       .filter(l=>Array.isArray(l[1])&&l[1].length);
     const nz=cl.filter(l=>!allZero(l[1]));
     if(cl.length&&!nz.length) flatZero.push("Connections");
     else if(nz.length){
-      const lines=nz.map(l=>({name:l[0],kind:"count",series:l[1],color:l[2],dec:0}));
+      const lines=nz.map((l,k)=>({name:l[0],kind:"count",series:l[1],color:SERIES[k],dec:0}));
       groupedCard("Connections",lines,"count/interval","",cards,null,I.players);
     }
   }
   if(allZero(ser.entities)) flatZero.push("Entities");
   else if(ser.entities){
     card(I.layers,"Entities","Total live entities across all worlds; per-world counts and typed breakdown in Worlds.",
-      ser.entities,{color:"#a98be0",unit:"",decimals:0},
+      ser.entities,{color:SERIES[0],unit:"",decimals:0},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:s[s.length-1],min:st.min,avg:st.avg,max:st.max,dec:0,unitLabel:"entities"});});
   }
   if(allZero(ser.chunks)) flatZero.push("Chunks");
   else if(ser.chunks){
     card(I.layers,"Chunks","Total loaded chunks across all worlds; per-world counts in Worlds.",
-      ser.chunks,{color:"#46cfc0",unit:"",decimals:0},
+      ser.chunks,{color:SERIES[0],unit:"",decimals:0},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:s[s.length-1],min:st.min,avg:st.avg,max:st.max,dec:0,unitLabel:"chunks"});});
   }
   const churnLines=[];
-  if(ser.chunksGenerated&&!allZero(ser.chunksGenerated)) churnLines.push({name:"generated",kind:"count",series:ser.chunksGenerated,color:"#e0a96b",dec:0});
-  if(ser.chunksLoaded&&!allZero(ser.chunksLoaded)) churnLines.push({name:"loaded",kind:"count",series:ser.chunksLoaded,color:"#6ba9e0",dec:0});
+  if(ser.chunksGenerated&&!allZero(ser.chunksGenerated)) churnLines.push({name:"generated",kind:"count",series:ser.chunksGenerated,dec:0});
+  if(ser.chunksLoaded&&!allZero(ser.chunksLoaded)) churnLines.push({name:"loaded",kind:"count",series:ser.chunksLoaded,dec:0});
+  churnLines.forEach((l,k)=>{l.color=SERIES[k];});
   if(churnLines.length) groupedCard("Chunk churn",churnLines,"per interval","chunks",cards,null,I.layers);
   else if(ser.chunksGenerated||ser.chunksLoaded) flatZero.push("Chunk churn");
   if(allZero(ser.ping)) flatZero.push("Player ping");
   else if(ser.ping){
     card(I.clock,"Player ping","Average player round-trip time. Rising ping with stable TPS points at the network, not the server.",
-      ser.ping,{color:"#46cfc0",unit:" ms",decimals:0},
+      ser.ping,{color:SERIES[0],unit:" ms",decimals:0},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:s[s.length-1],min:st.min,avg:st.avg,max:st.max,dec:0,unitLabel:"ms",
           maxCls:(st.avg>0&&st.max>2*st.avg)?"v-warn":null});});
   }
   if(ser.cpu&&ser.cpuJvm){
     groupedCard("CPU",[
-      {name:"process",kind:"gauge",series:ser.cpuJvm,color:"#46cfc0",dec:1},
-      {name:"machine",kind:"gauge",series:ser.cpu,color:"#62a8ea",dec:1}
+      {name:"process",kind:"gauge",series:ser.cpuJvm,color:SERIES[0],dec:1},
+      {name:"machine",kind:"gauge",series:ser.cpu,color:SERIES[1],dec:1}
     ],"","%",cards,null,I.cpu);
   } else if(ser.cpu){
     card(I.cpu,"Machine CPU",`Host-wide CPU load (jdk.CPULoad)${D.cpu?`. JVM peak ${D.cpu.jvmMax.toFixed(1)}%, JVM average ${D.cpu.jvmAvg.toFixed(1)}%`:""}.`,
-      ser.cpu,{color:"#62a8ea",unit:"%",decimals:1},
+      ser.cpu,{color:SERIES[0],unit:"%",decimals:1},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:s[s.length-1],min:st.min,
           avg:(!z&&D.cpu)?D.cpu.machAvg:st.avg,max:(!z&&D.cpu)?D.cpu.machMax:st.max,dec:1,unitLabel:"%"});});
@@ -1470,14 +1441,14 @@ function metricsHtml(){
   if(DV.heapG){
     const mx=(D.heap&&has(D.heap.max)&&D.heap.max>0)?gib(D.heap.max):null;
     card(I.heap,"Heap used",`Heap usage over the window${mx?` against the ${mx.toFixed(1)} GiB maximum`:""}; the sawtooth is allocate-then-collect.`,
-      DV.heapG,{color:"#e6b34a",unit:" GiB",decimals:1,max:mx},
+      DV.heapG,{color:SERIES[0],unit:" GiB",decimals:1,max:mx},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:s[s.length-1],min:(!z&&D.heap)?gib(D.heap.floor):st.min,
           avg:st.avg,max:(!z&&D.heap)?gib(D.heap.peak):st.max,dec:1,unitLabel:"GiB"});});
   }
   if(DV.rssG){
     card(I.ram,"Process RSS",`Resident set size of the server process (jdk.ResidentSetSize)${D.sys&&has(D.sys.ramTotal)?` · machine has ${gb(D.sys.ramTotal).toFixed(1)} GB RAM`:""}.`,
-      DV.rssG,{color:"#d98b6a",unit:" GB",decimals:1},
+      DV.rssG,{color:SERIES[0],unit:" GB",decimals:1},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:s[s.length-1],min:st.min,avg:st.avg,
           max:(!z&&D.ram)?gb(D.ram.rssPeak):st.max,dec:1,unitLabel:"GB"});});
@@ -1486,14 +1457,14 @@ function metricsHtml(){
     const memTot=(D.sys&&has(D.sys.ramTotal)&&D.sys.ramTotal>0)?gb(D.sys.ramTotal):null;
     const memLast=DV.hostMemG[DV.hostMemG.length-1];
     card(I.ram,"Host memory",`Physical memory in use on the whole host, all processes${memTot?`. Currently ${memLast.toFixed(1)} of ${memTot.toFixed(1)} GB (${(100*memLast/memTot).toFixed(0)}%)`:""}.`,
-      DV.hostMemG,{color:"#cc8bd1",unit:" GB",decimals:1},
+      DV.hostMemG,{color:SERIES[0],unit:" GB",decimals:1},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:s[s.length-1],min:st.min,avg:st.avg,max:st.max,dec:1,unitLabel:"GB"});});
   }
   if(DV.diskG){
     const dtot=(D.sys&&D.sys.disk&&has(D.sys.disk.total)&&D.sys.disk.total>0)?gb(D.sys.disk.total):null;
     card(I.disk,"Disk free",`Free space on the server filesystem${dtot?` of ${dtot.toFixed(1)} GB total`:""}. A full disk stops the JFR recording and bundle writes.`,
-      DV.diskG,{color:"#8a93d8",unit:" GB",decimals:1},
+      DV.diskG,{color:SERIES[0],unit:" GB",decimals:1},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:s[s.length-1],min:st.min,avg:st.avg,max:st.max,dec:1,unitLabel:"GB",
           minCls:(dtot&&st.min<0.05*dtot)?"v-warn":null});});
@@ -1501,32 +1472,16 @@ function metricsHtml(){
   if(ser.diskWrite||ser.diskRead){
     const lines=[];
     if(allZero(ser.diskWrite)) flatZero.push("Disk write");
-    else if(ser.diskWrite) lines.push({name:"write",kind:"gauge",series:ser.diskWrite,color:"#e6b34a",dec:1});
+    else if(ser.diskWrite) lines.push({name:"write",kind:"gauge",series:ser.diskWrite,dec:1});
     if(allZero(ser.diskRead)) flatZero.push("Disk read");
-    else if(ser.diskRead) lines.push({name:"read",kind:"gauge",series:ser.diskRead,color:"#62a8ea",dec:1});
+    else if(ser.diskRead) lines.push({name:"read",kind:"gauge",series:ser.diskRead,dec:1});
+    lines.forEach((l,k)=>{l.color=SERIES[k];});
     if(lines.length) groupedCard("Disk I/O",lines,""," MB/s",cards,null,I.disk);
-  }
-  if(allZero(ser.netOut)) flatZero.push("Network out");
-  else if(ser.netOut){
-    card(I.net,`Network out${D.net?` · ${esc(D.net.iface)}`:""}`,
-      `Outbound throughput (jdk.NetworkUtilization, host-wide per interface)${(D.net&&has(D.net.inAvg))?`. Inbound averaged ${D.net.inAvg.toFixed(1)} Mb/s`:""}.`,
-      ser.netOut,{color:"#a98be0",unit:" Mb/s",decimals:1},
-      (s,z)=>{const st=sstat(s);
-        return statsInner({now:s[s.length-1],min:st.min,
-          avg:(!z&&D.net)?D.net.outAvg:st.avg,max:(!z&&D.net)?D.net.outPeak:st.max,dec:1,unitLabel:"Mb/s"});});
-  }
-  if(ser.threads){
-    card(I.threads,"Live threads",
-      D.threadStates?`JVM thread count. At capture: ${Object.entries(D.threadStates).map(([k,v])=>v+" "+k.toLowerCase().replace("_"," ")).join(", ")}.`:"JVM thread count over the window.",
-      ser.threads,{color:"#62a8ea",unit:"",decimals:0},
-      (s,z)=>{const st=sstat(s);
-        return statsInner({now:(!z&&has(D.threadTotal))?D.threadTotal:s[s.length-1],
-          min:st.min,avg:st.avg,max:st.max,dec:0,unitLabel:"threads"});});
   }
   if(allZero(ser.gcPause)) flatZero.push("GC pause");
   else if(ser.gcPause){
     card(I.gc,"GC pause",`Longest recorded stop-the-world pause per interval${D.gc?` across ${D.gc.collections} collections (${D.gc.totalPauseMs}ms total)`:""}. Compare pause timing and frequency with the incident; a short maximum does not rule out GC involvement.`,
-      ser.gcPause,{color:"#5bd68b",unit:" ms",decimals:2},
+      ser.gcPause,{color:SERIES[0],unit:" ms",decimals:2},
       (s,z)=>{const st=sstat(s);
         return statsInner({now:s[s.length-1],min:st.min,avg:st.avg,
           max:(!z&&D.gc)?D.gc.maxPauseMs:st.max,dec:2,unitLabel:"ms",maxCls:st.max>=50?"v-warn":null});});
@@ -1534,7 +1489,7 @@ function metricsHtml(){
   if(allZero(ser.exceptions)) flatZero.push("Exceptions");
   else if(ser.exceptions){
     card(I.warn,"Exceptions thrown","Exceptions per interval. A spike near the incident points at the failing subsystem or mod.",
-      ser.exceptions,{color:"#ef7aa5",unit:"/interval",decimals:0},
+      ser.exceptions,{color:SERIES[0],unit:"/interval",decimals:0},
       (s,z)=>{const st=sstat(s);const tot=s.reduce((a,v)=>a+v,0);
         return statsInner({now:tot,nowLabel:"total",min:st.min,avg:st.avg,max:st.max,dec:0,unitLabel:"/interval",
           maxCls:(st.avg>0&&st.max>5*st.avg)?"v-warn":null});});
@@ -1542,9 +1497,7 @@ function metricsHtml(){
 
   const facts=[];
   if(DV.win) facts.push(`<span class="pill">${I.clock} window <b>${DV.win}</b></span>`);
-  if(DV.samples) facts.push(`<span class="pill">${I.fire} <b>${fmt(DV.samples)}</b> execution samples</span>`);
   if(has(D.incident.players)&&!ser.players) facts.push(`<span class="pill">${I.players} <b>${D.incident.players}</b> players at capture</span>`);
-  if(has(D.threadTotal)&&!ser.threads) facts.push(`<span class="pill">${I.threads} <b>${D.threadTotal}</b> live threads</span>`);
   if(D.gc&&!ser.gcPause) facts.push(`<span class="pill">${I.gc} max GC pause <b>${D.gc.maxPauseMs} ms</b></span>`);
   if(D.gc&&has(D.gc.totalPauseMs)&&has(D.incident.windowSec)&&D.incident.windowSec>0) facts.push(`<span class="pill">${I.gc} GC overhead <b>${(100*D.gc.totalPauseMs/(D.incident.windowSec*1000)).toFixed(1)}%</b></span>`);
   if(D.sys&&has(D.sys.cpuStealPct)&&D.sys.cpuStealPct>=5) facts.push(`<span class="pill">${I.cpu} CPU steal <b>${D.sys.cpuStealPct.toFixed(1)}%</b></span>`);
@@ -1612,7 +1565,6 @@ function groupedCard(title,lines,kindChip,unit,cards,extra,icon){
   const legend=single?"":`<div class="pmlegend">${lines.map((l,k)=>`<button type="button" class="pmlg" data-pml="${cid}:${k}" aria-pressed="true" data-tip="${esc(tipFor(slices0,k))}"><span class="edot" style="background:${l.color}"></span>${esc(l.name)}</button>`).join(" ")}</div>`;
   cards.push(`<div class="chartcard mcard"><div class="cth"><span class="ctt"><span class="cic">${icon||I.pulse}</span>${esc(title)}${kindChip?` <span class="st NEUTRAL" style="margin-left:7px">${kindChip}</span>`:""}</span><span class="mstats" data-stats="${cid}">${strip0}</span></div>${legend}${chart}</div>`);
 }
-const CARD_PAL=["#46cfc0","#62a8ea","#a98be0","#ef7aa5","#5bd68b","#e6b34a","#d98b6a","#8a93d8"];
 
 function pluginMetricsHtml(){
   const all=(D.pluginMetrics||[]).filter(m=>m&&m.name);
@@ -1623,7 +1575,7 @@ function pluginMetricsHtml(){
   const skipped=all.filter(m=>!charted.includes(m)&&m.uncharted!=="zero"&&m.uncharted!=="single");
   const decOf=s=>s.some(v=>Math.abs(v-Math.round(v))>1e-9)?1:0;
   const owners=[];
-  const colorOf=m=>{const o=String(m.name).split("/")[0];if(!owners.includes(o))owners.push(o);return CARD_PAL[owners.indexOf(o)%CARD_PAL.length];};
+  const colorOf=m=>{const o=String(m.name).split("/")[0];if(!owners.includes(o))owners.push(o);return SERIES[owners.indexOf(o)%SERIES.length];};
   const cards=[];
   charted.forEach(m=>{
     const rate=m.kind==="count"&&has(m.bucketSec);
@@ -1664,7 +1616,7 @@ function engineHtml(){
       if(ms.length>6){
         ms=[...ms].sort((a,b)=>sstat(b.series).avg-sstat(a.series).avg).slice(0,6);
       }
-      const lines=ms.map((m,k)=>({name:m.sys,kind:"gauge",series:m.series,color:CARD_PAL[k%CARD_PAL.length],dec:1}));
+      const lines=ms.map((m,k)=>({name:m.sys,kind:"gauge",series:m.series,color:SERIES[k%SERIES.length],dec:1}));
       groupedCard(worldLabel(world),lines,"ms per tick"," ms",cards,{gcIdx:true});
     });
     parts.push(`<div class="mgrid">${cards.join("")}</div>`);
@@ -1674,9 +1626,9 @@ function engineHtml(){
     const rows=sorted.map(r=>{
       const [sys,world,avg1,max1,avg5,max5]=r;
       const pctB=100*avg1/BUDGET;
-      const cls=pctB>100?"v-bad":(pctB>50?"v-warn":"pct");
+      const cls=pctB>100?"v-bad":(pctB>50?"v-warn":"pct"), word=pctB>100?"over budget":(pctB>50?"high":"");
       const barCol=pctB>100?"var(--bad)":(pctB>50?"var(--warn)":"var(--good)");
-      return `<tr><td class="nm"><span class="tnc2" style="max-width:280px" data-tipov="${esc(sys)}">${esc(sys)}</span></td><td class="pkg" data-sval="${esc(world)}"><span class="tnc2" style="max-width:170px" data-tipov="${esc(world)}">${esc(worldLabel(world))}</span></td><td class="r" data-num="${avg1}">${Number(avg1).toFixed(2)}</td><td class="r" data-num="${max1}">${Number(max1).toFixed(2)}</td><td class="r" data-num="${avg5}">${Number(avg5).toFixed(2)}</td><td class="r" data-num="${max5}">${Number(max5).toFixed(2)}</td><td class="r" data-num="${pctB.toFixed(2)}"><span class="bbar"><i style="width:${Math.min(100,pctB).toFixed(0)}%;background:${barCol}"></i></span><span class="${cls}">${pctB.toFixed(1)}%</span></td></tr>`;
+      return `<tr><td class="nm"><span class="tnc2" style="max-width:280px" data-tipov="${esc(sys)}">${esc(sys)}</span></td><td class="pkg" data-sval="${esc(world)}"><span class="tnc2" style="max-width:170px" data-tipov="${esc(world)}">${esc(worldLabel(world))}</span></td><td class="r" data-num="${avg1}">${Number(avg1).toFixed(2)}</td><td class="r" data-num="${max1}">${Number(max1).toFixed(2)}</td><td class="r" data-num="${avg5}">${Number(avg5).toFixed(2)}</td><td class="r" data-num="${max5}">${Number(max5).toFixed(2)}</td><td class="r" data-num="${pctB.toFixed(2)}"><span class="bbar"><i style="width:${Math.min(100,pctB).toFixed(0)}%;background:${barCol}"></i></span><span class="${cls}">${pctB.toFixed(1)}%${word?`<span class="vword">${word}</span>`:""}</span></td></tr>`;
     }).join("");
     parts.push(`<div class="tscroll" style="margin-top:${series.length?"16px":"0"}"><div class="tcap"><table class="sortable" id="es-t"><thead><tr>${thc("System","Engine ECS system",{sort:"text"})}${thc("World","World whose Store ticks this system",{sort:"text"})}${thc("avg 1m","Average tick cost, last minute (ms)",{sort:"num",r:true,def:"desc"})}${thc("max 1m","Worst tick, last minute (ms)",{sort:"num",r:true})}${thc("avg 5m","Average tick cost, last 5 minutes (ms)",{sort:"num",r:true})}${thc("max 5m","Worst tick, last 5 minutes (ms)",{sort:"num",r:true})}${thc("% of budget","Share of the "+BUDGET.toFixed(1)+" ms tick budget (avg 1m)",{sort:"num",r:true})}</tr></thead><tbody>${rows}</tbody></table></div></div>`);
   }
@@ -1689,7 +1641,7 @@ function flameHtml(){
   if(!D.flame||!Array.isArray(D.flame)||!Array.isArray(D.flame[2])||!D.flame[2].length) return "";
   const sw=(o,c,l)=>`<button type="button" class="flg flgtog" data-own="${o}" aria-pressed="true" data-tip="show or hide ${l} frames"><span class="fsw" style="background:${c}"></span>${l}</button>`;
   return `<p class="lead">Every execution sample's full stack, grouped by thread at the top level. Width is sample share, depth is the call path. Use the frame selector and zoom buttons to navigate without the canvas.</p>
-  <div class="flamebar"><span class="srch"><span class="si">${I.search}</span><input type="search" id="flamefilter" aria-label="Filter flame graph frames" placeholder="filter frames…"></span><span class="flamelg">${sw(1,"hsl(205,54%,46%)","engine")}${sw(2,"hsl(33,80%,50%)","mod")}${sw(3,"hsl(220,5%,46%)","JDK")}</span><button type="button" class="fcrumb" id="flamecrumb">Reset flame graph</button><span class="fnote" id="flamenote"></span></div>
+  <div class="flamebar"><span class="srch"><span class="si">${I.search}</span><input type="search" id="flamefilter" aria-label="Filter flame graph frames" placeholder="filter frames…"></span><span class="flamelg">${sw(1,"hsl(210,73%,66%)","engine")}${sw(2,"hsl(48,100%,56%)","mod")}${sw(3,"hsl(39,5%,53%)","JDK")}</span><button type="button" class="fcrumb" id="flamecrumb">Reset flame graph</button><span class="fnote" id="flamenote"></span></div>
   <div class="flame-controls"><label>Child frame <select id="flamechild" aria-describedby="flamevalue"></select></label><button type="button" class="copybtn" id="flamezoom">Zoom to frame</button><button type="button" class="copybtn" id="flameup">Parent frame</button></div>
   <div class="flame-controls" id="flamesearch" hidden><label>Search matches <select id="flamematch"></select></label><button type="button" class="copybtn" id="flamejump">Zoom to match</button></div>
   <output id="flamevalue" aria-live="polite"></output>
@@ -1700,7 +1652,7 @@ function initFlame(){
   const ROW=22, AROW=10, MAXH=520;
   const nodes=[];
   function parse(n,parent=null){
-    const node={name:String(n[0]),samples:n[1],children:[],owner:n[3]|0,parent,id:nodes.length};
+    const node={name:String(n[0]),samples:n[1],children:[],owner:n[3]|0,label:n[4]||null,parent,id:nodes.length};
     nodes.push(node);node.children=(n[2]||[]).map(c=>parse(c,node));return node;
   }
   const root=parse(D.flame);
@@ -1712,7 +1664,7 @@ function initFlame(){
   let choices=[],searchMatches=[],fTimer=null,choiceRoot=null,choiceOwners="";
   function describe(node){
     const names=[];for(let n=node;n;n=n.parent) names.push(n.name);
-    return `${names.reverse().join(" → ")} · ${fmt(node.samples)} samples · ${pct(node.samples,root.samples||1).toFixed(2)}% of total · ${pct(node.samples,path[path.length-1].samples||1).toFixed(1)}% of view`;
+    return `${names.reverse().join(" → ")}${node.label?` (${node.label})`:""} · ${fmt(node.samples)} samples · ${pct(node.samples,root.samples||1).toFixed(2)}% of total · ${pct(node.samples,path[path.length-1].samples||1).toFixed(1)}% of view`;
   }
   function showFrameValue(){
     const cur=path[path.length-1],selected=nodes[Number(childSelect.value)];
@@ -1751,11 +1703,12 @@ function initFlame(){
     let h=0; for(let i=0;i<cls.length;i++) h=(h*31+cls.charCodeAt(i))>>>0;
     return h%360;
   };
-  const OWNER_HUE={0:265,1:205,2:33,3:220}, OWNER_SAT={0:16,1:54,2:80,3:5};
+  const OWNER_HUE={0:39,1:210,2:48,3:39}, OWNER_SAT={0:10,1:73,2:100,3:5}, OWNER_JIT={0:0,1:8,2:2,3:0};
+  const OWNER_L={0:[68,5],1:[62,7],2:[52,9],3:[50,7]};
   const colorOf=(node,anc)=>{
-    const o=node.owner|0, j=hue(node.name)%24-12;
-    const s=anc?Math.max(8,OWNER_SAT[o]-20):OWNER_SAT[o];
-    const l=anc?34:(o===0?30:(o===2?50:46));
+    const o=node.owner|0, hh=hue(node.name), jit=OWNER_JIT[o], j=jit?hh%(2*jit+1)-jit:0;
+    const s=anc?Math.max(4,OWNER_SAT[o]-30):OWNER_SAT[o];
+    const l=anc?40:OWNER_L[o][0]+hh%OWNER_L[o][1];
     return `hsl(${OWNER_HUE[o]+j},${s}%,${l}%)`;
   };
   function render(){
@@ -1793,7 +1746,7 @@ function initFlame(){
         ctx.fillStyle=colorOf(n,false);
         ctx.fillRect(x,y,Math.max(w-0.6,0.4),ROW-1);
         if(w>40){
-          ctx.globalAlpha=1;ctx.fillStyle=dim||n.owner===0?"#eef1f6":"#08090b";
+          ctx.globalAlpha=1;ctx.fillStyle=dim?PAL.tx:PAL.ink;
           ctx.save();ctx.beginPath();ctx.rect(x+3,y,w-6,ROW);ctx.clip();
           ctx.fillText(String(n.name),x+4,y+ROW/2);
           ctx.restore();
@@ -1840,7 +1793,7 @@ function initFlame(){
     cv.style.cursor="pointer";
     let txt;
     if(c.kind==="gap") txt=`pruned frames (${fmt(c.gapN)} samples)`;
-    else txt=`${c.node.name} · ${fmt(c.node.samples)} samples · ${pct(c.node.samples,root.samples||1).toFixed(2)}% of total · ${pct(c.node.samples,path[path.length-1].samples||1).toFixed(1)}% of view`;
+    else txt=`${c.node.name}${c.node.label?` · ${c.node.label}`:""} · ${fmt(c.node.samples)} samples · ${pct(c.node.samples,root.samples||1).toFixed(2)}% of total · ${pct(c.node.samples,path[path.length-1].samples||1).toFixed(1)}% of view`;
     TIP.textContent=txt; TIP.style.display="block";
     const tw=TIP.offsetWidth, th=TIP.offsetHeight, m=8;
     let x=e.clientX+12; if(x+tw>innerWidth-m)x=e.clientX-tw-12;
@@ -1887,7 +1840,7 @@ function initFlame(){
 function threadTimelineHtml(){
   const tt=D.threadTimeline;
   if(!tt||!tt.length) return "";
-  const lg=[["RUNNABLE","#5bd68b"],["WAITING","#62a8ea"],["TIMED WAITING","#a98be0"],["BLOCKED","#f0626b"]]
+  const lg=[["RUNNABLE",PAL.good],["WAITING",PAL.info],["TIMED WAITING",PAL.violet],["BLOCKED",PAL.bad]]
     .map(([k,c])=>`<span><span class="edot" style="background:${c}"></span>${k}</span>`).join(" ");
   const hasFlame=!!(D.flame&&Array.isArray(D.flame)&&Array.isArray(D.flame[2])&&D.flame[2].length);
   const labels=tt.map(t=>hasFlame?`<button type="button" class="ttlabel" data-flamegroup="${esc(threadGroup(t.name))}" aria-pressed="false" data-tip="${esc(t.name)} · focus in flame graph">${esc(t.name)}</button>`:`<div class="ttlabel" data-tipov="${esc(t.name)}">${esc(t.name)}</div>`).join("");
@@ -1899,7 +1852,7 @@ function threadTimelineHtml(){
 function initThreadTimeline(){
   const cv=$("#ttcanvas"); if(!cv||!D.threadTimeline||!D.threadTimeline.length) return;
   const tt=D.threadTimeline, ROWH=22;
-  const SCOL={1:"#5bd68b",2:"#62a8ea",3:"#a98be0",4:"#f0626b"};
+  const SCOL={1:PAL.good,2:PAL.info,3:PAL.violet,4:PAL.bad};
   const SNAME={0:"no samples",1:"RUNNABLE",2:"WAITING",3:"TIMED_WAITING",4:"BLOCKED"};
   let geo=null;
   const threadSelect=$("#ttthread"),interval=$("#ttinterval"),value=$("#ttvalue");
@@ -1928,7 +1881,7 @@ function initThreadTimeline(){
       for(let i=0;i<n;i++){
         const s=t.states[i0+i];
         if(!s) continue;
-        ctx.fillStyle=SCOL[s]||"#9aa1ad";
+        ctx.fillStyle=SCOL[s]||PAL.neutral;
         ctx.fillRect(i*cw,y+1,Math.max(cw-0.4,0.5),ROWH-3);
       }
     });
@@ -1936,7 +1889,7 @@ function initThreadTimeline(){
       const gf=clamp01(D.incident.markerFrac);
       if(gf>=za-1e-9&&gf<=zb+1e-9){
         const x=Math.round(((gf-za)/((zb-za)||1))*cssW)+0.5;
-        ctx.setLineDash([3,3]); ctx.strokeStyle="#f0626b"; ctx.lineWidth=1;
+        ctx.setLineDash([3,3]); ctx.strokeStyle=PAL.bad; ctx.lineWidth=1;
         ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,cssH); ctx.stroke(); ctx.setLineDash([]);
       }
     }
@@ -1985,7 +1938,7 @@ function cpuModBars(rows,rich){
   const mx=Math.max(...rows.map(m=>m[1]));
   return rows.map(m=>{
     const mod=m[0],samp=m[1],p=T?pct(samp,T):0,meth=rich?m[2]:null,thr=rich?m[3]:null;
-    const bar=`<div class="wbar"><div class="wn"><span style="min-width:0"><span class="tnc" data-tipov="${esc(mod)}">${esc(mod)}</span>${meth?`<div class="modmeth" data-tipov="${esc(meth)}">${esc(leafName(meth))}</div>`:""}</span></div><div class="wt"><div class="wf" style="width:${(100*samp/Math.max(1,mx)).toFixed(1)}%"></div></div><div class="wv">${fmt(samp)} · ${p.toFixed(1)}%</div></div>`;
+    const bar=`<div class="wbar"><div class="wn"><span style="min-width:0"><span class="tnc" data-tipov="${esc(mod)}">${esc(mod)}</span>${hyboxTag(isHyboxMod(mod))}${meth?`<div class="modmeth" data-tipov="${esc(meth)}">${esc(leafName(meth))}</div>`:""}</span></div><div class="wt"><div class="wf" style="width:${(100*samp/Math.max(1,mx)).toFixed(1)}%"></div></div><div class="wv">${fmt(samp)} · ${p.toFixed(1)}%</div></div>`;
     const tt=(thr&&thr.length)?thr.map(t=>`${esc(t[0])} ${(100*t[1]/Math.max(1,samp)).toFixed(0)}%`).join(" · "):"";
     return tt?`<div>${bar}<div class="modthr" data-tipov="${tt}">on ${tt}</div></div>`:`<div>${bar}</div>`;
   }).join("");
@@ -2034,14 +1987,14 @@ function cpuHtml(){
   if(ser.cpu){
     const cpuMax=Math.max(5,Math.ceil(Math.max(...ser.cpu)/5)*5);
     if(ser.cpuJvm){
-      const lines=[{name:"machine",series:ser.cpu,color:"#62a8ea",dec:1},{name:"process",series:ser.cpuJvm,color:"#46cfc0",dec:1}];
+      const lines=[{name:"machine",series:ser.cpu,color:SERIES[1],dec:1},{name:"process",series:ser.cpuJvm,color:SERIES[0],dec:1}];
       const chart=lineChart(null,{h:195,max:cpuMax,unit:"%",decimals:1,times:DV.span,marker:DV.incMarker,multi:lines});
       const cid="ch"+CHART_ID;
       const tips=["Host-wide CPU load across all processes (jdk.CPULoad)","CPU used by the server JVM process alone"];
       const legend=`<div class="pmlegend">${lines.map((l,k)=>`<button type="button" class="pmlg" data-pml="${cid}:${k}" aria-pressed="true" data-tip="${esc(tips[k])}"><span class="edot" style="background:${l.color}"></span>${esc(l.name)}</button>`).join(" ")}</div>`;
       cards.push(`<div class="chartcard"><div class="cth"><span class="ctt">CPU over capture window</span><span class="ctm">${DV.span?esc(DV.span.from)+" → "+esc(DV.span.to)+" · ":""}${D.cpu?`machine avg ${D.cpu.machAvg.toFixed(1)}% · process avg ${D.cpu.jvmAvg.toFixed(1)}%`:""}</span></div>${legend}${chart}</div>`);
     } else {
-      cards.push(`<div class="chartcard"><div class="cth"><span class="ctt">Machine CPU over capture window</span><span class="ctm">${DV.span?esc(DV.span.from)+" → "+esc(DV.span.to)+" · ":""}avg ${D.cpu.machAvg.toFixed(1)}% · peak ${D.cpu.machMax.toFixed(1)}%</span></div>${lineChart(ser.cpu,{h:195,color:"#62a8ea",max:cpuMax,unit:"%",decimals:1,times:DV.span,marker:DV.incMarker})}</div>`);
+      cards.push(`<div class="chartcard"><div class="cth"><span class="ctt">Machine CPU over capture window</span><span class="ctm">${DV.span?esc(DV.span.from)+" → "+esc(DV.span.to)+" · ":""}avg ${D.cpu.machAvg.toFixed(1)}% · peak ${D.cpu.machMax.toFixed(1)}%</span></div>${lineChart(ser.cpu,{h:195,color:SERIES[0],max:cpuMax,unit:"%",decimals:1,times:DV.span,marker:DV.incMarker})}</div>`);
     }
   }
   const sampled=DV.ranked;
@@ -2055,18 +2008,7 @@ function cpuHtml(){
   }
   if(!cards.length&&!(D.subsystems&&D.subsystems.length)) return "";
   parts.push(cards.length===2?`<div class="charts2">${cards.join("")}</div>`:cards.join(""));
-  if(Array.isArray(D.worldTps)&&D.worldTps.length){
-    const all=D.worldTps.filter(w=>w&&w.name&&w.series&&w.series.length>=2);
-    const wt=all.slice(0,8);
-    if(wt.length){
-      const lines=wt.map((w,k)=>({name:shortWorld(w.name),series:w.series,color:CARD_PAL[k%CARD_PAL.length],dec:1}));
-      const chart=lineChart(null,{h:195,unit:" tps",decimals:1,times:DV.span,marker:DV.incMarker,multi:lines});
-      const cid="ch"+CHART_ID;
-      const legend=`<div class="pmlegend">${wt.map((w,k)=>`<button type="button" class="pmlg" data-pml="${cid}:${k}" aria-pressed="true" data-tip="${esc(w.name)}"><span class="edot" style="background:${lines[k].color}"></span>${esc(lines[k].name)}</button>`).join(" ")}</div>`;
-      const more=all.length>wt.length?` · top ${wt.length} of ${all.length} by CPU; all worlds in the Worlds table`:"";
-      parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Tick rate by world</span><span class="ctm">${wt.length} world${wt.length===1?"":"s"}${(D.tps&&has(D.tps.target))?" · target "+D.tps.target+" tps":""}${more}</span></div>${legend}${chart}</div>`);
-    }
-  }
+  if(Array.isArray(D.worldTps)&&D.worldTps.length) parts.push(`<p class="subnote" style="margin-top:12px">Tick rate per world is in <a href="#metrics">Key metrics</a>.</p>`);
   if(((D.subsystems&&D.subsystems.length)||(D.modCpu&&D.modCpu.length))&&T){
     const worlds=(D.cpuByWorld||[]).filter(w=>w.samples>0);
     if(worlds.length>1){
@@ -2076,7 +2018,7 @@ function cpuHtml(){
     if(D.subsystems&&D.subsystems.length)
       parts.push(`<div class="chartcard" style="margin-top:12px"><div class="cth"><span class="ctt">Where CPU goes, by engine subsystem</span><span class="ctm">classified by deepest stack frame</span></div>${recordingScopeBadge()}<div class="wbars" id="cpuSub"></div></div>`);
     if(D.modCpu&&D.modCpu.length)
-      parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Where CPU goes, by mod / package</span><span class="ctm">sampled code; owner unknown; grouped by package</span></div>${recordingScopeBadge()}<div class="wbars" id="cpuMod"></div></div>`);
+      parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Where CPU goes, by mod</span><span class="ctm">samples in each mod's code, by package when the mod is unknown</span></div>${recordingScopeBadge()}<div class="wbars" id="cpuMod"></div></div>`);
   }
   return lead+(ser.cpu?legendHtml():"")+parts.join("");
 }
@@ -2087,9 +2029,9 @@ function methodsHtml(){
   const T=DV.samples;
   const rows=hm.map((m,i)=>{
     const p=T?pct(m[0],T):null;
-    return `<tr><td class="rank">${i+1}</td><td class="mcell" data-sval="${esc(m[1])}">${m[2]&&m[2].length?`<button type="button" class="mname" aria-expanded="false"><span class="exp" aria-hidden="true">▸</span>${splitMethod(m[1])}</button>${pathHtml(m[2])}`:splitMethod(m[1])}</td><td class="r" data-num="${m[0]}">${fmt(m[0])}</td><td class="r"><span class="pct">${p!=null?p.toFixed(2)+"%":"·"}</span></td></tr>`;
+    return `<tr><td class="rank">${i+1}</td><td class="mcell" data-sval="${esc(m[1])}">${m[2]&&m[2].length?`<button type="button" class="mname" aria-expanded="false"><span class="exp" aria-hidden="true">▸</span>${splitMethod(m[1])}</button>${mixinTag(m[3])}${pathHtml(m[2],m[4])}`:splitMethod(m[1])+mixinTag(m[3])}</td><td class="r" data-num="${m[0]}">${fmt(m[0])}</td><td class="r"><span class="pct">${p!=null?p.toFixed(2)+"%":"·"}</span></td></tr>`;
   }).join("");
-  return `<p class="lead">Leaf-frame aggregation over <b>${T?fmt(T):"all"}</b> execution samples from all threads.${DV.topMethod&&T?` The top frame is <code class="mono" style="color:var(--violet)">${esc(leafName(DV.topMethod[1]))}</code> at <b>${pct(DV.topMethod[0],T).toFixed(2)}%</b> of samples.`:""}</p>
+  return `<p class="lead">Leaf-frame aggregation over <b>${T?fmt(T):"all"}</b> execution samples from all threads.${DV.topMethod&&T?` The top frame is <code class="mono" style="color:var(--violet)">${esc(leafName(DV.topMethod[1]))}</code>${DV.topMethod[3]?` (${esc(DV.topMethod[3])})`:""} at <b>${pct(DV.topMethod[0],T).toFixed(2)}%</b> of samples.`:""}${hm.some(m=>m[3]||(m[4]||[]).some(Boolean))?" Purple tags mark frames that Mixins added or changed. Their time still counts as the code they run in.":""}</p>
   <div class="tbar"><span class="srch"><span class="si">${I.search}</span><input type="search" aria-label="Filter methods" placeholder="filter methods…" data-filter="meth-t"></span><span class="chip">top ${hm.length}</span><span class="count" data-count="meth-t">${hm.length} rows</span></div>
   <div class="tscroll"><div class="tcap"><table class="sortable" id="meth-t"><thead><tr>${thc("#","Rank by sample count",{r:true})}${thc("Method","The most-sampled (leaf) method.",{sort:"text"})}${thc("Samples","Execution samples in which this was the leaf frame",{sort:"num",r:true,def:"desc"})}${thc("Self&nbsp;%","Share of all execution samples",{sort:"num",r:true})}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
@@ -2124,7 +2066,7 @@ function threadMethodsHtml(methods,thSamples){
   if(!methods||!methods.length) return "";
   const items=methods.map(m=>{
     const mp=thSamples?pct(m[1],thSamples):null;
-    return `<div class="pf"><span class="arr">•</span>${shortMethod(m[0])}<span class="thmn">${fmt(m[1])}${mp!=null?` · ${mp.toFixed(0)}%`:""}</span></div>`;
+    return `<div class="pf"><span class="arr">•</span>${shortMethod(m[0])}${mixinTag(m[2])}<span class="thmn">${fmt(m[1])}${mp!=null?` · ${mp.toFixed(0)}%`:""}</span></div>`;
   }).join("");
   return `<div class="mpath" hidden><span class="plab">top methods on this thread</span>${items}</div>`;
 }
@@ -2140,56 +2082,58 @@ function poolSummaryHtml(ht,T,hasFlame){
   const max=pools[0][1].s||1;
   const rows=pools.map(([g,v])=>{
     const p=T?pct(v.s,T):null;
-    const name=hasFlame?`<button type="button" class="thlink" data-flamegroup="${esc(g)}" aria-pressed="false" data-tip="Focus this pool in the flame graph">${esc(g)}</button>`:esc(g);
-    return `<tr><td class="nm">${name}</td><td class="r" data-num="${v.n}">${v.n}</td><td class="r" data-num="${v.s}">${fmt(v.s)}</td><td class="r"><span class="bbar"><i style="width:${(100*v.s/max).toFixed(0)}%;background:var(--blue)"></i></span><span class="pct">${p!=null?p.toFixed(1)+"%":"·"}</span></td></tr>`;
+    const name=(hasFlame?`<button type="button" class="thlink" data-flamegroup="${esc(g)}" aria-pressed="false" data-tip="Focus this pool in the flame graph">${esc(g)}</button>`:esc(g))+hyboxTag(isHyboxThread(g));
+    return `<tr><td class="nm">${name}</td><td class="r" data-num="${v.n}">${v.n}</td><td class="r" data-num="${v.s}">${fmt(v.s)}</td><td class="r"><span class="bbar"><i style="width:${(100*v.s/max).toFixed(0)}%;background:var(--s1)"></i></span><span class="pct">${p!=null?p.toFixed(1)+"%":"·"}</span></td></tr>`;
   }).join("");
   const note=more>0?`<div class="subnote" style="margin-top:4px">+${more} smaller pool${more===1?"":"s"} below 0.3% not shown</div>`:"";
-  return `<div class="card" style="margin-bottom:14px"><h3><span class="ic" style="color:var(--blue)">${I.threads}</span> Thread pools (aggregated)</h3>
+  return `<div class="card" style="margin-bottom:14px"><h3><span class="ic">${I.threads}</span> Thread pools (aggregated)</h3>
   <div class="subnote">Worker pools collapsed by name; samples summed across each pool's threads.</div>
   <div class="tbar"><span class="srch"><span class="si">${I.search}</span><input type="search" aria-label="Filter thread pools" placeholder="filter pools…" data-filter="pool-t"></span><span class="count" data-count="pool-t">${pools.length} rows</span></div>
   <div class="tscroll"><table class="sortable" id="pool-t"><thead><tr>${thc("Pool / group","Threads sharing a base name",{sort:"text"})}${thc("Threads","Number of threads in the group",{sort:"num",r:true})}${thc("Samples","Execution samples summed across the group",{sort:"num",r:true,def:"desc"})}${thc("Self&nbsp;%","Share of all samples",{sort:"num",r:true})}</tr></thead><tbody>${rows}</tbody></table></div>${note}</div>`;
 }
 function threadsHtml(){
   const ht=D.hotThreads||[];
-  if(!ht.length) return threadTimelineHtml();
+  if(!ht.length) return adv("thread states over time",threadTimelineHtml());
   const T=DV.samples;
-  const anyState=ht.some(t=>t[1]);
   const hasFlame=!!(D.flame&&Array.isArray(D.flame)&&Array.isArray(D.flame[2])&&D.flame[2].length);
   const rows=ht.map((t,i)=>{
-    const [s,st,name,meth,meths]=t;
+    const [s,,name,meth,meths,methLabel]=t;
     const p=T?pct(s,T):null;
     const stall=DV.stalled && name.indexOf(DV.stalled.name)>=0;
-    const stCell=anyState?`<td>${st?`<span class="st ${esc(st)}">${esc(String(st).replace("_"," "))}</span>`:"·"}</td>`:"";
-    const nameCell=hasFlame
+    const nameCell=(hasFlame
       ? `<button type="button" class="thlink" data-flamegroup="${esc(threadGroup(name))}" aria-pressed="false" data-tip="Focus this thread in the flame graph">${esc(name)}</button>`
-      : esc(name);
+      : esc(name))+hyboxTag(isHyboxThread(name));
     const methCell=(meths&&meths.length)
-      ? `<td class="mcell"><button type="button" class="mname" aria-expanded="false"><span class="exp" aria-hidden="true">▸</span>${splitMethod(meth)}</button>${threadMethodsHtml(meths,s)}</td>`
-      : `<td>${splitMethod(meth)}</td>`;
-    return `<tr><td class="rank">${i+1}</td><td class="nm${stall?' stallname':''}"${stall?' data-tip="Tick thread of the stalled world."':''}>${nameCell}</td>${stCell}<td class="r" data-num="${s}">${fmt(s)}</td><td class="r"><span class="pct">${p!=null?p.toFixed(2)+"%":"·"}</span></td>${methCell}</tr>`;
+      ? `<td class="mcell"><button type="button" class="mname" aria-expanded="false"><span class="exp" aria-hidden="true">▸</span>${splitMethod(meth)}</button>${mixinTag(methLabel)}${threadMethodsHtml(meths,s)}</td>`
+      : `<td>${splitMethod(meth)}${mixinTag(methLabel)}</td>`;
+    return `<tr><td class="rank">${i+1}</td><td class="nm${stall?' stallname':''}"${stall?' data-tip="Tick thread of the stalled world."':''}>${nameCell}${stall?'<span class="vword v-warn">stalled</span>':''}</td><td class="r" data-num="${s}">${fmt(s)}</td><td class="r"><span class="pct">${p!=null?p.toFixed(2)+"%":"·"}</span></td>${methCell}</tr>`;
   }).join("");
-  const stHead=anyState?thc("State","State when last sampled; only RUNNABLE threads gather CPU samples.",{sort:"text"}):"";
   const top=DV.topThread;
-  return `${recordingScopeBadge()}<p class="lead">Threads ranked by execution samples.${top&&T?` The busiest is <code class="mono">${esc(top[2])}</code> at <b>${pct(top[0],T).toFixed(1)}%</b>, with its most-sampled frame in <code class="mono" style="color:var(--violet)">${esc(leafName(top[3]))}</code>.`:""}${anyState?" CPU sampling only sees on-CPU threads, so waiting and blocked threads rarely appear here.":""}</p>
+  return `${recordingScopeBadge()}<p class="lead">Threads ranked by execution samples.${top&&T?` The busiest is <code class="mono">${esc(top[2])}</code> at <b>${pct(top[0],T).toFixed(1)}%</b>, with its most-sampled frame in <code class="mono" style="color:var(--violet)">${esc(leafName(top[3]))}</code>.`:""} CPU sampling only sees on-CPU threads, so waiting and blocked threads rarely appear here.</p>
   ${poolSummaryHtml(ht,T,hasFlame)}
-  ${threadTimelineHtml()}
-  <div class="tbar"><span class="srch"><span class="si">${I.search}</span><input type="search" aria-label="Filter threads" placeholder="filter threads…" data-filter="th-t"></span>${has(D.threadTotal)?`<span class="chip">${D.threadTotal} live threads</span>`:""}<span class="count" data-count="th-t">${ht.length} rows</span></div>
-  <div class="tscroll"><div class="tcap"><table class="sortable" id="th-t"><thead><tr>${thc("#","Rank by sample count",{r:true})}${thc("Thread","JVM thread name",{sort:"text"})}${stHead}${thc("Samples","Execution samples attributed to this thread",{sort:"num",r:true,def:"desc"})}${thc("Self&nbsp;%","Share of all samples",{sort:"num",r:true})}${thc("Top method","Most-sampled method on this thread; expand for the thread's top methods",{sort:"text"})}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  <div class="tbar"><span class="srch"><span class="si">${I.search}</span><input type="search" aria-label="Filter threads" placeholder="filter threads…" data-filter="th-t"></span><span class="count" data-count="th-t">${ht.length} rows</span></div>
+  <div class="tscroll"><div class="tcap"><table class="sortable" id="th-t"><thead><tr>${thc("#","Rank by sample count",{r:true})}${thc("Thread","JVM thread name",{sort:"text"})}${thc("Samples","Execution samples attributed to this thread",{sort:"num",r:true,def:"desc"})}${thc("Self&nbsp;%","Share of all samples",{sort:"num",r:true})}${thc("Top method","Most-sampled method on this thread; expand for the thread's top methods",{sort:"text"})}</tr></thead><tbody>${rows}</tbody></table></div></div>
+  ${adv("thread states over time",threadTimelineHtml())}`;
 }
 
 function statesHtml(){
-  const ts=D.threadStates;
+  const ts=D.threadStates, ser=D.series||{};
   const dl=DV.deadlock?`<div class="alert"><b style="color:var(--bad)">Deadlock detected · ${D.deadlocked.length} deadlocked thread${D.deadlocked.length===1?"":"s"}</b><ul>${D.deadlocked.map(d=>`<li>${esc(d)}</li>`).join("")}</ul></div>`:"";
-  const colors={RUNNABLE:"#5bd68b",WAITING:"#62a8ea",TIMED_WAITING:"#a98be0",BLOCKED:"#f0626b",NEW:"#46cfc0",TERMINATED:"#8f9ba8"};
-  const segs=Object.entries(ts||{}).filter(([,v])=>v>0).map(([k,v])=>({k,v,c:colors[k]||"#9aa1ad"}));
-  if(!segs.length) return dl;
-  const legend=segs.map(s=>`<div class="lg"><span class="sw" style="background:${s.c}"></span><span>${esc(s.k.replace("_"," "))}</span><b>${s.v}</b></div>`).join("");
-  const blocked=ts.BLOCKED||0;
-  const note=`<b>Blocked threads</b> ${blocked} blocked thread${blocked===1?"":"s"} at capture, waiting to enter a monitor.${DV.deadlock?"":" Deadlock detection returned no result."}`;
-  const total=has(D.threadTotal)?D.threadTotal:segs.reduce((a,s)=>a+s.v,0);
-  return `<p class="lead">Live JVM threads by state. <b>${ts.RUNNABLE||0}</b> of <b>${total}</b> were runnable and <b>${blocked}</b> blocked.</p>
-  <div class="card"><div class="donutwrap"><div>${donut(segs)}</div><div class="legend">${legend}</div>
-  <div class="state-note">${note}</div></div>${dl}</div>`;
+  const colors={RUNNABLE:PAL.good,WAITING:PAL.info,TIMED_WAITING:PAL.violet,BLOCKED:PAL.bad,NEW:PAL.teal,TERMINATED:PAL.neutral};
+  const segs=Object.entries(ts||{}).filter(([,v])=>v>0).map(([k,v])=>({k,v,c:colors[k]||PAL.neutral}));
+  const blocked=ts&&ts.BLOCKED||0;
+  const facts=[];
+  if(ts) facts.push(blocked?`<b class="v-warn">${blocked}</b> thread${blocked===1?" was":"s were"} waiting for a lock at capture.`:"No thread was waiting for a lock at capture.");
+  if(ts&&!DV.deadlock) facts.push("No deadlock found.");
+  let internals="";
+  if(segs.length){
+    const legend=segs.map(s=>`<div class="lg"><span class="sw" style="background:${s.c}"></span><span>${esc(s.k.replace("_"," "))}</span><b>${s.v}</b></div>`).join("");
+    const total=has(D.threadTotal)?D.threadTotal:segs.reduce((a,s)=>a+s.v,0);
+    internals+=`<div class="card"><div class="donutwrap"><div>${donut(segs)}</div><div class="legend">${legend}</div><div class="state-note"><b>${ts.RUNNABLE||0}</b> of <b>${total}</b> live threads were runnable at capture.</div></div></div>`;
+  }
+  if(ser.threads) internals+=`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Live threads over the capture window</span><span class="ctm">${has(D.threadTotal)?D.threadTotal+" at capture":""}</span></div>${lineChart(ser.threads,{h:150,color:SERIES[0],unit:"",decimals:0,times:DV.span,marker:DV.incMarker})}</div>`;
+  if(!facts.length&&!dl&&!internals) return "";
+  return (facts.length?`<p class="lead">${facts.join(" ")}</p>`:"")+dl+adv("live threads by state",internals);
 }
 
 function memHtml(){
@@ -2205,13 +2149,13 @@ function memHtml(){
     const hcG=ser.heapCommitted?ser.heapCommitted.map(gib):null;
     const chart=hcG
       ? lineChart(null,{h:195,max:mx?mx:null,unit:" GiB",decimals:1,times:DV.span,marker:DV.incMarker,
-          multi:[{name:"used",series:DV.heapG,color:"#e6b34a",dec:1},{name:"committed",series:hcG,color:"#8f9ba8",dec:1}]})
-      : lineChart(DV.heapG,{h:195,color:"#e6b34a",max:mx?mx:null,unit:" GiB",decimals:1,times:DV.span,marker:DV.incMarker});
+          multi:[{name:"used",series:DV.heapG,color:SERIES[0],dec:1},{name:"committed",series:hcG,color:PAL.neutral,dec:1}]})
+      : lineChart(DV.heapG,{h:195,color:SERIES[0],max:mx?mx:null,unit:" GiB",decimals:1,times:DV.span,marker:DV.incMarker});
     const hcid="ch"+CHART_ID;
-    const hlegend=hcG?`<div class="pmlegend"><button type="button" class="pmlg" data-pml="${hcid}:0" aria-pressed="true" data-tip="toggle the heap used line"><span class="edot" style="background:#e6b34a"></span>used</button> <button type="button" class="pmlg" data-pml="${hcid}:1" aria-pressed="true" data-tip="toggle the heap committed line"><span class="edot" style="background:#8f9ba8"></span>committed</button></div>`:"";
+    const hlegend=hcG?`<div class="pmlegend"><button type="button" class="pmlg" data-pml="${hcid}:0" aria-pressed="true" data-tip="toggle the heap used line"><span class="edot" style="background:${SERIES[0]}"></span>used</button> <button type="button" class="pmlg" data-pml="${hcid}:1" aria-pressed="true" data-tip="toggle the heap committed line"><span class="edot" style="background:${PAL.neutral}"></span>committed</button></div>`:"";
     cards.push(`<div class="chartcard"><div class="cth"><span class="ctt">Heap used over capture window</span><span class="ctm">${DV.span?esc(DV.span.from)+" → "+esc(DV.span.to)+" · ":""}${mx?mx.toFixed(1)+" GiB max":""}${DV.gcName?" · "+esc(DV.gcName):""}</span></div>${hlegend}${chart}</div>`);
   }
-  const gcrows=[];
+  const gcrows=[], advrows=[];
   if(D.sys&&D.sys.gcYoung&&D.sys.gcOld) gcrows.push(["Collector",D.sys.gcYoung+" + "+D.sys.gcOld]);
   if(D.gc){
     gcrows.push(["Collections",String(D.gc.collections)]);
@@ -2220,42 +2164,42 @@ function memHtml(){
   } else if(D.gcByCollector&&D.gcByCollector.length){
     D.gcByCollector.forEach(g=>gcrows.push([g[0],g[1]+" collections · "+g[2]+" ms total"]));
   }
-  if(D.gc&&D.gcByCollector&&D.gcByCollector.length){
-    const tot=D.gcByCollector.filter(g=>g[1]>0).map(g=>g[0]+" ×"+fmt(g[1])).join(" · ");
-    if(tot) gcrows.push(["Collections since JVM start",tot]);
-  }
-  if(D.sys&&has(D.sys.gcParallel)) gcrows.push(["GC worker threads",D.sys.gcParallel+" parallel, "+(D.sys.gcConc??"?")+" concurrent"]);
   if(D.heap&&has(D.heap.max)&&D.heap.max>0) gcrows.push(["Max heap (-Xmx)",gib(D.heap.max).toFixed(1)+" GiB"]);
   if(D.heap){ gcrows.push(["Peak heap used",gib(D.heap.peak).toFixed(1)+" GiB"+(has(D.heap.max)&&D.heap.max>0?" ("+Math.round(100*D.heap.peak/D.heap.max)+"%)":"")]);
     if(has(D.heap.floor)) gcrows.push(["Post-GC floor","~"+gib(D.heap.floor).toFixed(1)+" GiB"]);
-    if(has(D.heap.committed)) gcrows.push(["Heap committed",fmtBytes(D.heap.committed)]); }
-  if(D.sys&&D.sys.nonHeap&&has(D.sys.nonHeap.used)) gcrows.push(["Non-heap",fmtBytes(D.sys.nonHeap.used)+" used / "+fmtBytes(D.sys.nonHeap.committed)+" committed"]);
-  if(D.ram){ gcrows.push(["Process RSS (peak)",gb(D.ram.rssPeak).toFixed(1)+" GB"]);
-    gcrows.push(["Native memory (NMT)",D.ram.nmtOn?fmtBytes(D.ram.nativeCommitted)+" committed":"n/a, start with -XX:NativeMemoryTracking=summary"]); }
+    if(has(D.heap.committed)) advrows.push(["Heap committed",fmtBytes(D.heap.committed)]); }
+  if(D.gc&&D.gcByCollector&&D.gcByCollector.length){
+    const tot=D.gcByCollector.filter(g=>g[1]>0).map(g=>g[0]+" ×"+fmt(g[1])).join(" · ");
+    if(tot) advrows.push(["Collections since JVM start",tot]);
+  }
+  if(D.sys&&has(D.sys.gcParallel)) advrows.push(["GC worker threads",D.sys.gcParallel+" parallel, "+(D.sys.gcConc??"?")+" concurrent"]);
+  if(D.sys&&D.sys.nonHeap&&has(D.sys.nonHeap.used)) advrows.push(["Non-heap",fmtBytes(D.sys.nonHeap.used)+" used / "+fmtBytes(D.sys.nonHeap.committed)+" committed"]);
+  if(D.ram){ advrows.push(["Process RSS (peak)",gb(D.ram.rssPeak).toFixed(1)+" GB"]);
+    advrows.push(["Native memory (NMT)",D.ram.nmtOn?fmtBytes(D.ram.nativeCommitted)+" committed":"n/a, start with -XX:NativeMemoryTracking=summary"]); }
   if(D.gc&&has(D.gc.explicitDisabled)){
     const exDesc=D.gc.explicitDisabled?"disabled (-XX:+DisableExplicitGC)":(D.gc.explicitConcurrent?"concurrent (invokes concurrent)":"stop-the-world");
-    gcrows.push(["Explicit GC",exDesc]);
+    advrows.push(["Explicit GC",exDesc]);
     const ex=D.gc.explicitCalls||[];
     const exTotal=ex.reduce((a,c)=>a+c[1],0);
-    gcrows.push(["Explicit GC calls",exTotal===0?"none in window":exTotal+" · "+ex.map(c=>c[0]+" ×"+c[1]).join(", ")]);
+    advrows.push(["Explicit GC calls",exTotal===0?"none in window":exTotal+" · "+ex.map(c=>c[0]+" ×"+c[1]).join(", ")]);
   }
-  if(gcrows.length) cards.push(`<div class="kvcard"><div class="kvh"><span class="ic">${I.gc}</span><b>Garbage collection &amp; memory</b></div><div class="kv">${gcrows.map(r=>`<div class="row"><span class="k">${esc(r[0])}</span><span class="v">${esc(r[1])}</span></div>`).join("")}</div></div>`);
+  const kv=(title,rows)=>`<div class="kvcard"><div class="kvh"><span class="ic">${I.gc}</span><b>${title}</b></div><div class="kv">${rows.map(r=>`<div class="row"><span class="k">${esc(r[0])}</span><span class="v">${esc(r[1])}</span></div>`).join("")}</div></div>`;
+  if(gcrows.length) cards.push(kv("Garbage collection &amp; memory",gcrows));
   if(cards.length) parts.push(cards.length===2?`<div class="charts2">${cards.join("")}</div>`:cards.join(""));
+  const advanced=[];
+  if(advrows.length) advanced.push(kv("JVM memory details",advrows));
   if(Array.isArray(D.memPools)&&D.memPools.length){
     const pools=[...D.memPools].sort((a,b)=>((b[4]>=0)-(a[4]>=0)));
     const pv=v=>(has(v)&&v>=0)?fmtBytes(v):"·";
     const prows=pools.map(p=>`<tr><td class="nm">${esc(String(p[0]))}</td><td class="r" data-num="${p[1]}">${pv(p[1])}</td><td class="r" data-num="${p[2]}">${pv(p[2])}</td><td class="r" data-num="${p[3]}">${pv(p[3])}</td><td class="r" data-num="${p[4]}">${pv(p[4])}</td></tr>`).join("");
-    parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Memory pools</span><span class="ctm">JVM memory pools at capture</span></div>
-      <div class="subnote">Heap pools first. "At last GC" is the pool's usage right after the most recent collection; "·" means the JVM does not report that value for this pool.</div>
+    advanced.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Memory pools</span><span class="ctm">JVM memory pools at capture</span></div>
+      <div class="subnote">Heap pools first. "At last GC" is the pool's usage right after the most recent collection. "·" means the JVM does not report that value for this pool.</div>
       <div class="tscroll"><table class="sortable" id="mp-t"><thead><tr>${thc("Pool","JVM memory pool name",{sort:"text"})}${thc("Used","Bytes in use at capture",{sort:"num",r:true})}${thc("Committed","Bytes reserved from the OS for this pool",{sort:"num",r:true})}${thc("Max","Configured ceiling for this pool",{sort:"num",r:true})}${thc("At last GC","Usage right after the most recent collection",{sort:"num",r:true})}</tr></thead><tbody>${prows}</tbody></table></div></div>`);
   }
   if(D.gcCauses&&D.gcCauses.length){
-    const crows=D.gcCauses.map((c,i)=>`<tr><td class="rank">${i+1}</td><td class="nm">${esc(String(c[0]))}</td><td class="r" data-num="${c[1]}">${fmt(c[1])}</td><td class="r" data-num="${c[2]}">${Number(c[2]).toFixed(1)}</td></tr>`).join("");
-    parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">GC causes</span><span class="ctm">why each collection fired</span></div>
+    const crows=D.gcCauses.map((c,i)=>`<tr><td class="rank">${i+1}</td><td class="nm">${esc(String(c[0]))}${c[0]==="Heap Inspection Initiated GC"?` <span class="mxlab hyb" data-tip="A heap walk, usually the Hybox Heap tab. jmap and jcmd cause it too.">Hybox heap walk</span>`:""}</td><td class="r" data-num="${c[1]}">${fmt(c[1])}</td><td class="r" data-num="${c[2]}">${Number(c[2]).toFixed(1)}</td></tr>`).join("");
+    advanced.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">GC causes</span><span class="ctm">why each collection fired</span></div>
       <div class="tscroll"><table class="sortable" id="gcc-t"><thead><tr>${thc("#","Rank",{r:true})}${thc("Cause","GC cause reported by the JVM",{sort:"text"})}${thc("Collections","Collections with this cause",{sort:"num",r:true,def:"desc"})}${thc("Total pause ms","Summed pause time for this cause",{sort:"num",r:true})}</tr></thead><tbody>${crows}</tbody></table></div></div>`);
-  }
-  if(DV.rssG&&D.ram){
-    parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Process RSS over capture window</span><span class="ctm">peak ${gb(D.ram.rssPeak).toFixed(1)} GB${D.sys&&has(DV.memLimitBytes)?" · "+gb(DV.memLimitBytes).toFixed(1)+" GB "+DV.memBasis:""}</span></div>${lineChart(DV.rssG,{h:150,color:"#d98b6a",unit:" GB",decimals:1,times:DV.span,marker:DV.incMarker})}</div>`);
   }
   if(D.alloc&&(((D.alloc.bySubsystem||[]).length)||((D.alloc.byThread||[]).length)||((D.alloc.byClass||[]).length)||((D.alloc.byMod||[]).length))){
     const tot=(has(D.alloc.total)&&D.alloc.total>0?D.alloc.total:(D.alloc.bySubsystem||[]).reduce((a,s)=>a+s[1],0))||1;
@@ -2274,15 +2218,15 @@ function memHtml(){
         +aworlds.map(w=>`<button type="button" class="chip tog" data-allocworld="${esc(w.world)}" aria-pressed="false">${esc(worldLabel(w.world))} · ${pct(w.bytes,tot).toFixed(0)}%</button>`).join("")+`</div>`);
     }
     if((D.alloc.bySubsystem||[]).length) parts.push(`<div class="chartcard" style="margin-top:12px"><div class="cth"><span class="ctt">Where allocation pressure goes, by engine subsystem</span><span class="ctm">${fmtBytes(tot)} sampled</span></div>${recordingScopeBadge()}${note}<div class="wbars" id="allocSub"></div></div>`);
-    if((D.alloc.byMod||[]).length) parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Where allocation pressure goes, by mod / package</span><span class="ctm">${fmtBytes(tot)} sampled · owner unknown; grouped by package</span></div>${recordingScopeBadge()}<div class="wbars" id="allocMod"></div></div>`);
-    if((D.alloc.byThread||[]).length) parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Top allocating threads</span><span class="ctm">allocation samples</span></div>${recordingScopeBadge()}<div class="wbars">${allocBars(D.alloc.byThread,true)}</div></div>`);
+    if((D.alloc.byMod||[]).length) parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Where allocation pressure goes, by mod</span><span class="ctm">${fmtBytes(tot)} sampled · by package when the mod is unknown</span></div>${recordingScopeBadge()}<div class="wbars" id="allocMod"></div></div>`);
+    if((D.alloc.byThread||[]).length) advanced.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Top allocating threads</span><span class="ctm">allocation samples</span></div>${recordingScopeBadge()}<div class="wbars">${allocBars(D.alloc.byThread,true)}</div></div>`);
     if((D.alloc.byClass||[]).length){
       const mx=Math.max(...D.alloc.byClass.map(i=>i[1]));
       const clsBars=D.alloc.byClass.map(i=>{
         const full=String(i[0]);
         return `<div class="wbar"><div class="wn"><span class="tnc" data-tipov="${esc(full)}">${esc(shortCls(full))}</span></div><div class="wt"><div class="wf al" style="width:${(100*i[1]/Math.max(1,mx)).toFixed(1)}%"></div></div><div class="wv">${fmtBytes(i[1])} · ${pct(i[1],tot).toFixed(1)}%</div></div>`;
       }).join("");
-      parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Top allocated classes</span><span class="ctm">allocation samples</span></div>${recordingScopeBadge()}<div class="wbars">${clsBars}</div></div>`);
+      advanced.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Top allocated classes</span><span class="ctm">allocation samples</span></div>${recordingScopeBadge()}<div class="wbars">${clsBars}</div></div>`);
     }
   }
   if(D.retained&&D.retained.length){
@@ -2311,18 +2255,21 @@ function memHtml(){
       const kind=String(r[3]||"");
       return `<tr><td class="rank">${i+1}</td><td data-sval="${esc(full)}"><span class="tnc2" data-tipov="${esc(full)}">${esc(shortP)}</span></td><td data-sval="${esc(kind)}"><span class="lvl ${kind==="write"?"WARN":"INFO"}">${esc(kind)}</span></td><td class="r" data-num="${r[1]}">${Number(r[1]).toFixed(0)}</td><td class="r" data-num="${r[2]}">${fmtBytes(r[2])}</td></tr>`;
     }).join("");
-    parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Slow file operations</span><span class="ctm">individual ops at or over 20 ms</span></div>
-      <div class="subnote">File operations that took 20 ms or longer (the JFR reporting threshold). A world save or log flush blocking here is tick time lost.</div>
+    const sioT=D.slowIoThresholdMs;
+    const sioMeta=sioT!=null?`slowest single reads and writes, recorded from ${sioT} ms`:"slowest single reads and writes";
+    const sioNote=sioT!=null?`The slowest file operations in the recording. It keeps only operations of ${sioT} ms or longer.`:"The slowest file operations the recording kept.";
+    parts.push(`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Slow file operations</span><span class="ctm">${sioMeta}</span></div>
+      <div class="subnote">${sioNote} A world save or log flush blocking here is tick time lost.</div>
       <div class="tscroll"><table class="sortable" id="sio-t"><thead><tr>${thc("#","Rank",{r:true})}${thc("Path","File path; hover for the full path",{sort:"text"})}${thc("Kind","Read or write",{sort:"text"})}${thc("Duration ms","Wall time of the single operation",{sort:"num",r:true,def:"desc"})}${thc("Bytes","Bytes transferred by the operation",{sort:"num",r:true})}</tr></thead><tbody>${srows}</tbody></table></div></div>`);
   }
-  if(!parts.length) return "";
+  if(!parts.length&&!advanced.length) return "";
   let lead="";
   if(D.heap&&D.gc){
     const ex=D.gc.explicitCalls||[], exTotal=ex.reduce((a,c)=>a+c[1],0);
-    const exLead=has(D.gc.explicitDisabled)?(exTotal===0?` No explicit <code class="mono">System.gc()</code> calls fired in the window.`:` ${exTotal} explicit <code class="mono">System.gc()</code> call(s) fired; attributed to ${ex.map(c=>esc(c[0])).join(", ")}.`):"";
-    lead=`<p class="lead">Heap usage and GC pauses over the capture window. Heap moved between roughly ${gib(D.heap.floor).toFixed(1)} and ${gib(D.heap.peak).toFixed(1)} GiB${has(D.heap.max)&&D.heap.max>0?` against a ${gib(D.heap.max).toFixed(1)} GiB maximum`:""}; ${esc(DV.gcName||"the collector")} ran ${D.gc.collections} collections with a longest pause of <b>${D.gc.maxPauseMs}ms</b>.${exLead}</p>`;
+    const exLead=exTotal>0?` Code asked for ${exTotal} full collection${exTotal===1?"":"s"} with <code class="mono">System.gc()</code>, from ${ex.map(c=>esc(c[0])).join(", ")}.`:"";
+    lead=`<p class="lead">Heap moved between roughly ${gib(D.heap.floor).toFixed(1)} and ${gib(D.heap.peak).toFixed(1)} GiB${has(D.heap.max)&&D.heap.max>0?` against a ${gib(D.heap.max).toFixed(1)} GiB maximum`:""}. ${esc(DV.gcName||"The collector")} ran ${D.gc.collections} collections with a longest pause of <b>${D.gc.maxPauseMs} ms</b>.${exLead}</p>`;
   }
-  return lead+((DV.heapG||DV.rssG)?legendHtml():"")+parts.join("");
+  return lead+(DV.heapG?legendHtml():"")+parts.join("")+adv("JVM details for support",advanced.join(""));
 }
 
 function networkHtml(){
@@ -2330,9 +2277,9 @@ function networkHtml(){
   if(!D.net) return "";
   const mb=v=>has(v)?v.toFixed(1):"n/a";
   const inKnown=has(D.net.inAvg);
-  const others=Array.isArray(D.net.others)?D.net.others.filter(o=>o&&o.length>=5):[];
+  const others=Array.isArray(D.net.others)?D.net.others.filter(o=>o&&o.length>=5&&[1,2,3,4].some(i=>Number(o[i])>0)):[];
   const cards=[];
-  if(ser.netOut) cards.push(`<div class="chartcard"><div class="cth"><span class="ctt">Outbound network over capture window</span><span class="ctm">${esc(D.net.iface)} · avg ${mb(D.net.outAvg)} · peak ${mb(D.net.outPeak)} Mb/s</span></div>${lineChart(ser.netOut,{h:195,color:"#a98be0",max:Math.max(1,Math.ceil(D.net.outPeak*1.12)),unit:" Mb/s",decimals:1,times:DV.span,marker:DV.incMarker})}</div>`);
+  if(ser.netOut) cards.push(`<div class="chartcard"><div class="cth"><span class="ctt">Outbound network over capture window</span><span class="ctm">${esc(D.net.iface)} · avg ${mb(D.net.outAvg)} · peak ${mb(D.net.outPeak)} Mb/s</span></div>${lineChart(ser.netOut,{h:195,color:SERIES[0],max:Math.max(1,Math.ceil(D.net.outPeak*1.12)),unit:" Mb/s",decimals:1,times:DV.span,marker:DV.incMarker})}</div>`);
   const rows=[
     ["Interface",D.net.iface],
     ["Outbound avg / peak",mb(D.net.outAvg)+" / "+mb(D.net.outPeak)+" Mb/s"],
@@ -2344,11 +2291,10 @@ function networkHtml(){
     rows.push(["Transferred out (window)","≈ "+tot(D.net.outAvg)]);
   }
   others.forEach(o=>rows.push([String(o[0]),`in ${Number(o[1]).toFixed(1)}/${Number(o[2]).toFixed(1)} · out ${Number(o[3]).toFixed(1)}/${Number(o[4]).toFixed(1)} Mb/s`]));
-  rows.push(["Throughput source","jdk.NetworkUtilization (per-interface, host-wide)"]);
   cards.push(`<div class="kvcard"><div class="kvh"><span class="ic">${I.net}</span><b>Network</b><small>${esc(D.net.iface)}</small></div><div class="kv">${rows.map(r=>`<div class="row"><span class="k">${esc(r[0])}</span><span class="v">${esc(r[1])}</span></div>`).join("")}</div></div>`);
   let out=cards.length===2?`<div class="charts2">${cards.join("")}</div>`:cards.join("");
-  if(ser.netIn) out+=`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Inbound network over capture window</span><span class="ctm">avg ${mb(D.net.inAvg)} · peak ${mb(D.net.inPeak)} Mb/s</span></div>${lineChart(ser.netIn,{h:150,color:"#62a8ea",max:Math.max(1,Math.ceil(D.net.inPeak*1.25)),unit:" Mb/s",decimals:1,times:DV.span,marker:DV.incMarker})}</div>`;
-  const lead=`<p class="lead">Network throughput on <code class="mono">${esc(D.net.iface)}</code> over the window. Outbound averaged <b>${mb(D.net.outAvg)} Mb/s</b> (peak ${mb(D.net.outPeak)})${inKnown?`; inbound <b>${mb(D.net.inAvg)} Mb/s</b> (peak ${mb(D.net.inPeak)})`:`; inbound n/a`}. Rates are host-wide for the interface.${others.length?` <b>${others.length}</b> other active interface${others.length===1?"":"s"} listed in the Network card.`:""}</p>`;
+  if(ser.netIn) out+=`<div class="chartcard" style="margin-top:16px"><div class="cth"><span class="ctt">Inbound network over capture window</span><span class="ctm">avg ${mb(D.net.inAvg)} · peak ${mb(D.net.inPeak)} Mb/s</span></div>${lineChart(ser.netIn,{h:150,color:SERIES[0],max:Math.max(1,Math.ceil(D.net.inPeak*1.25)),unit:" Mb/s",decimals:1,times:DV.span,marker:DV.incMarker})}</div>`;
+  const lead=`<p class="lead">Network traffic of the whole machine on <code class="mono">${esc(D.net.iface)}</code>, not only the server. Outbound averaged <b>${mb(D.net.outAvg)} Mb/s</b> (peak ${mb(D.net.outPeak)})${inKnown?`, inbound <b>${mb(D.net.inAvg)} Mb/s</b> (peak ${mb(D.net.inPeak)})`:`, inbound n/a`}.${others.length?` <b>${others.length}</b> other active interface${others.length===1?"":"s"} listed in the Network card.`:""}</p>`;
   return lead+((ser.netOut||ser.netIn)?legendHtml():"")+out;
 }
 
@@ -2358,6 +2304,7 @@ function worldsHtml(){
   const T=DV.samples;
   const hasSamples=T&&ws.some(w=>has(w.samples));
   const hasTick=ws.some(w=>has(w.tps));
+  const tpsElsewhere=!!(D.series&&D.series.tps)&&Array.isArray(D.worldTps)&&D.worldTps.length>0;
   const entMap=new Map((D.entities||[]).map(e=>[e[0],e[1]]));
   const hasEnt=entMap.size>0||ws.some(w=>has(w.entities));
   const hasChunks=ws.some(w=>has(w.chunks));
@@ -2383,7 +2330,7 @@ function worldsHtml(){
     if(hasChunksGen) cells+=`<td class="r" data-num="${has(w.chunksGenerated)?w.chunksGenerated:-1}">${has(w.chunksGenerated)?fmt(w.chunksGenerated):"·"}</td>`;
     if(hasChunksLoad) cells+=`<td class="r" data-num="${has(w.chunksLoaded)?w.chunksLoaded:-1}">${has(w.chunksLoaded)?fmt(w.chunksLoaded):"·"}</td>`;
     if(hasTick){
-      cells+=`<td class="r" data-num="${has(w.tps)?w.tps:-1}">${has(w.tps)&&w.tps>=0?w.tps.toFixed(1):"·"}</td>`;
+      if(!tpsElsewhere) cells+=`<td class="r" data-num="${has(w.tps)?w.tps:-1}">${has(w.tps)&&w.tps>=0?w.tps.toFixed(1):"·"}</td>`;
       if(hasPct){
         const med=has(w.msptP50)?w.msptP50:w.mspt;
         const pc=v=>has(v)&&v>=0?v.toFixed(1):"·";
@@ -2394,7 +2341,7 @@ function worldsHtml(){
     }
     if(hasSamples){
       const s=has(w.samples)?w.samples:0, p=pct(s,T), heavy=p>=20, idle=s===0;
-      cells+=`<td class="r" data-num="${s}">${fmt(s)}</td><td class="r"><span class="${heavy?'v-warn':(idle?'pkg':'pct')}">${p.toFixed(1)}%</span></td>`;
+      cells+=`<td class="r" data-num="${s}">${fmt(s)}</td><td class="r"><span class="${heavy?'v-warn':(idle?'pkg':'pct')}">${p.toFixed(1)}%${heavy?'<span class="vword">high</span>':''}</span></td>`;
     }
     return `<tr class="${w.stalled?'hl':''}">${cells}</tr>`;
   }).join("");
@@ -2404,14 +2351,15 @@ function worldsHtml(){
   if(hasChunksGen) head+=thc("Chunks gen","Chunks generated in this world during the captured window",{sort:"num",r:true});
   if(hasChunksLoad) head+=thc("Chunks loaded","Chunks loaded (disk + generated) in this world during the captured window",{sort:"num",r:true});
   if(hasTick){
-    head+=thc("TPS","Measured tick rate at capture",{sort:"num",r:true});
+    if(!tpsElsewhere) head+=thc("TPS","Measured tick rate at capture",{sort:"num",r:true});
     if(hasPct) head+=thc("MSPT med","Median milliseconds per tick over the window",{sort:"num",r:true})+thc("p95","95th percentile milliseconds per tick",{sort:"num",r:true})+thc("max","Worst single tick in the window (ms)",{sort:"num",r:true});
     else head+=thc("MSPT","Average milliseconds per tick at capture",{sort:"num",r:true});
   }
   if(hasSamples) head+=thc("Samples","CPU samples on this world's tick thread",{sort:"num",r:true,def:"desc"})+thc("CPU&nbsp;%","Share of all execution samples",{sort:"num",r:true});
+  const tpsNote=hasTick&&tpsElsewhere?` Tick rate per world is in <a href="#metrics">Key metrics</a>.`:"";
   const lead=DV.topWorld&&T
-    ? `<p class="lead">Per-world CPU from execution samples. <b>${esc(worldLabel(DV.topWorld.name))}</b> leads at <b>${pct(DV.topWorld.samples,T).toFixed(1)}%</b>${DV.stalled?`; the stalled world <code class="mono">${esc(worldLabel(DV.stalled.name))}</code> ranks #${DV.stalledRank} of ${ws.length}`:''}. Hover a world's player count to see who was connected, or an entity count for the typed breakdown.</p>`
-    : `<p class="lead">Worlds at the moment of capture. Hover a world's player count to see who was connected, or an entity count for the typed breakdown.</p>`;
+    ? `<p class="lead">Per-world CPU from execution samples. <b>${esc(worldLabel(DV.topWorld.name))}</b> leads at <b>${pct(DV.topWorld.samples,T).toFixed(1)}%</b>${DV.stalled?`. The stalled world <code class="mono">${esc(worldLabel(DV.stalled.name))}</code> ranks #${DV.stalledRank} of ${ws.length}`:''}. Hover a world's player count to see who was connected, or an entity count for the typed breakdown.${tpsNote}</p>`
+    : `<p class="lead">Worlds at the moment of capture. Hover a world's player count to see who was connected, or an entity count for the typed breakdown.${tpsNote}</p>`;
   return lead+`<div class="tbar"><span class="srch"><span class="si">${I.search}</span><input type="search" aria-label="Filter worlds" placeholder="filter worlds…" data-filter="w-t"></span><span class="count" data-count="w-t">${ws.length} rows</span></div>
   <div class="tscroll"><table class="sortable" id="w-t"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -2433,14 +2381,12 @@ function systemHtml(){
       row("CPU affinity (cpuset)",s.cpuset||null),
       row("Pressure (PSI some avg10)",[has(s.psiCpu)&&s.psiCpu>=0?"cpu "+s.psiCpu.toFixed(1)+"%":null,has(s.psiIo)&&s.psiIo>=0?"io "+s.psiIo.toFixed(1)+"%":null,has(s.psiMem)&&s.psiMem>=0?"mem "+s.psiMem.toFixed(1)+"%":null].filter(Boolean).join(" · ")||null),
       row("Machine RAM (host)",has(s.ramTotal)&&s.ramTotal>0?gb(s.ramTotal).toFixed(1)+" GB":null),
-      row("Load average (1m, host)",has(s.loadAvg)&&s.loadAvg>=0?s.loadAvg.toFixed(2):null),
       row("CPU throttling",has(s.throttledPeriods)&&s.throttledPeriods>0?s.throttledPeriods+" periods"+(has(s.throttledMs)&&s.throttledMs>0?" · "+fmtDur(s.throttledMs):"")+" in window":null),
       row("CPU steal (host)",has(s.cpuStealPct)&&s.cpuStealPct>=0?s.cpuStealPct.toFixed(1)+"% of window":null),
-      row("CPU iowait (host)",has(s.cpuIowaitPct)&&s.cpuIowaitPct>=0?s.cpuIowaitPct.toFixed(1)+"% of window":null),
-      row("Safepoints",has(s.safepointCount)&&s.safepointCount>0?fmt(s.safepointCount)+(has(s.safepointMs)&&s.safepointMs>0?" · "+s.safepointMs.toFixed(0)+" ms to-safepoint":"")+" in window":null)
+      row("CPU iowait (host)",has(s.cpuIowaitPct)&&s.cpuIowaitPct>=0?s.cpuIowaitPct.toFixed(1)+"% of window":null)
     ]),
     card(osIcon(s.os||""),"Operating system",osFamily(s.os||""),[
-      row("OS",s.os),row("Architecture",s.arch),row("Host",s.server),
+      row("OS",s.os),row("Architecture",s.arch),row("Server name",s.server),
       row("Server software",s.hytale?"Hytale Dedicated "+s.hytale:null),row("Uptime",has(s.uptimeMs)&&s.uptimeMs>0?fmtDur(s.uptimeMs):null),
       row("Disk",s.disk&&has(s.disk.total)&&s.disk.total>0?gb(s.disk.free).toFixed(1)+" GB free of "+gb(s.disk.total).toFixed(1)+" GB":null),
       row("Block I/O limit",(has(s.ioReadLimit)&&s.ioReadLimit>=0)||(has(s.ioWriteLimit)&&s.ioWriteLimit>=0)?[has(s.ioReadLimit)&&s.ioReadLimit>=0?"read "+fmtBytes(s.ioReadLimit)+"/s":null,has(s.ioWriteLimit)&&s.ioWriteLimit>=0?"write "+fmtBytes(s.ioWriteLimit)+"/s":null].filter(Boolean).join(" · "):null),
@@ -2450,15 +2396,20 @@ function systemHtml(){
       row("Container",s.container&&s.container.type?s.container.type:null),
       row("CPU limit",(s.container&&has(s.container.cpuLimit)&&s.container.cpuLimit>0)?(has(s.cpuCores)&&s.cpuCores>0&&s.container.cpuLimit>=s.cpuCores?"unlimited (quota "+s.container.cpuLimit.toFixed(0)+")":s.container.cpuLimit.toFixed(1)+" cores"):null),
       row("Memory limit",s.container&&has(s.container.memLimit)&&s.container.memLimit>0?fmtBytes(s.container.memLimit):null),
-      row("Open files",has(s.openFds)&&s.openFds>=0?(has(s.maxFds)&&s.maxFds>0?fmt(s.openFds)+" of "+fmt(s.maxFds):fmt(s.openFds)):null),
+      row("Open files",has(s.openFds)&&has(s.maxFds)&&s.maxFds>0&&s.openFds>=0.8*s.maxFds?fmt(s.openFds)+" of "+fmt(s.maxFds):null),
       row("Container memory",has(s.containerMemUsed)&&s.containerMemUsed>=0?(s.container&&has(s.container.memLimit)&&s.container.memLimit>0?fmtBytes(s.containerMemUsed)+" of "+fmtBytes(s.container.memLimit)+" ("+(100*s.containerMemUsed/s.container.memLimit).toFixed(0)+"%)":fmtBytes(s.containerMemUsed)):null),
       row("Container swap",has(s.containerSwapUsed)&&s.containerSwapUsed>=0?(s.containerSwapMax===0?"disabled":fmtBytes(s.containerSwapUsed)+(has(s.containerSwapMax)&&s.containerSwapMax>0?" of "+fmtBytes(s.containerSwapMax):" used")):null),
       row("OOM kills",has(s.oomKills)&&s.oomKills>0?fmt(s.oomKills)+" (cumulative)":null)
     ]),
     card(I.java,"Java / JVM",s.javaVendor?jvmDistro(s.javaVendor):"",[
       row("Runtime",s.jvm),row("Vendor",s.javaVendor),row("Version",s.javaVersion),row("java.home",s.javaHome),
-      ...(s.loaders||[]).map(l=>row(l[0]+" loader",l[1])),
-      row("Max heap",has(s.xmxBytes)&&s.xmxBytes>0?gib(s.xmxBytes).toFixed(1)+" GiB (-Xmx)":null)
+      ...(s.loaders||[]).map(l=>row(l[0]+" loader",l[1]))
+    ])
+  ].filter(Boolean);
+  const advCards=[
+    card(I.cpu,"Load and JVM pauses","",[
+      row("Load average (1m, host)",has(s.loadAvg)&&s.loadAvg>=0?s.loadAvg.toFixed(2):null),
+      row("Safepoints",has(s.safepointCount)&&s.safepointCount>0?fmt(s.safepointCount)+(has(s.safepointMs)&&s.safepointMs>0?" · "+s.safepointMs.toFixed(0)+" ms to-safepoint":"")+" in window":null)
     ]),
     card(I.gc,"Garbage collector",DV.gcName||"",[
       row("Young",s.gcYoung),row("Old",s.gcOld),row("Parallel GC threads",s.gcParallel),row("Concurrent GC threads",s.gcConc),
@@ -2477,8 +2428,9 @@ function systemHtml(){
     const long=s.startCommand.length>200;
     cmd=`<div class="codewrap${long?" closed":""}" style="margin-top:16px"><button type="button" class="codehd" data-code aria-expanded="${!long}"><span class="ic">${I.term}</span><span class="fn">Start command</span><span class="chev2" aria-hidden="true">${I.chev}</span></button><pre class="cmdpre">${esc(s.startCommand)}</pre></div>`;
   }
-  if(!cards.length&&!cw&&!dw&&!cmd) return "";
-  return (cards.length?`<div class="syscols">${cards.join("")}</div>`:"")+cw+dw+cmd;
+  const advanced=adv("JVM details for support",advCards.length?`<div class="syscols">${advCards.join("")}</div>`:"");
+  if(!cards.length&&!cw&&!dw&&!cmd&&!advanced) return "";
+  return (cards.length?`<div class="syscols">${cards.join("")}</div>`:"")+cw+dw+cmd+advanced;
 }
 
 function pluginsHtml(){
@@ -2562,40 +2514,106 @@ function logHtml(){
 function configHtml(){
   const blocks=(D.configs||[]).map(c=>
     `<div class="codewrap closed"><button type="button" class="codehd" data-code aria-expanded="false"><span class="ic">${I.doc}</span><span class="fn">${esc(c.title)}</span><span class="chev2" aria-hidden="true">${I.chev}</span></button><pre>${colorJson(c.content)}</pre></div>`);
-  let mix="";
-  if(D.mixins){
-    const cfgs=D.mixins.configs||[];
-    const total=cfgs.reduce((a,c)=>a+c[1].length,0);
-    const conflicts=MIXCONF.list;
-    const rows=cfgs.map(c=>{
-      const chips=c[1].map(m=>`<span class="mxchip">${esc(m)}</span>`).join(" ");
-      return `<tr><td class="nm" data-sval="${esc(c[0])}">${esc(c[0])}</td><td class="r" data-num="${c[1].length}">${c[1].length}</td><td style="white-space:normal">${chips}</td></tr>`;
+  return blocks.join("\n");
+}
+
+function mixinMod(file){
+  const s=((D.mixins&&D.mixins.sources)||[]).find(x=>x[0]===file);
+  if(s&&s[1]) return String(s[1]).split(":").pop();
+  return file?String(file).replace(/\.jar$/i,""):"unknown";
+}
+function mixinChips(list){return (list||[]).map(m=>`<span class="mxchip">${esc(String(m).split(".").pop())}</span>`).join(" ");}
+function legacyMixinsHtml(M){
+  const cfgs=M.configs||[];
+  const total=cfgs.reduce((a,c)=>a+c[1].length,0);
+  const conflicts=MIXCONF.list;
+  const rows=cfgs.map(c=>{
+    const chips=c[1].map(m=>`<span class="mxchip">${esc(m)}</span>`).join(" ");
+    return `<tr><td class="nm" data-sval="${esc(c[0])}">${esc(c[0])}</td><td class="r" data-num="${c[1].length}">${c[1].length}</td><td style="white-space:normal">${chips}</td></tr>`;
+  }).join("");
+  let conf="";
+  if(conflicts&&conflicts.length){
+    const crows=conflicts.map(c=>{
+      const target=c[0], pairs=c[1];
+      const mods=[...new Set(pairs.map(p=>modOfConfig(p[0])))];
+      const head=mods.map(esc).join(' <span class="vs">↔</span> ')+` <span class="dash">·</span> ${esc(String(target).split(".").pop())}`;
+      const chips=pairs.map(p=>`<span class="mxchip warnchip">${esc(p[0])}${p[1]?" → "+esc(p[1]):""}</span>`).join(" ");
+      return `<div class="mxcrow"><div class="mxchead">${head}</div><code>${esc(target)}</code><div class="mxchips">${chips}</div></div>`;
     }).join("");
-    let conf="";
-    if(conflicts&&conflicts.length){
-      const crows=conflicts.map(c=>{
-        const target=c[0], pairs=c[1];
-        const mods=[...new Set(pairs.map(p=>modOfConfig(p[0])))];
-        const head=mods.map(esc).join(' <span class="vs">↔</span> ')+` <span class="dash">·</span> ${esc(String(target).split(".").pop())}`;
-        const chips=pairs.map(p=>`<span class="mxchip warnchip">${esc(p[0])}${p[1]?" → "+esc(p[1]):""}</span>`).join(" ");
-        return `<div class="mxcrow"><div class="mxchead">${head}</div><code>${esc(target)}</code><div class="mxchips">${chips}</div></div>`;
-      }).join("");
-      conf=`<div class="mxconf"><div class="mxchd">${I.warn} ${conflicts.length} class${conflicts.length===1?"":"es"} patched by more than one config</div>
-        <div class="mxcsub">Overlapping mixins can interact in load-order-dependent ways; flag these mods first when debugging odd behaviour.</div>
-        ${crows}</div>`;
-    } else if(conflicts&&cfgs.length>=2){
-      conf=`<div class="mxok">${I.check} No classes patched by more than one config.</div>`;
-    }
-    mix=`<div class="kvcard" style="margin-top:16px"><div class="kvh"><span class="ic">${I.layers}</span><b>Mixins</b><small>${total} applied</small></div>
-      <div class="kv">
-        ${D.mixins.bootstrapper?`<div class="row"><span class="k">Bootstrapper</span><span class="v">${esc(D.mixins.bootstrapper)}</span></div>`:""}
-        <div class="row"><span class="k">Total</span><span class="v">${total} mixins across ${cfgs.length} config${cfgs.length===1?"":"s"}</span></div>
-      </div>
-      ${conf}
-      ${cfgs.length?`<div class="tscroll" style="margin:10px;border-radius:6px"><table class="sortable" id="mx-t"><thead><tr>${thc("Config","The mixin config file that registered these mixins; its name identifies the owning mod",{sort:"text"})}${thc("Count","Mixins registered by this config",{sort:"num",r:true,def:"desc"})}${thc("Mixin classes","All mixin classes this config applies")}</tr></thead><tbody>${rows}</tbody></table></div>`:""}</div>`;
+    conf=`<div class="mxconf"><div class="mxchd">${I.warn} ${conflicts.length} class${conflicts.length===1?"":"es"} patched by more than one config</div>
+      <div class="mxcsub">Overlapping mixins can interact in load-order-dependent ways; flag these mods first when debugging odd behaviour.</div>
+      ${crows}</div>`;
+  } else if(conflicts&&cfgs.length>=2){
+    conf=`<div class="mxok">${I.check} No classes patched by more than one config.</div>`;
   }
-  if(!blocks.length&&!mix) return "";
-  return blocks.join("\n")+mix;
+  return `<div class="kvcard"><div class="kvh"><span class="ic">${I.layers}</span><b>Mixins</b>${cfgs.length?`<small>${total} applied</small>`:""}</div>
+    <div class="kv">
+      ${M.bootstrapper?`<div class="row"><span class="k">Bootstrapper</span><span class="v">${esc(M.bootstrapper)}</span></div>`:""}
+      ${cfgs.length||!M.note?`<div class="row"><span class="k">Total</span><span class="v">${total} mixins across ${cfgs.length} config${cfgs.length===1?"":"s"}</span></div>`:""}
+      ${M.note?`<div class="row"><span class="k">Details</span><span class="v">${esc(M.note)}</span></div>`:""}
+    </div>
+    ${conf}
+    ${cfgs.length?`<div class="tscroll" style="margin:10px;border-radius:6px"><table class="sortable" id="mx-t"><thead><tr>${thc("Config","The mixin config file that registered these mixins; its name identifies the owning mod",{sort:"text"})}${thc("Count","Mixins registered by this config",{sort:"num",r:true,def:"desc"})}${thc("Mixin classes","All mixin classes this config applies")}</tr></thead><tbody>${rows}</tbody></table></div>`:""}</div>`;
+}
+function mixinsHtml(){
+  const M=D.mixins;
+  if(!M) return "";
+  const H=M.hyinit;
+  if(!H) return legacyMixinsHtml(M);
+  const sources=M.sources||[], cfgs=M.configs||[], probs=M.problems||[], ovl=M.overlaps||[];
+  const errors=probs.filter(p=>p[0]==="error").length, warns=probs.length-errors;
+  const totalMixins=cfgs.reduce((a,c)=>a+(c[1]||[]).length,0);
+  const lead=`<p class="lead">Hyinit${H.version?` <b>${esc(H.version)}</b>`:""} loaded <b>${sources.length}</b> early plugin JAR${sources.length===1?"":"s"} with <b>${fmt(totalMixins)}</b> Mixin${totalMixins===1?"":"s"} in <b>${cfgs.length}</b> config${cfgs.length===1?"":"s"}.${has(H.patchedClasses)?` Mixins changed <b>${fmt(H.patchedClasses)}</b> class${H.patchedClasses===1?"":"es"} by capture time.`:""} The full list of changed methods is in <code>extras/mixins.txt</code>.</p>${M.note?`<div class="subnote">${esc(M.note)}</div>`:""}`;
+  let prob;
+  if(probs.length){
+    const rows=probs.map(p=>{
+      const lv=p[0]==="error"?"ERROR":"WARN";
+      return `<div class="mxprob"><span class="lvl ${lv}">${lv}</span>${esc(p[1]||"")}${p[2]?`<span class="mxpsrc">${esc(p[2])}</span>`:""}${p[3]?`<div class="mxpdet">${esc(p[3])}</div>`:""}</div>`;
+    }).join("");
+    const head=[errors?`${errors} error${errors===1?"":"s"}`:"",warns?`${warns} warning${warns===1?"":"s"}`:""].filter(Boolean).join(" and ");
+    prob=`<div class="mxconf${errors?" bad":""}" style="margin:0 0 14px"><div class="mxchd">${I.warn} ${head} since startup</div><div class="mxcsub">The server log has the full stack traces.</div>${rows}${has(H.problemsOmitted)&&H.problemsOmitted>0?`<div class="mxcsub">${fmt(H.problemsOmitted)} more were not kept.</div>`:""}</div>`;
+  } else {
+    prob=`<div class="mxok" style="margin:0 0 14px">${I.check} No Mixin problems since startup.</div>`;
+  }
+  const started=H.launchMode==="earlyPlugin"?"from the early plugins folder":H.launchMode==="launcher"?"with java -jar":H.launchMode;
+  const kv=[
+    ["Hyinit",H.version],
+    ["Started",started],
+    ["Mixin",[H.mixin,H.fabricMixin?"Fabric Mixin "+H.fabricMixin:null,H.mixinExtras?"MixinExtras "+H.mixinExtras:null].filter(Boolean).join(" · ")],
+    ["Classes transformed",has(H.classesTransformed)?fmt(H.classesTransformed)+(has(H.transformMs)?` in ${fmt(H.transformMs)} ms`:""):null],
+    ["Hyinit startup",has(H.bootstrapMs)?`${fmt(H.bootstrapMs)} ms before Hytale started`:null]
+  ].filter(r=>r[1]).map(r=>`<div class="row"><span class="k">${esc(r[0])}</span><span class="v">${esc(String(r[1]))}</span></div>`).join("");
+  const card=`<div class="kvcard" style="margin-bottom:14px"><div class="kvh"><span class="ic">${I.layers}</span><b>Versions</b></div><div class="kv">${kv}</div></div>`;
+  const srows=sources.map(s=>{
+    const [file,plugin,ver,sha,configs,main,skipped,compat,methods]=s;
+    const tags=(skipped?` <span class="ovltag badtag" data-tip="The plugin was disabled at startup, so its Mixins were not applied.">Mixins skipped</span>`:"")
+      +(compat?` <span class="ovltag" data-tip="Declared Mixin compatibility">compat ${esc(compat)}</span>`:"");
+    const name=plugin?String(plugin).split(":").pop():String(file||"").replace(/\.jar$/i,"");
+    return `<tr><td class="nm" data-sval="${esc(name)}">${esc(name)}${tags}</td><td class="pkg">${esc(file||"·")}</td><td class="vtag">${esc(ver||"·")}</td><td data-sval="${esc(sha||"")}">${sha?`<span class="sha" data-tip="SHA-256 ${esc(sha)}">${esc(String(sha).slice(0,8))}</span>`:`<span class="pkg">·</span>`}</td><td class="r" data-num="${methods||0}">${has(methods)?fmt(methods):"·"}</td><td style="white-space:normal">${(configs||[]).map(c=>`<span class="mxchip">${esc(c)}</span>`).join(" ")}</td></tr>`;
+  }).join("");
+  const stable=sources.length?`<div class="card" style="margin-bottom:14px"><h3><span class="ic">${I.layers}</span> Early plugin JARs</h3>
+    <div class="tscroll"><table class="sortable" id="mxs-t"><thead><tr>${thc("Mod","Plugin name from the JAR's manifest",{sort:"text"})}${thc("JAR","File name in the early plugins folder",{sort:"text"})}${thc("Version","Version from the JAR's manifest",{sort:"text"})}${thc("SHA-256","First 8 characters. Hover for the full checksum.",{sort:"text"})}${thc("Methods","Methods that this JAR's Mixins added or changed so far",{sort:"num",r:true,def:"desc"})}${thc("Mixin configs","Configs Hyinit registered from this JAR")}</tr></thead><tbody>${srows}</tbody></table></div></div>`:"";
+  const crows=cfgs.map(c=>{
+    const [name,mixins,source,pkg,targets,compat,priority,required]=c;
+    const n=(mixins||[]).length;
+    return `<tr><td class="nm" data-sval="${esc(name)}">${esc(name)}${pkg?`<div class="pkg">${esc(pkg)}</div>`:""}</td><td data-sval="${esc(mixinMod(source))}">${esc(mixinMod(source))}</td><td class="r" data-num="${n}">${n}</td><td class="r" data-num="${targets||0}">${has(targets)?fmt(targets):"·"}</td><td style="white-space:normal">${n?`<details><summary>${n} class${n===1?"":"es"}</summary>${mixinChips(mixins)}</details>`:"·"}</td></tr>`;
+  }).join("");
+  const ctable=cfgs.length?`<div class="card" style="margin-bottom:14px"><h3><span class="ic">${I.doc}</span> Mixin configs</h3>
+    <div class="tscroll"><table class="sortable" id="mx-t"><thead><tr>${thc("Config","Mixin config file and its Mixin package",{sort:"text"})}${thc("Mod","The JAR that registered this config",{sort:"text"})}${thc("Mixins","Mixin classes in this config",{sort:"num",r:true,def:"desc"})}${thc("Targets","Classes this config changes",{sort:"num",r:true})}${thc("Mixin classes","Expand to list the Mixin classes")}</tr></thead><tbody>${crows}</tbody></table></div></div>`:"";
+  let over="";
+  if(ovl.length){
+    const shown=ovl.slice(0,50).map(o=>{
+      const mods=[...new Set((o[1]||[]).map(p=>p[0]))];
+      const chips=(o[1]||[]).map(p=>`<span class="mxchip warnchip">${esc(p[0])}${p[1]?" → "+esc(String(p[1]).split(".").pop()):""}</span>`).join(" ");
+      return `<div class="mxcrow"><div class="mxchead">${mods.map(esc).join(' <span class="vs">↔</span> ')} <span class="dash">·</span> ${esc(leafName(o[0]))}</div><code>${esc(o[0])}</code><div class="mxchips">${chips}</div></div>`;
+    }).join("");
+    over=`<div class="mxconf" style="margin:0 0 14px"><div class="mxchd">${I.warn} ${ovl.length} method${ovl.length===1?"":"s"} changed by more than one mod</div>
+      <div class="mxcsub">Mixins from different mods in one method can affect each other. Check these first when something behaves oddly.</div>
+      ${shown}${ovl.length>50?`<div class="mxcsub">${ovl.length-50} more are in extras/mixins.txt.</div>`:""}</div>`;
+  } else if(sources.length>=2){
+    over=`<div class="mxok" style="margin:0 0 14px">${I.check} No method is changed by more than one mod.</div>`;
+  }
+  return lead+prob+card+stable+over+ctable;
 }
 
 
@@ -2606,17 +2624,18 @@ const html=[
   sec("engine",I.chip,"Engine systems","per-system tick wall time",engineHtml()),
   sec("methods",I.fire,"Hot methods","ranked by CPU samples",methodsHtml(),true),
   sec("flame",I.fire,"Flame graph","aggregated call tree",flameHtml(),true),
-  sec("threads",I.threads,"Hot threads",has(D.threadTotal)?D.threadTotal+" live threads":"",threadsHtml()),
-  sec("states",I.layers,"Thread states","state breakdown",statesHtml()),
+  sec("threads",I.threads,"Hot threads","ranked by CPU samples",threadsHtml()),
+  sec("states",I.layers,"Thread states","locks and deadlocks",statesHtml()),
   sec("memory",I.heap,"Memory & GC",DV.gcName?("heap + "+DV.gcName):"heap",memHtml()),
   sec("pluginmetrics",I.pulse,"Plugin metrics",(D.pluginMetrics&&D.pluginMetrics.length?D.pluginMetrics.length+" series":""),pluginMetricsHtml()),
   sec("network",I.net,"Network","throughput over window",networkHtml()),
   sec("worlds",I.globe,"Worlds","per-world CPU",worldsHtml(),true),
   sec("system",I.chip,"System & hardware","host / JVM",systemHtml()),
   sec("plugins",I.layers,"Plugins",(D.plugins&&D.plugins.length?D.plugins.length+" loaded":""),pluginsHtml()),
+  sec("mixins",I.layers,"Mixins",D.mixins&&D.mixins.problems&&D.mixins.problems.length?D.mixins.problems.length+" problem"+(D.mixins.problems.length===1?"":"s"):(D.mixins&&D.mixins.hyinit?"Hyinit":""),mixinsHtml()),
   sec("assetpacks",I.layers,"Asset packs",(D.assetPacks&&D.assetPacks.length?D.assetPacks.length+" loaded":""),assetPacksHtml()),
   sec("log",I.term,"Server log","captured tail",logHtml()),
-  sec("config",I.doc,"Config files & mixins","captured configuration",configHtml())
+  sec("config",I.doc,"Config files","captured configuration",configHtml())
 ].join("");
 $("#sections").innerHTML=html;
 
@@ -2841,8 +2860,8 @@ function buildMarkdown(){
     L.push("");
   }
   if(D.hotThreads&&D.hotThreads.length&&T){
-    L.push(`## Hot threads`,"| Thread | State | Samples | CPU% | Top method |","|---|---|---|---|---|");
-    D.hotThreads.slice(0,10).forEach(ht=>L.push(`| ${ht[2]} | ${ht[1]} | ${fmt(ht[0])} | ${pct(ht[0],T).toFixed(1)}% | ${ht[3]?leafName(ht[3]):"-"} |`));
+    L.push(`## Hot threads`,"| Thread | Samples | CPU% | Top method |","|---|---|---|---|");
+    D.hotThreads.slice(0,10).forEach(ht=>L.push(`| ${ht[2]}${isHyboxThread(ht[2])?" (Hybox itself)":""} | ${fmt(ht[0])} | ${pct(ht[0],T).toFixed(1)}% | ${ht[3]?leafName(ht[3]):"-"} |`));
     L.push("");
   }
   if(D.subsystems&&D.subsystems.length&&T){
@@ -2955,6 +2974,14 @@ function buildMarkdown(){
     MIXCONF.list.forEach(c=>L.push(`- ${c[0]}: ${c[1].map(p=>p[1]?`${p[0]} (${p[1]})`:p[0]).join(" vs ")}`));
     L.push("");
   }
+  if(D.mixins&&D.mixins.hyinit){
+    const H=D.mixins.hyinit, probs=D.mixins.problems||[], ovl=D.mixins.overlaps||[];
+    L.push(`## Mixins`,`Hyinit ${H.version||"?"} · Mixin ${H.mixin||"?"} · ${(D.mixins.sources||[]).length} early plugin JARs`);
+    (D.mixins.sources||[]).forEach(s=>L.push(`- ${s[1]?String(s[1]).split(":").pop():s[0]} ${s[2]||""} (${s[0]}${s[3]?`, sha256 ${String(s[3]).slice(0,8)}`:""})`));
+    probs.forEach(p=>L.push(`- ${String(p[0]).toUpperCase()}: ${p[1]}${p[2]?` (${p[2]})`:""}`));
+    ovl.slice(0,10).forEach(o=>L.push(`- Changed by more than one mod: ${o[0]} (${[...new Set((o[1]||[]).map(p=>p[0]))].join(", ")})`));
+    L.push("");
+  }
   if(Array.isArray(D.events)&&D.events.length){
     const byType={};
     D.events.forEach(e=>{
@@ -2969,15 +2996,14 @@ function buildMarkdown(){
   const btn=$("#copyMd"); if(!btn) return;
   btn.addEventListener("click",async()=>{
     const md=buildMarkdown();
+    let ok=true;
     try{ await navigator.clipboard.writeText(md); }
-    catch(e){ const ta=document.createElement("textarea"); ta.value=md; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");}catch(_){} ta.remove();btn.focus({preventScroll:true}); }
-    btn.classList.add("ok"); btn.innerHTML=`${I.check} Copied`;
-    setTimeout(()=>{btn.classList.remove("ok"); btn.innerHTML=`${I.copy} Copy as Markdown`;},1600);
+    catch(e){ const ta=document.createElement("textarea"); ta.value=md; document.body.appendChild(ta); ta.select(); try{ok=document.execCommand("copy");}catch(_){ok=false;} ta.remove();btn.focus({preventScroll:true}); }
+    btn.classList.add(ok?"ok":"fail"); btn.innerHTML=ok?`${I.check} Copied`:`${I.warn} Copy failed`;
+    setTimeout(()=>{btn.classList.remove("ok","fail"); btn.innerHTML=`${I.copy} Copy as Markdown`;},ok?1600:3200);
   });
 })();
 
-function clockToSec(t){const p=String(t).split(":").map(Number);return (p[0]||0)*3600+(p[1]||0)*60+(p[2]||0);}
-function secToClock(s){s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;const z=v=>String(v).padStart(2,"0");return z(h)+":"+z(m)+":"+z(x);}
 buildPresetRow();
 renderCharts();
 pruneBarTips();
@@ -2986,6 +3012,7 @@ $("#totop").addEventListener("click",()=>window.scrollTo({top:0,behavior:"smooth
 window.addEventListener("scroll",()=>{$("#totop").style.display=scrollY>600?"flex":"none";},{passive:true});
 let RSZ;
 window.addEventListener("resize",()=>{clearTimeout(RSZ);RSZ=setTimeout(()=>{renderCharts();pruneBarTips();},150);});
+document.addEventListener("toggle",e=>{if(e.target.matches&&e.target.matches("details.adv")&&e.target.open) requestAnimationFrame(()=>{renderCharts();pruneBarTips();});},true);
 window.BBZOOM={get:()=>ZOOM,set:setZoom};
 window.BBCHARTS=CHARTS;
 
@@ -3033,7 +3060,7 @@ initThreadTimeline();
 
 const spy=new IntersectionObserver(es=>{
   es.forEach(e=>{ if(e.isIntersecting){ const id=e.target.id||"top";
-    document.querySelectorAll(".navlist a").forEach(a=>a.classList.toggle("on",a.dataset.nav===id)); }});
+    document.querySelectorAll(".navlist a").forEach(a=>{const on=a.dataset.nav===id;a.classList.toggle("on",on);if(on)a.setAttribute("aria-current","true");else a.removeAttribute("aria-current");}); }});
 },{rootMargin:"-12% 0px -78% 0px"});
 const hdr=document.querySelector("header"); hdr.id="top"; spy.observe(hdr);
 document.querySelectorAll("section").forEach(s=>spy.observe(s));

@@ -1,6 +1,7 @@
 package io.github.xytronix.hybox.core.retention;
 
 import java.io.IOException;
+import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -18,6 +19,8 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Stream;
+
+import io.github.xytronix.hybox.core.text.Units;
 
 /**
  * Enforces on-disk retention for incident bundles.
@@ -43,37 +46,21 @@ public final class RetentionManager {
         Objects.requireNonNull(policy, "policy");
 
         if (!Files.exists(incidentDir)) {
-            return new RetentionStats(0, 0, 0L, 0, 0L, 0);
+            return new RetentionStats(0, 0, 0L, 0, 0L, 0, List.of());
         }
 
-        List<IncidentFile> incidents = new ArrayList<>();
         List<Path> candidates;
-        try (Stream<Path> stream = Files.list(incidentDir)) {
-            candidates = stream
-                .filter(path -> path.getFileName().toString().endsWith(".zip"))
-                .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-                .toList();
+        try {
+            candidates = bundleFiles(incidentDir);
         } catch (IOException e) {
             logger.log(System.Logger.Level.WARNING, "Failed to list incident directory " + incidentDir, e);
-            return new RetentionStats(0, 0, 0L, 0, 0L, 0);
+            return new RetentionStats(0, 0, 0L, 0, 0L, 0, List.of());
         }
 
         int scanned = candidates.size();
-        for (Path path : candidates) {
-            try {
-                Instant createdAt = resolveCreatedAt(path);
-                long size = Files.size(path);
-                incidents.add(new IncidentFile(path, createdAt, size));
-            } catch (IOException e) {
-                logger.log(System.Logger.Level.WARNING,
-                    "Failed to read incident bundle metadata for " + path, e);
-            }
-        }
-        incidents.sort(Comparator.comparing(IncidentFile::createdAt)
-            .thenComparing(file -> file.path().getFileName().toString()));
+        List<IncidentFile> incidents = readIncidents(candidates);
 
-        int deleted = 0;
-        long bytesDeleted = 0;
+        List<RetentionStats.Removal> removals = new ArrayList<>();
         int deleteFailures = 0;
 
         long currentBytes = incidents.stream().mapToLong(IncidentFile::size).sum();
@@ -82,7 +69,7 @@ public final class RetentionManager {
         if (incidents.isEmpty()) {
             long finalBytes = recalcBytes(incidentDir);
             int finalCount = recalcCount(incidentDir);
-            return new RetentionStats(scanned, 0, 0L, 0, finalBytes, finalCount);
+            return new RetentionStats(scanned, 0, 0L, 0, finalBytes, finalCount, List.of());
         }
 
         IncidentFile newest = incidents.get(incidents.size() - 1);
@@ -97,8 +84,7 @@ public final class RetentionManager {
                 if (incident.createdAt().isBefore(cutoff)) {
                     if (attemptDelete(incident, newest, failed)) {
                         incidents.remove(incident);
-                        deleted++;
-                        bytesDeleted += incident.size();
+                        removals.add(removed(incident, RetentionStats.Rule.AGE, policy));
                         currentBytes -= incident.size();
                         currentCount--;
                     } else {
@@ -122,8 +108,7 @@ public final class RetentionManager {
                 }
                 if (attemptDelete(candidate, newest, failed)) {
                     incidents.remove(candidate);
-                    deleted++;
-                    bytesDeleted += candidate.size();
+                    removals.add(removed(candidate, RetentionStats.Rule.COUNT, policy));
                     currentBytes -= candidate.size();
                     currentCount--;
                 } else {
@@ -142,8 +127,7 @@ public final class RetentionManager {
                 }
                 if (attemptDelete(candidate, newest, failed)) {
                     incidents.remove(candidate);
-                    deleted++;
-                    bytesDeleted += candidate.size();
+                    removals.add(removed(candidate, RetentionStats.Rule.SIZE, policy));
                     currentBytes -= candidate.size();
                     currentCount--;
                 } else {
@@ -159,8 +143,98 @@ public final class RetentionManager {
 
         long finalBytes = recalcBytes(incidentDir);
         int finalCount = recalcCount(incidentDir);
+        long bytesDeleted = removals.stream().mapToLong(RetentionStats.Removal::bytes).sum();
+        RetentionStats stats = new RetentionStats(scanned, removals.size(), bytesDeleted, deleteFailures,
+            finalBytes, finalCount, removals);
+        if (!removals.isEmpty() || deleteFailures > 0) {
+            logger.log(System.Logger.Level.INFO, "Retention removed " + Units.count(removals.size(), "bundle")
+                + " (" + stats.removed(RetentionStats.Rule.AGE) + " by age, "
+                + stats.removed(RetentionStats.Rule.COUNT) + " by count, "
+                + stats.removed(RetentionStats.Rule.SIZE) + " by size) and freed " + Units.bytes(bytesDeleted)
+                + (deleteFailures > 0 ? ". " + deleteFailures + " could not be deleted" : "") + ". "
+                + Units.count(finalCount, "bundle") + " and " + Units.bytes(finalBytes) + " remain.");
+        }
+        return stats;
+    }
 
-        return new RetentionStats(scanned, deleted, bytesDeleted, deleteFailures, finalBytes, finalCount);
+    public RetentionUsage usage(Path incidentDir, RetentionPolicy policy) {
+        Objects.requireNonNull(incidentDir, "incidentDir");
+        Objects.requireNonNull(policy, "policy");
+        List<IncidentFile> incidents = List.of();
+        if (Files.exists(incidentDir)) {
+            try {
+                incidents = readIncidents(bundleFiles(incidentDir));
+            } catch (IOException e) {
+                logger.log(System.Logger.Level.WARNING, "Failed to list incident directory " + incidentDir, e);
+            }
+        }
+        int expired = 0;
+        if (policy.maxAge() != null && !policy.maxAge().isZero()) {
+            Instant cutoff = clock.instant().minus(policy.maxAge());
+            for (int i = 0; i < incidents.size() - 1; i++) {
+                if (incidents.get(i).createdAt().isBefore(cutoff)) {
+                    expired++;
+                }
+            }
+        }
+        long free = -1;
+        long total = -1;
+        Path existing = incidentDir.toAbsolutePath();
+        while (existing != null && !Files.exists(existing)) {
+            existing = existing.getParent();
+        }
+        if (existing != null) {
+            try {
+                FileStore store = Files.getFileStore(existing);
+                free = store.getUsableSpace();
+                total = store.getTotalSpace();
+            } catch (IOException e) {
+                logger.log(System.Logger.Level.WARNING, "Failed to read free disk space for " + existing, e);
+            }
+        }
+        return new RetentionUsage(incidents.size(), incidents.stream().mapToLong(IncidentFile::size).sum(),
+            expired, free, total, policy);
+    }
+
+    private static List<Path> bundleFiles(Path incidentDir) throws IOException {
+        try (Stream<Path> stream = Files.list(incidentDir)) {
+            return stream
+                .filter(path -> path.getFileName().toString().endsWith(".zip"))
+                .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                .toList();
+        }
+    }
+
+    private List<IncidentFile> readIncidents(List<Path> candidates) {
+        List<IncidentFile> incidents = new ArrayList<>();
+        for (Path path : candidates) {
+            try {
+                Instant createdAt = resolveCreatedAt(path);
+                long size = Files.size(path);
+                incidents.add(new IncidentFile(path, createdAt, size));
+            } catch (IOException e) {
+                logger.log(System.Logger.Level.WARNING,
+                    "Failed to read incident bundle metadata for " + path, e);
+            }
+        }
+        incidents.sort(Comparator.comparing(IncidentFile::createdAt)
+            .thenComparing(file -> file.path().getFileName().toString()));
+        return incidents;
+    }
+
+    private RetentionStats.Removal removed(IncidentFile incident, RetentionStats.Rule rule, RetentionPolicy policy) {
+        String name = incident.path().getFileName().toString();
+        logger.log(System.Logger.Level.INFO, "Retention removed " + name + " (" + Units.bytes(incident.size())
+            + "): " + logReason(rule, policy) + ".");
+        return new RetentionStats.Removal(name, rule, incident.size());
+    }
+
+    private static String logReason(RetentionStats.Rule rule, RetentionPolicy policy) {
+        return switch (rule) {
+            case AGE -> "age, older than MaxAge " + Units.duration(policy.maxAge());
+            case COUNT -> "count, more than MaxCount " + policy.maxCount() + " bundles";
+            case SIZE -> "size, bundles over MaxTotalBytes " + Units.bytes(policy.maxTotalBytes());
+        };
     }
 
     public boolean enforceStaging(Path directory, RetentionPolicy policy, Path... additionalDirectories) {
@@ -192,9 +266,16 @@ public final class RetentionManager {
                 if (newestFiles.contains(file)) {
                     continue;
                 }
-                if (count > policy.failedRecordingMaxCount() || file.createdAt().isBefore(cutoff)
-                    || (policy.stagingMaxTotalBytes() > 0 && bytes > policy.stagingMaxTotalBytes())) {
+                boolean overCount = count > policy.failedRecordingMaxCount();
+                boolean tooOld = file.createdAt().isBefore(cutoff);
+                boolean overBytes = policy.stagingMaxTotalBytes() > 0 && bytes > policy.stagingMaxTotalBytes();
+                if (overCount || tooOld || overBytes) {
                     if (attemptDelete(file, null, failed)) {
+                        logger.log(System.Logger.Level.INFO, "Retention removed failed recording " + file.path().getFileName()
+                            + " (" + Units.bytes(file.size()) + "): "
+                            + (tooOld ? "age, older than " + Units.duration(policy.stagingMaxAge())
+                                : overCount ? "count, more than " + policy.failedRecordingMaxCount() + " failed recordings"
+                                : "size, staging over " + Units.bytes(policy.stagingMaxTotalBytes())) + ".");
                         bytes -= file.size();
                         count--;
                     }

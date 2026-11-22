@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import io.github.xytronix.hybox.core.text.Units;
 
 final class HyboxTrendRenderer {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("MMM d HH:mm", Locale.ROOT).withZone(ZoneOffset.UTC);
@@ -30,15 +31,19 @@ final class HyboxTrendRenderer {
     static void render(HyboxTrendModel model, ViewState state, UICommandBuilder commands,
                        HyboxIncidentRenderer.ChartImages images) {
         commands.clear("#Charts");
-        commands.set("#RangeLabel.Text", "Health metrics · last " + model.days() + (model.days() == 1 ? " day" : " days"));
-        for (int days : new int[] {1, 7, 30}) commands.set("#Range" + days + ".Disabled", !state.trendAllowed() || days == model.days());
+        commands.set("#RangeLabel.Text", "Health metrics · last " + Units.count(model.days(), "day"));
+        for (int days : new int[] {1, 7, 30}) {
+            boolean chosen = days == model.days();
+            HyboxDashboardRenderer.choice(commands, "#Range" + days, "#Range" + days + "Marker", chosen, "SecondaryButtonStyle");
+            commands.set("#Range" + days + ".Disabled", !state.trendAllowed() || chosen);
+        }
         String span = model.samples() == 0 ? "no recorded time span" : date(model.firstSample()) + " – " + date(model.lastSample()) + " UTC";
-        commands.set("#Summary.Text", count(model.samples()) + " samples · " + span + " · " + count(model.markers().length) + " incidents in range");
+        commands.set("#Summary.Text", Units.count(model.samples(), "sample") + " · " + span + " · " + Units.count(model.markers().length, "incident") + " in range");
         commands.set("#Unavailable.Visible", !model.unavailable().isEmpty() && !state.loading());
         commands.set("#Unavailable.Text", "Off / unavailable: " + String.join(", ", model.unavailable()));
         String empty = state.loading() ? "Loading health metrics…" : !model.metricsEnabled()
             ? "Metrics.Enabled is off. Enable it to record health metric history."
-            : model.samples() == 0 ? "No health metrics recorded in the last " + model.days() + " day(s)."
+            : model.samples() == 0 ? "No health metrics recorded in the last " + Units.count(model.days(), "day") + "."
             : model.metrics().isEmpty() ? "No metric values are available in the recorded samples." : "";
         commands.set("#EmptyState.Text", empty);
         commands.set("#EmptyState.Visible", !empty.isEmpty());
@@ -88,10 +93,6 @@ final class HyboxTrendRenderer {
 
     private static String value(double value, HyboxTrendModel.Metric metric) {
         return HyboxChartRenderer.value(value, metric.unit(), metric.precision());
-    }
-
-    private static String count(int count) {
-        return String.format(Locale.ROOT, "%,d", count);
     }
 
     private static String date(long time) {

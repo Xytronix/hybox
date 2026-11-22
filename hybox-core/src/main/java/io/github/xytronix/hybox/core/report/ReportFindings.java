@@ -9,17 +9,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import io.github.xytronix.hybox.core.health.FrameLabels;
 import io.github.xytronix.hybox.core.health.HealthSnapshot;
 import io.github.xytronix.hybox.core.health.JfrTimeline;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
 import io.github.xytronix.hybox.core.json.JsonWriter;
 
 /** Recording-wide diagnosis shared by HTML and in-game reports; spans contain text, never markup. */
-record ReportFindings(List<Span> intro, List<Entry> evidence, String severity, String direction,
-                      List<Entry> steps, List<String> tags, String caveat) {
+record ReportFindings(List<Span> intro, List<Entry> evidence, List<Entry> steps) {
     private static final double GIB = 1024.0 * 1024 * 1024;
-    private static final double GB = 1e9;
-    private static final String CAVEAT = "Correlate CPU share, blocked threads and short GC pauses with timing and stacks.";
 
     record Span(String text, String style) {}
     record Entry(List<Span> spans, String section, String label) {}
@@ -70,8 +68,10 @@ record ReportFindings(List<Span> intro, List<Entry> evidence, String severity, S
         }
         if (timeline != null && !timeline.hotMethods().isEmpty() && total > 0) {
             JfrTimeline.HotMethod method = timeline.hotMethods().getFirst();
+            String mixin = FrameLabels.labelOf(method.method());
             evidence.add(entry("methods", "hot methods", text("Top frame "), code(leafName(method.method())),
-                text(" holds "), bold(percent(method.samples(), total, 2) + "%"),
+                text((mixin == null ? "" : " (" + mixin + ")") + " holds "),
+                bold(percent(method.samples(), total, 2) + "%"),
                 text(" of samples (" + fmt(method.samples()) + " hits).")));
         }
         if (stalled != null && stalled.samples() != null && total > 0) {
@@ -89,9 +89,9 @@ record ReportFindings(List<Span> intro, List<Entry> evidence, String severity, S
             evidence.add(entry("states", "deadlocked threads", text("The JVM detected a deadlock involving "),
                 bold(number(deadlocked)), text(" thread" + (deadlocked == 1 ? "" : "s") + ".")));
         }
-        if (blocked != null) {
+        if (blocked != null && blocked > 0) {
             evidence.add(entry("states", "thread states", bold(number(blocked)),
-                text(" thread(s) were BLOCKED at capture.")));
+                text(blocked == 1 ? " thread was waiting for a lock at capture." : " threads were waiting for a lock at capture.")));
         }
         JfrTimeline.CpuStats cpu = timeline == null ? null : timeline.cpu();
         if (cpu != null && Double.isFinite(cpu.machMax())) {
@@ -106,20 +106,25 @@ record ReportFindings(List<Span> intro, List<Entry> evidence, String severity, S
         long[] rss = timeline == null ? null : timeline.rssSeries();
         Long heapMax = ReportSystemWriter.heapMax(snapshot, timeline);
         if (rss != null && memoryLimit > 0) {
-            long last = rss[rss.length - 1];
+            long rssPeak = Long.MIN_VALUE;
+            for (long value : rss) {
+                rssPeak = Math.max(rssPeak, value);
+            }
             List<Span> spans = new ArrayList<>();
-            spans.add(text("Process RSS "));
-            spans.add(bold(fixed(last / GB, 1) + " GB"));
-            spans.add(text(" of " + fixed(memoryLimit / GB, 1) + " GB "
+            spans.add(text("Process memory (RSS) peaked at "));
+            spans.add(bold(fixed(rssPeak / GIB, 1) + " GiB"));
+            spans.add(text(" of " + fixed(memoryLimit / GIB, 1) + " GiB "
                 + (containerLimit ? "container limit" : "machine RAM") + " ("
-                + fixed(100.0 * last / memoryLimit, 0) + "%)"));
+                + fixed(100.0 * rssPeak / memoryLimit, 0) + "%)."));
             Long heapPeak = heapPeak(snapshot, timeline);
             if (heapMax != null && heapPeak != null) {
-                spans.add(text("; heap peaked at "));
+                spans.add(text(" Java heap peaked at "));
                 spans.add(bold(fixed(heapPeak / GIB, 1)));
-                spans.add(text(" of " + fixed(heapMax / GIB, 1) + " GiB"));
+                spans.add(text(" of " + fixed(heapMax / GIB, 1) + " GiB."));
+                if (heapPeak > rssPeak) {
+                    spans.add(text(" RSS can be lower than the heap when the system compresses or swaps memory."));
+                }
             }
-            spans.add(text("."));
             evidence.add(new Entry(List.copyOf(spans), "memory", "memory & GC"));
         }
         ExceptionSpike spike = exceptionSpike(timeline);
@@ -157,10 +162,23 @@ record ReportFindings(List<Span> intro, List<Entry> evidence, String severity, S
                 + (incompatible == 1 ? " declares" : "s declare")
                 + " a server version range that excludes the running server.")));
         }
+        MixinSection.Parsed mixins = MixinSection.parse(sections.mixins());
+        if (mixins != null && !mixins.problems().isEmpty()) {
+            long errors = mixins.errors();
+            long warnings = mixins.warnings();
+            List<Span> spans = new ArrayList<>(4);
+            if (errors > 0) {
+                spans.add(bold(number(errors)));
+                spans.add(text(" Mixin error" + (errors == 1 ? "" : "s") + (warnings > 0 ? " and " : "")));
+            }
+            if (warnings > 0) {
+                spans.add(bold(number(warnings)));
+                spans.add(text(" Mixin warning" + (warnings == 1 ? "" : "s")));
+            }
+            spans.add(text(" since startup."));
+            evidence.add(new Entry(List.copyOf(spans), "mixins", "mixins"));
+        }
 
-        String direction = deadlocked > 0 ? "Inspect the detected deadlock and lock ownership"
-            : topWorld != null ? "Inspect the busiest world thread alongside tick timing"
-            : "Correlate stacks and timing in recording.jfr using JDK Mission Control";
         List<Entry> steps = new ArrayList<>(3);
         if (deadlocked > 0) {
             steps.add(entry("states", "thread states", text("Inspect the " + deadlocked
@@ -184,11 +202,13 @@ record ReportFindings(List<Span> intro, List<Entry> evidence, String severity, S
                 }
             }
         }
-        int conflicts = sections.mixins() == null ? 0
-            : (int) sections.mixins().keySet().stream().filter(key -> key.startsWith("Conflict: ")).count();
+        int conflicts = mixins == null ? 0 : mixins.versions() == null ? mixins.legacyConflicts().size()
+            : mixins.overlaps().size();
         if (conflicts > 0 && steps.size() < 3) {
-            steps.add(entry("config", "mixins", text("Inspect the " + conflicts + " class"
-                + (conflicts == 1 ? "" : "es") + " patched by multiple mixin configs ("), text("mixins"), text(")")));
+            steps.add(entry("mixins", "mixins", text(mixins.versions() == null
+                ? "Inspect the " + conflicts + " class" + (conflicts == 1 ? "" : "es") + " patched by multiple mixin configs ("
+                : "Check the " + conflicts + " method" + (conflicts == 1 ? "" : "s") + " changed by more than one mod ("),
+                text("mixins"), text(")")));
         }
         if (spike != null && steps.size() < 3) {
             steps.add(entry("log", "server log", text("Trace the exception burst in the "),
@@ -203,13 +223,7 @@ record ReportFindings(List<Span> intro, List<Entry> evidence, String severity, S
         } else {
             intro = List.of(code(report.meta().trigger()), text(" fired at " + created + "."));
         }
-        List<String> tags = new ArrayList<>(2);
-        if (gc != null && Double.isFinite(gc.maxPauseMs())) {
-            tags.add("Longest recorded GC pause: " + number(gc.maxPauseMs()) + " ms");
-        }
-        if (deadlocked > 0) tags.add("Deadlock detected");
-        return new ReportFindings(intro, List.copyOf(evidence), report.meta().severity().name(), direction,
-            List.copyOf(steps), List.copyOf(tags), CAVEAT);
+        return new ReportFindings(intro, List.copyOf(evidence), List.copyOf(steps));
     }
 
     void write(JsonWriter json) throws IOException {
@@ -217,15 +231,7 @@ record ReportFindings(List<Span> intro, List<Entry> evidence, String severity, S
         json.name("intro");
         writeSpans(json, intro);
         writeEntries(json, "evidence", evidence);
-        json.name("severity").value(severity);
-        json.name("direction").value(direction);
         writeEntries(json, "steps", steps);
-        json.name("tags").beginArray();
-        for (String tag : tags) {
-            json.value(tag);
-        }
-        json.endArray();
-        json.name("caveat").value(caveat);
         json.endObject();
     }
 

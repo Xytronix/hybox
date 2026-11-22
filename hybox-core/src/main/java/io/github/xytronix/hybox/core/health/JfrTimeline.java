@@ -17,7 +17,7 @@ public final class JfrTimeline {
 
     public record CpuInfo(String brand, long sockets, long cores, long hwThreads) {}
 
-    public record HotMethod(String method, long samples, List<String> callers) {}
+    public record HotMethod(String method, long samples, List<String> callers, List<String> callerLabels) {}
 
     public record Alloc(long totalBytes, Map<String, Long> bySubsystem, Map<String, Long> byThread,
                         Map<String, Long> byClass, Map<String, Long> byMod, List<WorldAlloc> byWorld) {}
@@ -52,7 +52,7 @@ public final class JfrTimeline {
 
     public record GcCause(String cause, long count, double totalPauseMs) {}
 
-    public record Flame(String name, long samples, List<Flame> children, int owner) {}
+    public record Flame(String name, long samples, List<Flame> children, int owner, String label) {}
 
     public record ThreadLane(String name, int[] states) {}
 
@@ -62,7 +62,6 @@ public final class JfrTimeline {
 
     public record NetIface(String iface, double inAvg, double inPeak, double outAvg, double outPeak) {}
 
-    private final int buckets;
     private final Instant start;
     private final Instant end;
     private final long totalSamples;
@@ -118,6 +117,7 @@ public final class JfrTimeline {
     private final double[] diskReadSeries;
     private final double[] diskWriteSeries;
     private final List<SlowIo> slowIo;
+    private final long slowIoThresholdMs;
     private final double[] entitiesSeries;
     private final double[] chunksSeries;
     private final Map<String, long[]> chunkChurnByWorld;
@@ -129,7 +129,7 @@ public final class JfrTimeline {
     private final long swapTotal;
     private final List<NetIface> netOthers;
 
-    JfrTimeline(int buckets, Instant start, Instant end, long totalSamples, CpuStats cpu,
+    JfrTimeline(Instant start, Instant end, long totalSamples, CpuStats cpu,
                 double[] cpuMachineSeries, double[] cpuJvmSeries, long[] heapSeries, long[] rssSeries,
                 String netInterface, double[] netInSeries, double[] netOutSeries, long[] threadSeries,
                 double[] gcPauseSeries, GcStats gc, GcConfig gcConfig, List<ExplicitGc> explicitGcs,
@@ -146,14 +146,13 @@ public final class JfrTimeline {
                 List<SystemTick> tickSeries, List<GcCause> gcCauses, int[] gcOverlapBuckets,
                 Flame flame, List<ThreadLane> threadTimeline, List<ModCpu> cpuByMod,
                 long[] diskFreeSeries, long diskTotal,
-                double[] diskReadSeries, double[] diskWriteSeries, List<SlowIo> slowIo,
+                double[] diskReadSeries, double[] diskWriteSeries, List<SlowIo> slowIo, long slowIoThresholdMs,
                 double[] entitiesSeries, double[] chunksSeries,
                 Map<String, long[]> chunkChurnByWorld,
                 double[] chunksGeneratedSeries, double[] chunksLoadedSeries,
                 long[] heapCommittedSeries, long[] hostMemSeries,
                 long swapFree, long swapTotal, List<NetIface> netOthers,
                 HostCpu hostCpu, Safepoint safepoint) {
-        this.buckets = buckets;
         this.start = start;
         this.end = end;
         this.totalSamples = totalSamples;
@@ -206,6 +205,7 @@ public final class JfrTimeline {
         this.diskReadSeries = diskReadSeries;
         this.diskWriteSeries = diskWriteSeries;
         this.slowIo = slowIo;
+        this.slowIoThresholdMs = slowIoThresholdMs;
         this.diskTotal = diskTotal;
         this.entitiesSeries = entitiesSeries;
         this.chunksSeries = chunksSeries;
@@ -225,7 +225,6 @@ public final class JfrTimeline {
         return JfrTimelineParser.parse(recording);
     }
 
-    public int buckets() { return buckets; }
     public Instant start() { return start; }
     public Instant end() { return end; }
     public long totalSamples() { return totalSamples; }
@@ -266,6 +265,7 @@ public final class JfrTimeline {
     public double[] diskReadSeries() { return diskReadSeries; }
     public double[] diskWriteSeries() { return diskWriteSeries; }
     public List<SlowIo> slowIo() { return slowIo; }
+    public long slowIoThresholdMs() { return slowIoThresholdMs; }
     public List<PluginEvent> pluginEvents() { return pluginEvents; }
     public List<ConnEvent> connectionEvents() { return connEvents; }
     public double[] connectsSeries() { return connectsSeries; }

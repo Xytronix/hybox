@@ -2,6 +2,7 @@ package io.github.xytronix.hybox.hytale;
 
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import java.util.Locale;
+import io.github.xytronix.hybox.core.text.Units;
 
 final class HyboxChartRenderer {
     static final int HOVER_CELLS = 20;
@@ -39,7 +40,9 @@ final class HyboxChartRenderer {
         double top = Double.isFinite(statedMax) ? statedMax : 0;
         double scale = Math.max(top, tallest) > 0 ? Math.max(top, tallest) : 1;
         labels(selector, scale, unit, precision, commands);
-        commands.set(selector + " #ChartLegend.Text", "red = incident · bars = average per column");
+        commands.set(selector + " #ChartLegend.Text", shadeIncident
+            ? "Bars show the average per column. The highlighted bar holds the incident."
+            : "Bars show the average per column. Thin lines mark incidents.");
         for (int c = 0; c < columns; c++) {
             if (!Double.isFinite(bars[c])) continue;
             int height = Math.max(1, (int) Math.round(90 * bars[c] / scale));
@@ -49,13 +52,13 @@ final class HyboxChartRenderer {
             if (shadeIncident) for (double marker : markers) {
                 if (marker >= c * values.length / columns && marker < (c + 1) * values.length / columns) incident = true;
             }
-            String color = incident ? "#ef8181" : "#7a9cc6";
-            commands.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Bottom: 0, Width: " + width + ", Height: " + height + "); Background: " + color + "(0.8); }");
+            String color = HyboxChartImage.hex(incident ? HyboxChartImage.INCIDENT : HyboxChartImage.LINE);
+            commands.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Bottom: 0, Width: " + width + ", Height: " + height + "); Background: " + color + "; }");
         }
         if (!shadeIncident) for (double marker : markers) {
             if (!Double.isFinite(marker) || marker < 0 || marker > values.length - 1) continue;
             int left = (int) Math.round(marker / Math.max(1, values.length - 1) * (HyboxChartImage.WIDTH - 1));
-            commands.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Bottom: 0, Width: 1, Height: 96); Background: #ef8181(0.8); }");
+            commands.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Bottom: 0, Width: 1, Height: 96); Background: " + HyboxChartImage.hex(HyboxChartImage.INCIDENT) + "; }");
         }
         if (images == null || values.length < 2) return;
         double lineScale = Math.max(top, peak) > 0 ? Math.max(top, peak) : 1;
@@ -67,19 +70,12 @@ final class HyboxChartRenderer {
                 labels(selector, lineScale, unit, precision, swap);
                 swap.set(selector + " #PlotImage.AssetPath", path);
                 swap.set(selector + " #PlotImage.Visible", true);
-                swap.set(selector + " #ChartLegend.Text", shadeIncident ? "every sample · red line = incident" : "sample averages · red lines = incidents");
+                swap.set(selector + " #ChartLegend.Text", shadeIncident ? "Every sample. The dashed line marks the incident." : "Sample averages. Dashed lines mark incidents.");
             }));
     }
 
     static String value(double number, String unit, int precision) {
-        if (unit.equals("bytes")) {
-            if (number < 0) return "n/a";
-            if (number < 1024) return String.format(Locale.ROOT, "%,.0f B", number);
-            String[] units = {"KiB", "MiB", "GiB", "TiB"};
-            int i = -1;
-            do { number /= 1024; i++; } while (number >= 1024 && i < 3);
-            return String.format(Locale.ROOT, "%.1f ", number) + units[i];
-        }
+        if (unit.equals("bytes")) return Units.bytes(Math.round(number));
         if (unit.equals("GiB")) number /= 1073741824.0;
         if (unit.equals("GB")) number /= 1e9;
         return String.format(Locale.ROOT, "%." + precision + "f", number) + suffix(unit);

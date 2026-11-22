@@ -38,9 +38,9 @@ class HyboxTrendRendererTest {
             assertEquals("Oct 18 12:00", text(commands, chart + " #X0.Text"));
             assertEquals("Oct 25 12:00", text(commands, chart + " #X4.Text"));
             assertEquals(2, Arrays.stream(commands.getCommands()).filter(c -> (chart + " #Bars").equals(c.selector)
-                && c.text != null && c.text.contains("#ef8181")).count());
+                && c.text != null && c.text.contains(HyboxChartImage.hex(HyboxChartImage.INCIDENT))).count());
         }
-        assertFalse(Arrays.stream(commands.getCommands()).anyMatch(c -> c.text != null && c.text.contains("#efbd62")));
+        assertFalse(Arrays.stream(commands.getCommands()).anyMatch(c -> c.text != null && c.text.contains("#ff8a3d")));
         assertEquals("min 10.0 ms · avg 20.0 ms · max 30.0 ms · now 30.0 ms", text(commands, "#Charts[0] #ChartStats.Text"));
         assertFalse(bool(commands, "#EmptyState.Visible"));
     }
@@ -70,7 +70,7 @@ class HyboxTrendRendererTest {
         assertFalse(bool(denied, "#SettingsButton.Visible"));
         assertTrue(bool(denied, "#BackButton.Disabled"));
         var empty = render(HyboxTrendModel.from(true, 30, NOW, MetricsLog.Trend.EMPTY, new long[0]), READY);
-        assertEquals("No health metrics recorded in the last 30 day(s).", text(empty, "#EmptyState.Text"));
+        assertEquals("No health metrics recorded in the last 30 days.", text(empty, "#EmptyState.Text"));
         assertFalse(bool(empty, "#SettingsButton.Visible"));
         assertFalse(Arrays.stream(empty.getCommands()).anyMatch(c -> "#Charts".equals(c.selector) && c.type == CustomUICommandType.Append));
     }
@@ -86,6 +86,11 @@ class HyboxTrendRendererTest {
         assertFalse(Arrays.stream(commands.getCommands()).anyMatch(c -> c.selector != null && c.selector.endsWith("#ChartTitle.Text")));
         var denied = render(model(true), new HyboxTrendRenderer.ViewState("denied", false, false, false, false, false));
         for (int days : new int[] {1, 7, 30}) assertTrue(bool(denied, "#Range" + days + ".Disabled"));
+        var ready = render(model(true), READY);
+        for (int days : new int[] {1, 7, 30}) {
+            assertEquals(days == 7, bool(ready, "#Range" + days + "Marker.Visible"));
+            assertEquals(days == 7, command(ready, "#Range" + days + ".Style").data.contains("SelectedButtonStyle"));
+        }
         assertTrue(bool(denied, "#SaveButton.Disabled"));
         assertEquals("denied", text(denied, "#Feedback.Text"));
         var events = new UIEventBuilder();
@@ -126,13 +131,18 @@ class HyboxTrendRendererTest {
         var image = ImageIO.read(new ByteArrayInputStream(png));
         assertEquals(HyboxChartImage.WIDTH, image.getWidth());
         assertEquals(HyboxChartImage.HEIGHT, image.getHeight());
-        int redColumns = 0;
+        int markerColumns = 0, seriesPixels = 0;
         for (int x = 0; x < image.getWidth(); x++) {
             int pixel = image.getRGB(x, HyboxChartImage.TOP);
-            int red = pixel >> 16 & 255, blue = pixel & 255, alpha = pixel >>> 24;
-            if (alpha > 200 && red > blue) redColumns++;
+            int red = pixel >> 16 & 255, green = pixel >> 8 & 255, alpha = pixel >>> 24;
+            if (alpha > 200 && red > 200 && green < 150) markerColumns++;
+            for (int y = 0; y < image.getHeight(); y++) {
+                int p = image.getRGB(x, y);
+                if (p >>> 24 == 255 && (p >> 16 & 255) == 0xff && (p >> 8 & 255) == 0xd2 && (p & 255) == 0x1f) seriesPixels++;
+            }
         }
-        assertEquals(2, redColumns);
+        assertEquals(2, markerColumns);
+        assertTrue(seriesPixels > 0);
         var swap = new UICommandBuilder();
         requests.getFirst().apply().accept("UI/Custom/Hybox/Charts/test.png", swap);
         assertTrue(bool(swap, "#Charts[0] #PlotImage.Visible"));

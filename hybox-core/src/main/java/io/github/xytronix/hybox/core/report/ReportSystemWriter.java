@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import io.github.xytronix.hybox.core.env.PrivateArguments;
 import io.github.xytronix.hybox.core.health.HealthSnapshot;
 import io.github.xytronix.hybox.core.health.HostCpuStats;
 import io.github.xytronix.hybox.core.health.JfrTimeline;
@@ -73,7 +74,7 @@ final class ReportSystemWriter {
         }
         ReportJson.writeNullable(json, "cpuCores", cpuCores);
         ReportJson.writeNullable(json, "hwThreads", cpuInfo != null && cpuInfo.hwThreads() > 0 ? cpuInfo.hwThreads() : null);
-        ReportJson.writeNullable(json, "sockets", cpuInfo != null && cpuInfo.sockets() > 0 ? cpuInfo.sockets() : null);
+        ReportJson.writeNullable(json, "sockets", plausibleSockets(cpuInfo, cpuCores));
         ReportJson.writeNullable(json, "ramTotal", sys != null && sys.totalRamBytes() > 0 ? sys.totalRamBytes() : null);
         ReportJson.writeNullable(json, "uptimeMs", sys != null && sys.uptimeMs() > 0 ? sys.uptimeMs() : null);
         HealthSnapshot.Memory memory = snapshot == null ? null : snapshot.memory();
@@ -169,6 +170,13 @@ final class ReportSystemWriter {
         return value != null ? value : System.getProperty(key);
     }
 
+    private static Long plausibleSockets(JfrTimeline.CpuInfo cpuInfo, Long cores) {
+        if (cpuInfo == null || cpuInfo.sockets() <= 0) {
+            return null;
+        }
+        return cores != null && cores > 1 && cpuInfo.sockets() >= cores ? null : cpuInfo.sockets();
+    }
+
     static boolean isLoaderEntry(String value) {
         return value != null
             && (value.equals("installed") || INSTALLED_VERSION.matcher(value).matches());
@@ -194,10 +202,10 @@ final class ReportSystemWriter {
         if (timeline == null || (timeline.jvmArgs() == null && timeline.javaArgs() == null)) {
             return null;
         }
-        return ("java "
+        return PrivateArguments.mask(("java "
             + (timeline.jvmArgs() == null ? "" : timeline.jvmArgs()) + " "
             + (timeline.javaArgs() == null ? "" : timeline.javaArgs()))
-            .replaceAll("\\s+", " ").trim();
+            .replaceAll("\\s+", " ").trim());
     }
 
     private static void writeDisk(JsonWriter json, HealthSnapshot snapshot, JfrTimeline timeline)
@@ -516,6 +524,8 @@ final class ReportSystemWriter {
             json.endArray();
         }
         json.endArray();
+        ReportJson.writeNullable(json, "slowIoThresholdMs",
+            timeline.slowIoThresholdMs() >= 0 ? timeline.slowIoThresholdMs() : null);
     }
 
     private static String maskPlayers(String path, Map<String, String> players) {

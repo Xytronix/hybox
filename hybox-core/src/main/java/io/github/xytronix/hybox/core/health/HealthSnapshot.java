@@ -20,7 +20,7 @@ public record HealthSnapshot(
         hotThreads = hotThreads == null ? List.of() : List.copyOf(hotThreads);
     }
 
-    public record Cpu(double processLoad, double systemLoad, int cores) {}
+    public record Cpu(int cores) {}
 
     public record Memory(long heapUsed, long heapCommitted, long heapMax, long nonHeapUsed,
                          long nonHeapCommitted) {
@@ -35,20 +35,12 @@ public record HealthSnapshot(
 
     public record Disk(long usedBytes, long totalBytes) {}
 
-    public record Threads(int total, Map<String, Integer> byState, List<RunnableThread> runnable,
-                          List<String> deadlocked) {
+    public record Threads(int total, Map<String, Integer> byState, List<String> deadlocked) {
         public Threads {
             byState = byState == null ? Map.of() : Map.copyOf(byState);
-            runnable = runnable == null ? List.of() : List.copyOf(runnable);
             deadlocked = deadlocked == null ? List.of() : List.copyOf(deadlocked);
         }
-
-        public Threads(int total, Map<String, Integer> byState, List<RunnableThread> runnable) {
-            this(total, byState, runnable, List.of());
-        }
     }
-
-    public record RunnableThread(String name, String topFrame) {}
 
     public record World(String name, int players, int entities, int chunks, double tps, double mspt,
                         List<String> playerNames, double avgPingMs,
@@ -60,16 +52,6 @@ public record HealthSnapshot(
 
         public World(String name, int players, int entities, int chunks, double tps, double mspt) {
             this(name, players, entities, chunks, tps, mspt, List.of(), -1, -1, -1, -1, -1, -1);
-        }
-
-        public World(String name, int players, int entities, int chunks, double tps, double mspt,
-                     List<String> playerNames) {
-            this(name, players, entities, chunks, tps, mspt, playerNames, -1, -1, -1, -1, -1, -1);
-        }
-
-        public World(String name, int players, int entities, int chunks, double tps, double mspt,
-                     List<String> playerNames, double avgPingMs) {
-            this(name, players, entities, chunks, tps, mspt, playerNames, avgPingMs, -1, -1, -1, -1, -1);
         }
     }
 

@@ -36,7 +36,7 @@ class ReportFindingsTest {
         JfrTimeline timeline = timeline(Map.of(
             "totalSamples", 10_000L,
             "worldSamples", ordered("default", 2_500L, "instance-other_world", 6_000L),
-            "hotMethods", List.of(new JfrTimeline.HotMethod("org.bson.BsonWriter.write", 1_234L, List.of())),
+            "hotMethods", List.of(new JfrTimeline.HotMethod("org.bson.BsonWriter.write", 1_234L, List.of(), List.of())),
             "gc", new JfrTimeline.GcStats(23, 12.5, 47.25),
             "gcConfig", new JfrTimeline.GcConfig("Shenandoah Young", "Shenandoah Old", 2, 1, 99, true, false),
             "alloc", new JfrTimeline.Alloc(4 * GIB, ordered("BSON serialization", 3 * GIB, "Other", GIB),
@@ -57,11 +57,10 @@ class ReportFindingsTest {
             text(findings.evidence().get(2).spans()));
         assertEquals("Shenandoah ran 23 collections, longest pause 12.5 ms (47.25 ms total).",
             text(findings.evidence().get(3).spans()));
-        assertEquals("1 thread(s) were BLOCKED at capture.", text(findings.evidence().get(4).spans()));
+        assertEquals("1 thread was waiting for a lock at capture.", text(findings.evidence().get(4).spans()));
         assertEquals("BSON serialization leads allocation pressure at 3.0 GiB sampled.",
             text(findings.evidence().get(5).spans()));
         assertEquals("allocation", findings.evidence().get(5).label());
-        assertEquals("Inspect the busiest world thread alongside tick timing", findings.direction());
         assertEquals(3, findings.steps().size());
         assertEquals("Investigate lock contention in the 1 blocked thread(s) (thread states)",
             text(findings.steps().get(0).spans()));
@@ -74,9 +73,7 @@ class ReportFindingsTest {
         assertEquals("Review the BSON serialization hot path: 1,234 samples, 12.3% of samples (hot methods)",
             text(findings.steps().get(2).spans()));
         assertEquals("methods", findings.steps().get(2).section());
-        assertEquals(List.of("Longest recorded GC pause: 12.5 ms"), findings.tags());
-        assertEquals("DEGRADED", findings.severity());
-        assertEquals("Correlate CPU share, blocked threads and short GC pauses with timing and stacks.", findings.caveat());
+        assertFalse(findings.evidence().stream().anyMatch(entry -> text(entry.spans()).contains("GC pause:")));
 
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         ReportHtml.write(report, timeline, output);
@@ -88,8 +85,9 @@ class ReportFindingsTest {
         assertTrue(payload.contains("\"diag\":[{\"title\":\"Stalled thread\",\"entries\":[[\"Blocked in\","));
         assertTrue(payload.contains("\"pre\":\"at org.bson.BsonWriter.write(BsonWriter.java:1)\""));
         assertFalse(payload.contains("<b>"));
-        assertTrue(html.contains("if(!has(D.findings)) return legacyDiagnosisHtml();"));
-        assertTrue(html.contains("<div class=\"subnote\">" + findings.caveat() + "</div>"));
+        assertFalse(payload.contains("\"direction\":") || payload.contains("\"caveat\":") || payload.contains("\"tags\":"));
+        assertFalse(html.contains("legacyDiagnosisHtml"));
+        assertFalse(html.contains("Investigation direction"));
         assertFalse(html.contains("Every line below is computed from this bundle's recording."));
         assertFalse(html.contains("(recording.jfr in this bundle)"));
     }
@@ -103,12 +101,10 @@ class ReportFindingsTest {
             List.of(new DiagnosticSection("Mixins", Map.of("Conflict: example.Target", "a; b"))));
         ReportFindings findings = findings(report, timeline);
 
-        assertEquals("Inspect the detected deadlock and lock ownership", findings.direction());
         assertEquals("Inspect the 2 detected deadlocked threads and their lock owners (thread states)",
             text(findings.steps().get(0).spans()));
         assertEquals(3, findings.steps().size());
         assertEquals("methods", findings.steps().get(2).section());
-        assertEquals("Deadlock detected", findings.tags().getLast());
         assertTrue(findings.evidence().stream().anyMatch(entry -> "deadlocked threads".equals(entry.label())));
     }
 
@@ -124,18 +120,19 @@ class ReportFindingsTest {
             new DiagnosticSection("Plugins", Map.of("vendor:mod", "1.0 @ <0.7 @ INCOMPATIBLE"))));
         ReportFindings findings = findings(report, timeline);
 
-        assertEquals(List.of("states", "cpu", "memory", "metrics", "system", "plugins"),
+        assertEquals(List.of("cpu", "memory", "metrics", "system", "plugins"),
             findings.evidence().stream().map(ReportFindings.Entry::section).toList());
-        assertEquals("Machine CPU peaked at 100.0% (average 33.3%).", text(findings.evidence().get(1).spans()));
-        assertEquals("Process RSS 3.0 GB of 4.3 GB container limit (70%); heap peaked at 3.0 of 4.0 GiB.",
-            text(findings.evidence().get(2).spans()));
+        assertEquals("Machine CPU peaked at 100.0% (average 33.3%).", text(findings.evidence().get(0).spans()));
+        assertEquals("Process memory (RSS) peaked at 2.8 GiB of 4.0 GiB container limit (70%). Java heap peaked at "
+                + "3.0 of 4.0 GiB. RSS can be lower than the heap when the system compresses or swaps memory.",
+            text(findings.evidence().get(1).spans()));
         assertEquals("100 exceptions/interval right before the incident, 10× the window average of 10.0.",
-            text(findings.evidence().get(3).spans()));
+            text(findings.evidence().get(2).spans()));
         assertEquals("Heap -Xmx 4.0 GiB is at or above the container memory limit of 4.0 GiB; "
-            + "the JVM can be OOM-killed before GC reacts.", text(findings.evidence().get(4).spans()));
+            + "the JVM can be OOM-killed before GC reacts.", text(findings.evidence().get(3).spans()));
         assertEquals("1 installed mod declares a server version range that excludes the running server.",
-            text(findings.evidence().get(5).spans()));
-        assertEquals(List.of("config", "log"), findings.steps().stream().map(ReportFindings.Entry::section).toList());
+            text(findings.evidence().get(4).spans()));
+        assertEquals(List.of("mixins", "log"), findings.steps().stream().map(ReportFindings.Entry::section).toList());
         assertEquals("Inspect the 1 class patched by multiple mixin configs (mixins)", text(findings.steps().get(0).spans()));
         assertEquals("Trace the exception burst in the server log tail", text(findings.steps().get(1).spans()));
         assertEquals(List.of(new ReportFindings.Span("Trace the exception burst in the ", ""),
@@ -151,8 +148,6 @@ class ReportFindingsTest {
         assertTrue(findings.steps().isEmpty());
         assertEquals("MANUAL fired at 2026-01-01 00:00:00 UTC.",
             text(findings.intro()));
-        assertEquals("Correlate stacks and timing in recording.jfr using JDK Mission Control", findings.direction());
-        assertEquals("INFO", findings.severity());
     }
 
     @Test
@@ -172,7 +167,7 @@ class ReportFindingsTest {
 
     private static IncidentReport report(int blocked, List<String> deadlocked, List<DiagnosticSection> diagnostics) {
         HealthSnapshot snapshot = new HealthSnapshot(30, null, null, List.of(), null, null,
-            new HealthSnapshot.Threads(10, Map.of("BLOCKED", blocked), List.of(), deadlocked),
+            new HealthSnapshot.Threads(10, Map.of("BLOCKED", blocked), deadlocked),
             List.of(new HealthSnapshot.World("default", 1, 10, 20, 30, 33)), List.of());
         IncidentMetadata meta = new IncidentMetadata(new IncidentId("fixture"), CAPTURED, Severity.DEGRADED,
             "HEARTBEAT_STALL", "default", "Heartbeat stalled");

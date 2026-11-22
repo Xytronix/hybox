@@ -1,6 +1,7 @@
 package io.github.xytronix.hybox.core.report;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,7 +19,11 @@ final class ReportDiagnosticsWriter {
     }
 
     static void writeAssetPacks(JsonWriter json, Map<String, String> assetPacks) throws IOException {
-        writeModRows(json, "assetPacks", assetPacks);
+        Map<String, String> others = assetPacks == null ? null : new LinkedHashMap<>(assetPacks);
+        if (others != null) {
+            others.keySet().removeIf(id -> id.replaceFirst(" #\\d+$", "").equals("Xytronix:Hybox"));
+        }
+        writeModRows(json, "assetPacks", others);
     }
 
     private static void writeModRows(JsonWriter json, String key, Map<String, String> entries) throws IOException {
@@ -43,71 +48,6 @@ final class ReportDiagnosticsWriter {
             json.endArray();
         }
         json.endArray();
-    }
-
-    static void writeMixins(JsonWriter json, Map<String, String> mixins) throws IOException {
-        boolean hasContent = mixins != null && mixins.keySet().stream().anyMatch(k ->
-            k.startsWith("Conflict: ")
-                || (!"Bootstrapper".equals(k) && !"Conflicts".equals(k)));
-        if (!hasContent) {
-            json.name("mixins").nullValue();
-            return;
-        }
-        json.name("mixins").beginObject();
-        json.name("bootstrapper").value(mixins.get("Bootstrapper"));
-        json.name("configs").beginArray();
-        for (Map.Entry<String, String> e : mixins.entrySet()) {
-            if ("Bootstrapper".equals(e.getKey()) || "Conflicts".equals(e.getKey())
-                || e.getKey().startsWith("Conflict: ")) {
-                continue;
-            }
-            json.beginArray();
-            json.value(e.getKey());
-            json.beginArray();
-            for (String cls : e.getValue().split(", ")) {
-                if (!cls.isBlank()) {
-                    json.value(cls);
-                }
-            }
-            json.endArray();
-            json.endArray();
-        }
-        json.endArray();
-        boolean resolvable = "none".equals(mixins.get("Conflicts"));
-        json.name("conflicts");
-        boolean any = mixins.keySet().stream().anyMatch(k -> k.startsWith("Conflict: "));
-        if (!any && !resolvable) {
-            json.nullValue();
-        } else {
-            json.beginArray();
-            for (Map.Entry<String, String> e : mixins.entrySet()) {
-                if (!e.getKey().startsWith("Conflict: ")) {
-                    continue;
-                }
-                json.beginArray();
-                json.value(e.getKey().substring("Conflict: ".length()));
-                json.beginArray();
-                for (String participant : e.getValue().split("; ")) {
-                    if (participant.isBlank()) {
-                        continue;
-                    }
-                    int arrow = participant.indexOf(" → ");
-                    json.beginArray();
-                    if (arrow < 0) {
-                        json.value(participant.trim());
-                        json.nullValue();
-                    } else {
-                        json.value(participant.substring(0, arrow).trim());
-                        json.value(participant.substring(arrow + " → ".length()).trim());
-                    }
-                    json.endArray();
-                }
-                json.endArray();
-                json.endArray();
-            }
-            json.endArray();
-        }
-        json.endObject();
     }
 
     static void writeLog(JsonWriter json, List<ReportHtml.LogLine> entries) throws IOException {
@@ -137,8 +77,8 @@ final class ReportDiagnosticsWriter {
         json.endArray();
     }
 
-    static String genericHtml(List<DiagnosticSection> generic, boolean hasPlugins) {
-        StringBuilder html = new StringBuilder(2048);
+    static List<DiagnosticSection> captured(List<DiagnosticSection> generic, boolean hasPlugins) {
+        List<DiagnosticSection> shown = new ArrayList<>(generic.size());
         for (DiagnosticSection section : generic) {
             Map<String, String> entries = section.entries();
             if ("Environment".equals(section.title())) {
@@ -154,10 +94,19 @@ final class ReportDiagnosticsWriter {
                 entries = trimmed;
             }
             String pre = section.preformatted();
-            boolean hasPre = pre != null && !pre.isBlank();
-            if (entries.isEmpty() && !hasPre) {
-                continue;
+            if (!entries.isEmpty() || pre != null && !pre.isBlank()) {
+                shown.add(new DiagnosticSection(section.title(), entries, pre));
             }
+        }
+        return shown;
+    }
+
+    static String genericHtml(List<DiagnosticSection> captured) {
+        StringBuilder html = new StringBuilder(2048);
+        for (DiagnosticSection section : captured) {
+            Map<String, String> entries = section.entries();
+            String pre = section.preformatted();
+            boolean hasPre = pre != null && !pre.isBlank();
             html.append("<div class=\"kvcard\" style=\"margin-bottom:16px\"><div class=\"kvh\"><b>")
                 .append(ReportHtml.escapeHtml(section.title())).append("</b></div><div class=\"kv\">");
             for (Map.Entry<String, String> entry : entries.entrySet()) {

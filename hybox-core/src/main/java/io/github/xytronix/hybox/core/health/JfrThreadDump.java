@@ -34,7 +34,7 @@ public final class JfrThreadDump {
         } catch (Exception e) {
             return null;
         }
-        return last;
+        return FrameLabels.labelDump(last);
     }
 
     public static DiagnosticSection stuckSection(String dump, Collection<String> frameworkPrefixes) {

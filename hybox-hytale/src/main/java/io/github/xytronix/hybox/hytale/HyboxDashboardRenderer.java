@@ -6,6 +6,7 @@ import com.hypixel.hytale.server.core.ui.Value;
 import com.hypixel.hytale.server.core.ui.builder.EventData;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.ui.builder.UIEventBuilder;
+import io.github.xytronix.hybox.core.text.Units;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
@@ -16,6 +17,7 @@ final class HyboxDashboardRenderer {
         DateTimeFormatter.ofPattern("HH:mm:ss 'UTC'").withZone(ZoneOffset.UTC);
     static final int[] PROFILE_MINUTES = {1, 5, 15, 30};
     static final String KEEP_BUFFER_KEY = "@KeepBuffer";
+    static final String TONES = "Pages/HyboxTones.ui";
 
     private HyboxDashboardRenderer() {}
 
@@ -51,10 +53,10 @@ final class HyboxDashboardRenderer {
             case "heap" -> "Heap histogram";
             default -> "Recorder overview";
         });
-        commands.set("#OverviewMarker.Visible", tab.equals("overview"));
-        commands.set("#IncidentsMarker.Visible", tab.equals("incidents"));
-        commands.set("#TriggersMarker.Visible", tab.equals("triggers"));
-        commands.set("#HeapMarker.Visible", tab.equals("heap"));
+        choice(commands, "#OverviewButton", "#OverviewMarker", tab.equals("overview"), "TabButtonStyle");
+        choice(commands, "#IncidentsButton", "#IncidentsMarker", tab.equals("incidents"), "TabButtonStyle");
+        choice(commands, "#TriggersButton", "#TriggersMarker", tab.equals("triggers"), "TabButtonStyle");
+        choice(commands, "#HeapButton", "#HeapMarker", tab.equals("heap"), "TabButtonStyle");
         commands.clear("#Section");
         switch (tab) {
             case "incidents" -> incidents(model, commands, events);
@@ -90,7 +92,8 @@ final class HyboxDashboardRenderer {
 
     private static void overview(DashboardModel model, UICommandBuilder commands, UIEventBuilder events) {
         commands.append("#Section", "Pages/HyboxDashboardOverview.ui");
-        for (int i = 0; i < model.tiles().size(); i++) commands.append("#Tiles", "Pages/HyboxDashboardTile.ui");
+        String tile = model.tiles().size() == 4 ? "Pages/HyboxDashboardTileWide.ui" : "Pages/HyboxDashboardTile.ui";
+        for (int i = 0; i < model.tiles().size(); i++) commands.append("#Tiles", tile);
         bind(events, "#ProfileSaveNow", "profile:stop");
         bind(events, "#ProfileCancel", "profile:cancel");
         bind(events, "#SkipWait", "capture:skip");
@@ -109,6 +112,7 @@ final class HyboxDashboardRenderer {
             var tone = model.warnings().stream().anyMatch(warning -> warning.tone() == DashboardModel.Tone.ERROR)
                 ? DashboardModel.Tone.ERROR : DashboardModel.Tone.WARN;
             colored(commands, "#WarningText", warningText, tone);
+            commands.set("#WarningTitle.Style.TextColor", tone.color);
             background(commands, "#Warnings", tone, "Banner");
         }
         for (int i = 0; i < model.tiles().size(); i++) {
@@ -119,8 +123,9 @@ final class HyboxDashboardRenderer {
             text(commands, selector + " #TileDetail", tile.detail());
             commands.set(selector + " #SeverityPill.Visible", tile.severity() != null);
             if (tile.severity() != null) {
-                colored(commands, selector + " #Severity", tile.severity(), tile.tone());
-                background(commands, selector + " #SeverityPill", tile.tone(), "Pill");
+                var severityTone = DashboardModel.severityTone(tile.severity());
+                colored(commands, selector + " #Severity", tile.severity(), severityTone);
+                background(commands, selector + " #SeverityPill", severityTone, "Pill");
             }
         }
         commands.set("#ProfileRunning.Visible", model.profile() != null);
@@ -130,7 +135,7 @@ final class HyboxDashboardRenderer {
             if (restartTimer) {
                 commands.clear("#ProfileTimerHost");
                 commands.appendInline("#ProfileTimerHost", "TimerLabel { Seconds: " + profile.remainingSeconds()
-                    + "; Style: (FontSize: 26, RenderBold: true, TextColor: #80c991, HorizontalAlignment: End); }");
+                    + "; Style: (FontSize: 26, RenderBold: true, TextColor: " + DashboardModel.Tone.NEUTRAL.color + ", HorizontalAlignment: End); }");
             }
             boolean requesterKnown = profile.requesterName() != null && !profile.requesterName().isBlank();
             text(commands, "#ProfileCaptureAt", "Capture at " + CAPTURE_TIME.format(profile.captureAt())
@@ -152,7 +157,8 @@ final class HyboxDashboardRenderer {
             if (current < 0) text(commands, "#CaptureStep", model.captureStep());
             for (int i = 0; i < 5; i++) {
                 String selector = "#CaptureStage" + i;
-                commands.set(selector + ".Style.TextColor", i < current ? "#80c991" : i == current ? "#d3e3ed" : "#96a9be");
+                commands.set(selector + ".Style.TextColor", (i < current ? DashboardModel.Tone.OK
+                    : i == current ? DashboardModel.Tone.NEUTRAL : DashboardModel.Tone.MUTED).color);
                 commands.set(selector + ".Style.RenderBold", i == current);
             }
         }
@@ -165,7 +171,9 @@ final class HyboxDashboardRenderer {
             : !form.allowed() ? "Requires permission to use /hybox profile."
             : "Records detailed CPU, allocation and lock data, then saves an incident bundle automatically at the end.");
         for (int minutes : PROFILE_MINUTES) {
-            commands.set("#ProfileMinutes" + minutes + ".Disabled", !model.canStartProfile() || minutes == form.minutes());
+            boolean chosen = minutes == form.minutes();
+            choice(commands, "#ProfileMinutes" + minutes, "#ProfileMinutes" + minutes + "Marker", chosen, "SecondaryButtonStyle");
+            commands.set("#ProfileMinutes" + minutes + ".Disabled", !model.canStartProfile() || chosen);
         }
         commands.set("#ProfileKeepBuffer.Value", form.keepBuffer());
         commands.set("#ProfileKeepBuffer.Disabled", !model.canStartProfile());
@@ -209,10 +217,9 @@ final class HyboxDashboardRenderer {
             var trigger = model.triggers().get(i);
             String selector = "#TriggerRows[" + i + "]";
             text(commands, selector + " #Trigger", trigger.name());
-            colored(commands, selector + " #Armed", trigger.armed() ? "ARMED" : "DISABLED",
-                trigger.armed() ? DashboardModel.Tone.OK : DashboardModel.Tone.WARN);
-            background(commands, selector + " #StatePill",
-                trigger.armed() ? DashboardModel.Tone.OK : DashboardModel.Tone.WARN, "Pill");
+            var state = trigger.armed() ? DashboardModel.Tone.OK : DashboardModel.Tone.MUTED;
+            colored(commands, selector + " #Armed", trigger.armed() ? "ARMED" : "DISABLED", state);
+            background(commands, selector + " #StatePill", state, "Pill");
             text(commands, selector + " #Threshold", trigger.threshold());
         }
     }
@@ -233,8 +240,8 @@ final class HyboxDashboardRenderer {
         else if (heap.message() != null) summary = heap.message();
         else if (snapshot == null) summary = "No heap walk yet. Walk the heap to list the classes using the most memory.";
         else summary = "Taken at " + CAPTURE_TIME.format(heap.takenAt()) + " · "
-            + (snapshot.totalBytes() > 0 ? HyboxChatFormatter.bytes(snapshot.totalBytes()) + " in "
-                + String.format(java.util.Locale.US, "%,d", snapshot.totalInstances()) + " objects · " : "")
+            + (snapshot.totalBytes() > 0 ? Units.bytes(snapshot.totalBytes()) + " in "
+                + Units.number(snapshot.totalInstances()) + " objects · " : "")
             + "top " + heap.rows() + " classes";
         text(commands, "#HeapSummary", summary);
         commands.set("#HeapWalkButton.Text", snapshot == null ? "Walk heap" : "Walk again");
@@ -246,8 +253,8 @@ final class HyboxDashboardRenderer {
             var entry = snapshot.entries().get(i);
             String selector = "#HeapRows[" + i + "]";
             text(commands, selector + " #Key", "#" + (i + 1) + " · " + shortClass(entry.className()));
-            text(commands, selector + " #Value", String.format(java.util.Locale.US, "%,d", entry.instances()) + " objects · "
-                + HyboxChatFormatter.bytes(entry.bytes()) + " · " + HyboxChatFormatter.heapShare(entry, base) + " of heap");
+            text(commands, selector + " #Value", Units.number(entry.instances()) + " objects · "
+                + Units.bytes(entry.bytes()) + " · " + HyboxChatFormatter.heapShare(entry, base) + " of objects found");
             commands.set(selector + " #Value.TooltipText", HyboxChatFormatter.singleLine(entry.className()));
             commands.set(selector + " #Share.Visible", true);
             commands.set(selector + " #Share.Value", (float) Math.max(0, Math.min(1, (double) entry.bytes() / base)));
@@ -271,8 +278,13 @@ final class HyboxDashboardRenderer {
         return shortName + "[]".repeat(dims);
     }
 
-    private static void background(UICommandBuilder commands, String selector, DashboardModel.Tone tone, String kind) {
-        commands.set(selector + ".Background", Value.ref("Pages/HyboxTones.ui", tone.name().charAt(0) + tone.name().substring(1).toLowerCase(java.util.Locale.ROOT) + kind));
+    static void background(UICommandBuilder commands, String selector, DashboardModel.Tone tone, String kind) {
+        commands.set(selector + ".Background", Value.ref(TONES, tone.name().charAt(0) + tone.name().substring(1).toLowerCase(java.util.Locale.ROOT) + kind));
+    }
+
+    static void choice(UICommandBuilder commands, String button, String marker, boolean selected, String idleStyle) {
+        commands.set(button + ".Style", Value.ref(TONES, selected ? "SelectedButtonStyle" : idleStyle));
+        commands.set(marker + ".Visible", selected);
     }
 
     private static void text(UICommandBuilder commands, String selector, String value) {

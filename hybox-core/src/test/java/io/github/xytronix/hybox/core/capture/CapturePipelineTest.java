@@ -76,6 +76,35 @@ class CapturePipelineTest {
     }
 
     @Test
+    void captureResultTellsThePlayerWhichOldBundlesRetentionRemoved(@TempDir Path tempDir) throws Exception {
+        Path incidentDir = tempDir.resolve("incidents");
+        Files.createDirectories(incidentDir);
+        for (int i = 1; i <= 15; i++) {
+            Files.write(incidentDir.resolve(String.format("incident-20260101-0100%02d.000Z-%06d.zip", i, i)), new byte[] {1});
+        }
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        CapturePipeline pipeline = new CapturePipeline(
+            clock,
+            new TriggerEngine(clock, new TriggerPolicy(Duration.ZERO, Duration.ZERO, 1000, 5000, 100, 250)),
+            new FakeRecordingDumper(new byte[] {1, 2, 3}),
+            new BundleBuilder(clock),
+            new RetentionManager(clock, System.getLogger("retention-test"), FileDeleter.defaultDeleter()),
+            IncidentNotifier.noop(),
+            incidentDir,
+            tempDir.resolve("temp"),
+            new CapturePolicy(new RetentionPolicy(25, 1024L * 1024 * 1024, Duration.ofHours(168))),
+            System.getLogger("capture-test")
+        );
+
+        CaptureResult first = pipeline.handle(new TriggerEvent(TriggerKind.MANUAL, "world", clock.instant(), Map.of()));
+        CaptureResult second = pipeline.handle(new TriggerEvent(TriggerKind.MANUAL, "world", clock.instant(), Map.of()));
+
+        assertEquals("Removed 15 bundles older than 7 days.", first.retention());
+        assertNull(second.retention());
+        assertEquals(2, countZips(incidentDir));
+    }
+
+    @Test
     void stallSeverityIsReflectedInIncidentJson(@TempDir Path tempDir) throws Exception {
         Path incidentDir = tempDir.resolve("incidents");
         Path tempRecordings = tempDir.resolve("temp");

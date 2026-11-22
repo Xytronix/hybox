@@ -28,6 +28,22 @@ final class HytalePlugins {
         return out;
     }
 
+    static List<String> knownVersions() {
+        List<String> versions = new ArrayList<>();
+        versions.add(HytaleServerVersion.get());
+        try {
+            for (PluginBase plugin : PluginManager.get().getPlugins()) {
+                try {
+                    versions.add(String.valueOf(plugin.getManifest().getVersion()));
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable t) {
+            LOGGER.log(System.Logger.Level.DEBUG, "Plugin enumeration failed.", t);
+        }
+        return versions;
+    }
+
     private static Map<String, String> entries() {
         Map<String, String> sorted = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         String serverVersion = HytaleServerVersion.get();
