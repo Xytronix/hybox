@@ -25,8 +25,11 @@ final class HytaleWorldStatsProvider implements WorldStatsProvider {
     public Worlds worlds() {
         List<HealthSnapshot.World> out = new ArrayList<>();
         int targetTps = 0;
+        int onlinePlayers = -1;
         try {
-            Map<String, World> worlds = Universe.get().getWorlds();
+            Universe universe = Universe.get();
+            onlinePlayers = onlinePlayers(universe);
+            Map<String, World> worlds = universe.getWorlds();
             for (Map.Entry<String, World> entry : worlds.entrySet()) {
                 String name = entry.getKey();
                 World world = entry.getValue();
@@ -58,7 +61,15 @@ final class HytaleWorldStatsProvider implements WorldStatsProvider {
             LOGGER.log(System.Logger.Level.WARNING, "World stats collection failed.", e);
         }
         out.sort((a, b) -> a.name().compareToIgnoreCase(b.name()));
-        return new Worlds(targetTps, out);
+        return new Worlds(targetTps, onlinePlayers, out);
+    }
+
+    private static int onlinePlayers(Universe universe) {
+        try {
+            return universe.getPlayerCount();
+        } catch (Exception e) {
+            return -1;
+        }
     }
 
     private static double[] msptPercentiles(HistoricMetric metrics) {

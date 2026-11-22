@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import io.github.xytronix.hybox.core.text.Units;
 
 final class HyboxTrendRenderer {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("MMM d HH:mm", Locale.ROOT).withZone(ZoneOffset.UTC);
@@ -30,15 +31,23 @@ final class HyboxTrendRenderer {
     static void render(HyboxTrendModel model, ViewState state, UICommandBuilder commands,
                        HyboxIncidentRenderer.ChartImages images) {
         commands.clear("#Charts");
-        commands.set("#RangeLabel.Text", "Health metrics · last " + model.days() + (model.days() == 1 ? " day" : " days"));
-        for (int days : new int[] {1, 7, 30}) commands.set("#Range" + days + ".Disabled", !state.trendAllowed() || days == model.days());
-        String span = model.samples() == 0 ? "no recorded time span" : date(model.firstSample()) + " – " + date(model.lastSample()) + " UTC";
-        commands.set("#Summary.Text", count(model.samples()) + " samples · " + span + " · " + count(model.markers().length) + " incidents in range");
+        commands.set("#RangeLabel.Text", "Health metrics, last " + Units.count(model.days(), "day"));
+        for (int days : new int[] {1, 7, 30}) {
+            boolean chosen = days == model.days();
+            HyboxDashboardRenderer.choice(commands, "#Range" + days, "#Range" + days + "Marker", chosen, "SecondaryButtonStyle");
+            commands.set("#Range" + days + ".Disabled", !state.trendAllowed() || chosen);
+        }
+        boolean sameDay = model.firstSample() / 86_400_000L == model.lastSample() / 86_400_000L;
+        String span = model.samples() == 0 ? "no recorded time span" : "from " + date(model.firstSample()) + " to "
+            + (sameDay ? TIME.format(Instant.ofEpochMilli(model.lastSample())) : date(model.lastSample())) + " UTC";
+        commands.set("#Summary.Text", Units.count(model.samples(), "sample") + " " + span + ", " + Units.count(model.markers().length, "incident"));
         commands.set("#Unavailable.Visible", !model.unavailable().isEmpty() && !state.loading());
-        commands.set("#Unavailable.Text", "Off / unavailable: " + String.join(", ", model.unavailable()));
+        java.util.List<String> settings = model.unavailable().stream().filter(name -> name.equals("CPU use") || name.equals("Allocation rate")).toList();
+        commands.set("#Unavailable.Text", "No data: " + String.join(", ", model.unavailable()) + "."
+            + (settings.isEmpty() ? "" : " Turn on " + String.join(" and ", settings) + " in Settings to record " + (settings.size() == 1 ? "it." : "them.")));
         String empty = state.loading() ? "Loading health metrics…" : !model.metricsEnabled()
-            ? "Metrics.Enabled is off. Enable it to record health metric history."
-            : model.samples() == 0 ? "No health metrics recorded in the last " + model.days() + " day(s)."
+            ? "Trends are off. Turn on Metrics history in /hybox settings."
+            : model.samples() == 0 ? "No health metrics recorded in the last " + Units.count(model.days(), "day") + "."
             : model.metrics().isEmpty() ? "No metric values are available in the recorded samples." : "";
         commands.set("#EmptyState.Text", empty);
         commands.set("#EmptyState.Visible", !empty.isEmpty());
@@ -52,8 +61,8 @@ final class HyboxTrendRenderer {
             String selector = "#Charts[" + i + "]";
             commands.append("#Charts", "Pages/HyboxIncidentChart.ui");
             commands.set(selector + " #ChartTitle.Text", metric.title());
-            String stats = "min " + value(metric.min(), metric) + " · avg " + value(metric.average(), metric)
-                + " · max " + value(metric.max(), metric) + " · now " + value(metric.now(), metric);
+            String stats = "min " + stat(metric.min(), metric) + " · avg " + stat(metric.average(), metric)
+                + " · max " + stat(metric.max(), metric) + " · last " + stat(metric.now(), metric);
             commands.set(selector + " #ChartStats.Text", stats);
             for (int x = 0; x < 5; x++) {
                 long time = model.rangeStart() + (model.generatedAt().toEpochMilli() - model.rangeStart()) * x / 4;
@@ -90,8 +99,9 @@ final class HyboxTrendRenderer {
         return HyboxChartRenderer.value(value, metric.unit(), metric.precision());
     }
 
-    private static String count(int count) {
-        return String.format(Locale.ROOT, "%,d", count);
+    private static String stat(double value, HyboxTrendModel.Metric metric) {
+        String text = value(value, metric);
+        return text.substring(0, text.length() - HyboxChartRenderer.suffix(metric.unit()).length());
     }
 
     private static String date(long time) {

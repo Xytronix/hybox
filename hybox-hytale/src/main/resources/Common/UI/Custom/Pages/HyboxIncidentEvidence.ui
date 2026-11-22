@@ -6,12 +6,13 @@ Group {
   Label #Evidence {
     FlexWeight: 1;
     Anchor: (Right: 12);
-    Style: (FontSize: 13, TextColor: #ffffff(0.92), Wrap: true);
+    Style: (FontSize: 13, TextColor: $H.@Text, Wrap: true);
   }
   $C.@SmallSecondaryTextButton #EvidenceLink {
     @Text = "";
     Anchor: (Width: 145, Height: 28);
     Padding: (Horizontal: 8);
     TextTooltipStyle: $H.@TooltipStyle;
+    Style: $H.@LinkButtonStyle;
   }
 }

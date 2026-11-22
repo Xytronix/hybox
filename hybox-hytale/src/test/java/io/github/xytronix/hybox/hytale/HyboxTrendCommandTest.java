@@ -48,7 +48,7 @@ class HyboxTrendCommandTest {
             Path html = directory.resolve("trend-report.html");
             assertTrue(Files.readString(html).contains("Hybox Health Trends · 7d"));
             assertEquals(1, messages.size());
-            assertTrue(plain(messages.getFirst()).contains("Trend (7d) · " + html));
+            assertTrue(plain(messages.getFirst()).contains("Trend report for 7 days saved: " + html));
         } finally {
             worker.shutdownNow();
         }

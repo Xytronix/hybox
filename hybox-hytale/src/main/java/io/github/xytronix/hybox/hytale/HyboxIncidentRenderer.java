@@ -14,6 +14,8 @@ import com.hypixel.hytale.protocol.packets.interface_.CustomUIEventBindingType;
 import com.hypixel.hytale.server.core.ui.builder.EventData;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.ui.builder.UIEventBuilder;
+import io.github.xytronix.hybox.core.text.Units;
+import io.github.xytronix.hybox.core.trigger.TriggerNames;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -24,6 +26,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 final class HyboxIncidentRenderer {
     record ViewState(String sectionId, int pageIndex, String flameZoomPath, String timeRangeId, boolean showCore) {
@@ -46,17 +50,23 @@ final class HyboxIncidentRenderer {
         sections.put("memory", "Memory & GC"); sections.put("pluginmetrics", "Plugin metrics");
         sections.put("network", "Network"); sections.put("worlds", "Worlds");
         sections.put("system", "System & hardware"); sections.put("plugins", "Plugins");
-        sections.put("assetpacks", "Asset packs"); sections.put("log", "Server log");
-        sections.put("config", "Config files & mixins");
+        sections.put("mixins", "Mixins"); sections.put("assetpacks", "Asset packs");
+        sections.put("log", "Server log"); sections.put("config", "Config files");
         SECTIONS = Collections.unmodifiableMap(sections);
     }
     private static final int PAGE_COST = 20;
     private static final int CHART_COLUMNS = 120;
     private static final int PLOT_WIDTH = 940;
     private static final int CHART_WIDTH = 880;
-    private static final String[] COLORS = {"#7a9cc6", "#80c991", "#efbd62", "#ef8181", "#7ac7bf", "#acb9ca"};
     private static final String PLUGIN_METRIC_KEY = "pluginMetric:";
+    private static final String MOD_EVENT = "mod:";
+    private static final Pattern THREAD_ID = Pattern.compile("(.*-)(?=[0-9a-fA-F]*[0-9])[0-9a-fA-F]{12,}");
     private static final Map<String, String> LABELS = labels();
+    private static final String MOD_CPU_SPLIT = "Self is time in the mod's own code. Total includes Hytale code the mod calls into.";
+    private static final String MOD_ALLOC_SPLIT = "Self is memory allocated by the mod's own code. Total includes Hytale code the mod calls into.";
+    private static final String MOD_OLDER = "Each sample went to the mod frame nearest the top of the stack, so a mod that wraps engine work is charged for that work.";
+    private static final Pattern MIXIN_HANDLER = Pattern.compile("^((?:handler|redirect|modify|args|constant|localvar|wrapOperation|wrapMethod"
+        + "|modifyExpressionValue|modifyReceiver|modifyReturnValue|wrapWithCondition)|md[0-9a-f]+)\\$.*\\$([^$]+)$");
 
     private HyboxIncidentRenderer() {}
 
@@ -72,14 +82,18 @@ final class HyboxIncidentRenderer {
         int index = 0;
         for (var section : SECTIONS.entrySet()) {
             String selector = "#SectionNav[" + index++ + "]";
-            cmd.set(selector + ".Text", (section.getKey().equals(state.sectionId()) ? "› " : "") + section.getValue());
+            cmd.set(selector + ".Text", (section.getKey().equals(state.sectionId()) ? "› " : "") + section.getValue()
+                + (section.getKey().equals("mixins") ? mixinProblemSuffix(model) : ""));
             if (section.getKey().equals(state.sectionId())) cmd.set(selector + ".Style", com.hypixel.hytale.server.core.ui.Value.ref("Pages/HyboxIncidentButton.ui", "SelectedStyle"));
             else cmd.set(selector + ".Style", com.hypixel.hytale.server.core.ui.Value.ref("Pages/HyboxIncidentButton.ui", "DefaultStyle"));
             bind(ev, selector, "section", section.getKey());
+            cmd.set(selector + ".Visible", section.getKey().equals(state.sectionId()) || hasContent(model, section.getKey()));
         }
         cmd.set("#SectionTitle.Text", SECTIONS.get(state.sectionId()));
-        cmd.set("#RecordingBadge.Text", !state.timeRangeId().equals("all") ? "Whole recording" : "");
-        boolean timeSeriesSection = Set.of("metrics", "cpu", "engine", "memory", "pluginmetrics", "network", "threads").contains(state.sectionId());
+        boolean timeSeriesSection = Set.of("metrics", "cpu", "engine", "states", "memory", "pluginmetrics", "network", "threads").contains(state.sectionId());
+        boolean whole = state.timeRangeId().equals("all");
+        cmd.set("#RecordingBadge.Text", timeSeriesSection ? (whole ? "Whole recording" : rangeScope(state.timeRangeId()))
+            : whole ? "" : "Whole recording");
         cmd.set("#RangeControls.Visible", timeSeriesSection);
         cmd.clear("#RangeControls");
         if (timeSeriesSection) {
@@ -88,7 +102,7 @@ final class HyboxIncidentRenderer {
                 boolean selected = state.timeRangeId().equals(preset.getKey());
                 cmd.append("#RangeControls", selected ? "Pages/HyboxIncidentRangeSelected.ui" : "Pages/HyboxIncidentRange.ui");
                 String rangeSelector = "#RangeControls[" + rangeIndex++ + "]";
-                cmd.set(rangeSelector + ".Text", preset.getValue());
+                cmd.set(rangeSelector + " #RangeLabel.Text", preset.getValue());
                 bind(ev, rangeSelector, "range", preset.getKey());
             }
         }
@@ -132,20 +146,16 @@ final class HyboxIncidentRenderer {
                 case THREAD -> {
                     cmd.append(parent, "Pages/HyboxIncidentThread.ui");
                     JsonArray thread = array(block.data);
-                    String threadState = text(at(thread, 1));
+                    String name = block.label;
                     cmd.set(selector + " #Rank.Text", "#" + block.arg);
-                    cmd.set(selector + " #Name.Text", block.label);
-                    cmd.set(selector + " #Name.TooltipText", block.label);
-                    cmd.set(selector + " #State.Text", threadState.isEmpty() ? "Not captured" : threadState);
-                    cmd.set(selector + " #State.Style.TextColor", switch (threadState) {
-                        case "RUNNABLE" -> COLORS[1]; case "WAITING" -> COLORS[0];
-                        case "TIMED_WAITING" -> COLORS[2]; case "BLOCKED" -> COLORS[3]; default -> COLORS[5];
-                    });
-                    cmd.set(selector + " #Samples.Text", count(number(at(thread, 0), 0)) + " samples");
+                    cmd.set(selector + " #Name.Text", name);
+                    cmd.set(selector + " #Name.TooltipText", name);
+                    cmd.set(selector + " #Samples.Text", count(number(at(thread, 0), 0), "sample"));
                     cmd.set(selector + " #Self.Text", percent(number(at(thread, 0), 0), number(model.object("incident").get("samples"), 0)) + " self");
                     cmd.set(selector + " #Share.Value", Math.max(0, Math.min(1, block.share)));
-                    cmd.set(selector + " #Top.Text", "Top method · " + text(at(thread, 3)));
-                    cmd.set(selector + " #Top.TooltipText", block.value.isEmpty() ? text(at(thread, 3)) : block.value);
+                    String topLabel = opt(at(thread, 5));
+                    cmd.set(selector + " #Top.Text", "Top method · " + text(at(thread, 3)) + (topLabel.isEmpty() ? "" : " · " + topLabel));
+                    cmd.set(selector + " #Top.TooltipText", block.value.isEmpty() ? text(at(thread, 3)) + (topLabel.isEmpty() ? "" : "\n" + topLabel) : block.value);
                     cmd.set(selector + " #Methods.Text", block.value);
                     cmd.set(selector + " #Methods.Visible", !block.value.isEmpty());
                     JsonArray series = block.timeline;
@@ -175,10 +185,9 @@ final class HyboxIncidentRenderer {
                                 value = 0;
                                 for (int candidate = 1; candidate < counts.length; candidate++) if (counts[candidate] > counts[value]) value = candidate;
                             }
-                            if (column > 0 && value != previous) {
+                            if (column > 0 && value != previous && previous > 0) {
                                 int left = runStart * PLOT_WIDTH / stripColumns, width = column * PLOT_WIDTH / stripColumns - left;
-                                String color = switch (previous) { case 1 -> COLORS[1]; case 2 -> COLORS[0]; case 3 -> COLORS[2]; case 4 -> COLORS[3]; default -> COLORS[5]; };
-                                cmd.appendInline(selector + " #StripBars", "Group { Anchor: (Left: " + left + ", Top: 0, Width: " + width + ", Height: 12); Background: " + color + "(0.8); }");
+                                cmd.appendInline(selector + " #StripBars", "Group { Anchor: (Left: " + left + ", Top: 0, Width: " + width + ", Height: 12); Background: " + stateColor(previous) + "; }");
                             }
                             if (value != previous) { runStart = column; previous = value; }
                         }
@@ -219,6 +228,10 @@ final class HyboxIncidentRenderer {
                     cmd.set(selector + " #Amount.Text", text(cells, "amount"));
                     cmd.set(selector + " #Details.Text", text(cells, "details"));
                     cmd.set(selector + " #Details.Visible", !text(cells, "details").isEmpty());
+                    if (block.share >= 0) {
+                        cmd.set(selector + " #Share.Visible", true);
+                        cmd.set(selector + " #Share.Value", Math.min(1, block.share));
+                    }
                 }
                 case LINK -> {
                     cmd.append(parent, "Pages/HyboxIncidentButton.ui");
@@ -274,20 +287,92 @@ final class HyboxIncidentRenderer {
     private static void header(IncidentModel model, UICommandBuilder cmd) {
         JsonObject incident = model.object("incident");
         String severity = text(incident, "severity");
-        cmd.set("#Severity.Text", severity);
-        cmd.set("#Severity.Style.TextColor", switch (severity) { case "CRITICAL" -> "#ef8181"; case "DEGRADED" -> "#efbd62"; default -> "#80c991"; });
-        cmd.set("#Headline.Text", text(incident, "trigger").replace('_', ' ') + " · " + text(incident, "world"));
-        cmd.set("#IncidentMeta.Text", model.id() + " · " + text(incident, "created") + " · stall " + display(incident.get("stallMs"), "stallMs") + " · " + playerCount(incident.get("players")));
-        cmd.set("#BlockedIn.Text", "Blocked in " + model.blockedIn());
-        cmd.set("#BlockedIn.TooltipText", model.blockedIn());
+        cmd.set("#Severity.Text", DashboardModel.severityLabel(present(incident.get("severity")) ? severity : null));
+        var tone = DashboardModel.severityTone(severity);
+        cmd.set("#Severity.Style.TextColor", tone.color);
+        HyboxDashboardRenderer.background(cmd, "#Severity", tone, "Pill");
+        String world = text(incident, "world");
+        boolean hasWorld = !world.isEmpty() && !world.equals("server") && !world.equals("Not captured");
+        cmd.set("#Headline.Text", trigger(incident) + (hasWorld ? " · " + world : ""));
+        cmd.set("#IncidentMeta.Text", text(incident, "created"));
+        String blockedIn = model.blockedIn();
+        boolean hasFrame = !blockedIn.equals("Not captured");
+        cmd.set("#BlockedIn.Visible", hasFrame);
+        cmd.set("#BlockedIn.Text", hasFrame ? "Blocked in " + blockedIn : "");
+        cmd.set("#BlockedIn.TooltipText", hasFrame ? blockedIn : "");
     }
 
     private static void overviewTiles(IncidentModel model, UICommandBuilder cmd) {
         JsonObject i = model.object("incident");
-        tile(cmd, 0, "Triggering stall", display(i.get("stallMs"), "stallMs"), text(i, "trigger"));
-        tile(cmd, 1, "CPU samples", display(i.get("samples"), "samples"), "Entire recording");
-        tile(cmd, 2, "Recording window", duration(number(i.get("windowSec"), 0) * 1000), "Starts " + text(i, "recStart"));
-        tile(cmd, 3, "Players", display(i.get("players"), "players"), text(i, "world"));
+        int index = 0;
+        if (present(i.get("stallMs"))) tile(cmd, index++, "Stall", display(i.get("stallMs"), "stallMs"), trigger(i));
+        tile(cmd, index++, "Recording window", duration(number(i.get("windowSec"), 0) * 1000), "Starts " + text(i, "recStart") + (present(i.get("recStart")) ? " UTC" : ""));
+        tile(cmd, index, "Players", display(i.get("players"), "players"), "online at capture");
+    }
+
+    private static String trigger(JsonObject incident) {
+        return TriggerNames.label(present(incident.get("trigger")) ? text(incident, "trigger") : null);
+    }
+
+    static boolean hasContent(IncidentModel model, String section) {
+        return switch (section) {
+            case "top" -> true;
+            case "stalled" -> !diagCards(model).isEmpty();
+            case "diagnosis" -> {
+                if (filled(model, "findings")) yield true;
+                Plan rows = new Plan(model);
+                comparison(rows);
+                yield !rows.blocks.isEmpty();
+            }
+            case "metrics" -> filled(model, "series");
+            case "cpu" -> filled(model, "cpu") || filled(model, "subsystems") || filled(model, "modCpu") || filled(model, "cpuByWorld")
+                || dataIsSeries(model.object("series").get("cpu")) || dataIsSeries(model.object("series").get("cpuJvm"));
+            case "engine" -> filled(model, "tickSeries") || filled(model, "tickSystems");
+            case "methods" -> filled(model, "hotMethods");
+            case "flame" -> filled(model, "flame");
+            case "threads" -> filled(model, "hotThreads") || filled(model, "threadTimeline");
+            case "states" -> filled(model, "threadStates") || filled(model, "deadlocked");
+            case "memory" -> filled(model, "heap") || filled(model, "gc") || filled(model, "alloc") || dataIsSeries(model.object("series").get("heap"));
+            case "pluginmetrics" -> filled(model, "pluginMetrics");
+            case "network" -> filled(model, "net");
+            case "worlds" -> filled(model, "worlds") || filled(model, "entities");
+            case "system" -> filled(model, "sys");
+            case "plugins" -> filled(model, "plugins");
+            case "mixins" -> filled(model, "mixins");
+            case "assetpacks" -> filled(model, "assetPacks");
+            case "log" -> filled(model, "log");
+            case "config" -> filled(model, "configs");
+            default -> false;
+        };
+    }
+
+    private static boolean filled(IncidentModel model, String key) {
+        JsonElement value = model.field(key);
+        if (value.isJsonArray()) return !value.getAsJsonArray().isEmpty();
+        if (value.isJsonObject()) return !value.getAsJsonObject().isEmpty();
+        return present(value);
+    }
+
+    private static final Set<String> DUPLICATE_DIAGNOSTICS = Set.of("Mixins", "Plugins", "Asset packs", "Tick systems",
+        "Mod hot-path contribution (JFR)", "Heap histogram", "Memory pools", "Entities", "Server log");
+    private static final Set<String> DUPLICATE_ENVIRONMENT = Set.of("Server name", "Hytale version", "Container runtime", "Mods", "Mods (count)");
+    private record DiagCard(String title, List<JsonArray> entries, String pre) {}
+
+    private static List<DiagCard> diagCards(IncidentModel model) {
+        List<DiagCard> cards = new ArrayList<>();
+        for (JsonElement element : model.array("diag")) {
+            JsonObject d = object(element); String title = text(d, "title");
+            if (DUPLICATE_DIAGNOSTICS.contains(title) || title.toLowerCase(Locale.ROOT).matches(".*\\.(json|toml|yaml|yml|properties|cfg)")) continue;
+            List<JsonArray> entries = new ArrayList<>();
+            for (JsonElement pair : array(d.get("entries"))) {
+                JsonArray a = array(pair);
+                if (title.equals("Environment") && (DUPLICATE_ENVIRONMENT.contains(text(at(a, 0))) || opt(at(a, 1)).startsWith("installed"))) continue;
+                entries.add(a);
+            }
+            String pre = opt(d.get("pre"));
+            if (!entries.isEmpty() || !pre.isEmpty()) cards.add(new DiagCard(title, entries, pre));
+        }
+        return cards;
     }
 
     private static void tile(UICommandBuilder cmd, int index, String key, String value, String sub) {
@@ -301,76 +386,118 @@ final class HyboxIncidentRenderer {
         switch (state.sectionId()) {
             case "top" -> overview(p);
             case "stalled" -> {
-                for (JsonElement element : array(p.use("diag"))) {
-                    JsonObject d = object(element); String title = text(d, "title");
-                    p.card(title);
-                    for (JsonElement pair : array(d.get("entries"))) {
-                        JsonArray a = array(pair); p.row(text(at(a, 0)), text(at(a, 1)));
-                    }
-                    if (present(d.get("pre"))) p.textLines("Captured stack", text(d, "pre"));
+                p.use("diag");
+                for (DiagCard card : diagCards(model)) {
+                    p.card(card.title());
+                    for (JsonArray a : card.entries()) p.row(text(at(a, 0)), text(at(a, 1)));
+                    if (!card.pre().isEmpty()) p.textLines("Captured stack", card.pre());
                 }
             }
             case "diagnosis" -> { findings(p); comparison(p); }
             case "metrics" -> {
                 JsonObject series = object(p.use("series"));
                 if (series.isEmpty()) p.row("Time series", "Not captured");
-                Set<String> ordered = new LinkedHashSet<>(List.of("mspt", "tps", "players", "connects", "joins", "leaves", "entities", "chunks", "chunksGenerated", "chunksLoaded", "ping", "cpuJvm", "cpu", "heap", "heapCommitted", "rss", "hostMem", "disk", "diskWrite", "diskRead", "netOut", "netIn", "threads", "gcPause", "exceptions"));
+                Set<String> ordered = new LinkedHashSet<>(List.of("mspt", "tps", "players", "connects", "joins", "leaves", "entities", "chunks", "chunksGenerated", "chunksLoaded", "ping", "cpuJvm", "cpu", "heap", "heapCommitted", "rss", "hostMem", "disk", "diskWrite", "diskRead", "gcPause", "exceptions"));
                 ordered.addAll(series.keySet());
-                for (String key : ordered) p.chart(label(key), series.get(key), unit(key), key);
+                ordered.removeAll(Set.of("threads", "netOut", "netIn"));
+                String tickWorld = text(model.object("tps"), "world");
+                for (String key : ordered) {
+                    if (dataIsSeries(series.get(key))) p.chart(label(key), series.get(key), unit(key), key);
+                    if (!key.equals("tps")) continue;
+                    for (JsonElement element : array(p.use("worldTps"))) {
+                        JsonObject world = object(element); String name = text(world, "name");
+                        if (name.equals(tickWorld) && dataIsSeries(series.get("tps")) || !dataIsSeries(world.get("series"))) continue;
+                        p.chart("TPS · " + name, world.get("series"), "tps", "worldTps");
+                    }
+                }
                 p.card("Recording facts");
                 for (String key : List.of("tps", "cpu", "heap", "ram", "gc", "net", "threadStates", "worlds", "sys")) p.use(key);
-                p.known("Live threads at capture", p.use("threadTotal"));
                 p.use("gcOverlap");
                 recordingFacts(p);
-                p.tuples("Events", "events", "Recording position", "Type", "Event");
                 JsonElement hidden = p.use("eventsHidden"); if (present(hidden)) p.row("Additional events omitted", text(hidden));
             }
             case "cpu" -> {
                 p.data("CPU", "cpu"); p.series("cpu", "cpuJvm");
                 double total = number(model.object("incident").get("samples"), 0); p.use("incident");
                 cpuFacts(p);
-                p.shares("Engine subsystems", p.use("subsystems"), total, "samples");
-                p.tuples("Mod CPU", "modCpu", "Plugin", "Samples", "Top method", "Threads (thread, samples)");
-                for (JsonElement item : model.array("modCpu")) {
-                    JsonArray a = array(item); double samples = number(at(a, 1), 0);
-                    p.share(text(at(a, 0)), count(samples) + " samples · " + decimal(100 * samples / Math.max(1, total), 1) + "% · owner unknown; grouped by package", samples / Math.max(1, total));
+                p.shares("Engine subsystems", p.use("subsystems"), total, "sample");
+                JsonArray mods = array(p.use("modCpu"));
+                if (!mods.isEmpty()) p.card("CPU by mod");
+                if (split(mods, 4)) {
+                    p.paragraph(MOD_CPU_SPLIT);
+                    for (JsonArray a : modRows(mods, 4)) {
+                        double self = number(at(a, 4), 0), all = number(at(a, 5), 0);
+                        List<String> threads = new ArrayList<>();
+                        for (JsonElement thread : array(at(a, 7))) {
+                            JsonArray t = array(thread);
+                            threads.add(threadName(t) + " " + decimal(100 * number(at(t, 1), 0) / Math.max(1, self), 0) + "%");
+                        }
+                        String selfMethod = opt(at(a, 6)), selfLabel = opt(at(a, 8)), totalMethod = opt(at(a, 9)), totalLabel = opt(at(a, 10));
+                        String details = "Total " + count(all, "sample") + " · " + decimal(100 * all / Math.max(1, total), 1) + "%"
+                            + (totalMethod.isEmpty() ? "" : ", entered through " + shortMethod(totalMethod) + (totalLabel.isEmpty() ? "" : ", " + totalLabel))
+                            + (100 * self / Math.max(1, total) < 0.05 && 100 * all / Math.max(1, total) >= 1 ? "\nWraps Hytale work, self under 0.1%" : "")
+                            + (threads.isEmpty() ? "" : "\nSelf on " + String.join(", ", threads));
+                        p.table(text(at(a, 0)), selfMethod.isEmpty() ? "" : "Self ran in " + shortMethod(selfMethod) + (selfLabel.isEmpty() ? "" : ", " + selfLabel),
+                            "Self " + count(self, "sample") + " · " + decimal(100 * self / Math.max(1, total), 1) + "%", details, self / Math.max(1, total));
+                    }
+                } else {
+                    if (!mods.isEmpty()) p.row("Older bundle", MOD_OLDER);
+                    for (JsonElement item : mods) {
+                        JsonArray a = array(item); double samples = number(at(a, 1), 0);
+                        List<String> threads = new ArrayList<>();
+                        for (JsonElement thread : array(at(a, 3))) {
+                            JsonArray t = array(thread);
+                            threads.add(threadName(t) + " " + decimal(100 * number(at(t, 1), 0) / Math.max(1, samples), 0) + "%");
+                        }
+                        String top = opt(at(a, 2));
+                        p.table(text(at(a, 0)), top.isEmpty() ? "" : "Top method · " + top,
+                            count(samples, "sample") + " · " + decimal(100 * samples / Math.max(1, total), 1) + "%", String.join(" · ", threads));
+                    }
                 }
                 for (JsonElement element : array(p.use("cpuByWorld"))) {
                     JsonObject world = object(element); String name = text(world, "world");
                     p.card(name + " · CPU attribution");
-                    p.row("Samples", display(world.get("samples"), "samples") + " samples · " + percent(number(world.get("samples"), 0), total));
-                    p.shares(name + " · subsystems", world.get("subsystems"), number(world.get("samples"), 0), "samples");
-                    p.shares(name + " · mods", world.get("mods"), number(world.get("samples"), 0), "samples");
+                    p.row("Samples", count(number(world.get("samples"), 0), "sample") + " · " + percent(number(world.get("samples"), 0), total));
+                    p.shares(name + " · subsystems", world.get("subsystems"), number(world.get("samples"), 0), "sample");
+                    p.modShares(name + " · mods", world.get("mods"), number(world.get("samples"), 0), "sample", "");
                 }
-                p.namedCharts("World tick rate", "worldTps", "tps");
+                if (!model.array("worldTps").isEmpty()) p.link("TPS per world", "Key metrics", "section", "metrics");
             }
             case "engine" -> {
                 p.namedCharts("Tick system", "tickSeries", "ms");
-                p.row("Per-system tick wall time", "Measured by the engine for every system tick: exact time, not sampling. Includes time blocked on locks and I/O.");
+                p.row("Per-system tick wall time", "Time each engine system took per tick, measured by Hytale. It includes time spent waiting on locks and disk.");
                 double budget = 1000 / Math.max(1, number(model.object("tps").get("target"), 30)); p.use("tps");
-                for (JsonElement item : model.array("tickSystems")) {
+                for (JsonElement item : array(p.use("tickSystems"))) {
                     JsonArray a = array(item);
-                    p.row(text(at(a, 0)) + " @ " + text(at(a, 1)) + " · % of budget", decimal(100 * number(at(a, 2), 0) / budget, 1) + "% of " + decimal(budget, 1) + " ms tick budget (avg 1m)");
+                    p.row(text(at(a, 0)) + " @ " + text(at(a, 1)), decimal(number(at(a, 2), 0), 2) + " ms avg, " + decimal(number(at(a, 3), 0), 2) + " ms worst in the last minute. "
+                        + decimal(100 * number(at(a, 2), 0) / budget, 1) + "% of the " + decimal(budget, 1) + " ms tick.");
+                    p.row("", "5 min: " + decimal(number(at(a, 4), 0), 2) + " ms avg, " + decimal(number(at(a, 5), 0), 2) + " ms worst.");
                 }
-                p.tuples("Tick systems · profiling timers", "tickSystems", "System", "World", "1m average (ms)", "1m maximum (ms)", "5m average (ms)", "5m maximum (ms)");
                 p.data("Engine profiling note", "tickSystemsNote");
             }
             case "methods" -> {
                 JsonArray methods = array(p.use("hotMethods"));
                 double total = number(model.object("incident").get("samples"), 0); p.use("incident");
-                if (!methods.isEmpty()) p.row("Leaf-frame aggregation", "Top " + methods.size() + " methods over " + count(total) + " execution samples from all threads. Top frame " + text(at(array(methods.get(0)), 1)) + " holds " + percent(number(at(array(methods.get(0)), 0), 0), total) + " of samples.");
+                if (!methods.isEmpty()) p.row("Hot methods", "Top " + methods.size() + " methods over " + count(total, "CPU sample") + " from all threads. Top frame " + text(at(array(methods.get(0)), 1)) + " holds " + percent(number(at(array(methods.get(0)), 0), 0), total) + " of samples.");
                 int rank = 0;
                 for (JsonElement element : methods) {
                     JsonArray a = array(element); double samples = number(at(a, 0), 0);
-                    p.table("#" + ++rank + " · " + text(at(a, 1)), "Leaf frame", count(samples) + " samples · " + percent(samples, total) + " self", "Callers: " + join(array(at(a, 2)), " → "));
+                    String label = opt(at(a, 3));
+                    JsonArray callers = array(at(a, 2)), callerLabels = array(at(a, 4));
+                    List<String> callerText = new ArrayList<>(callers.size());
+                    for (int i = 0; i < callers.size(); i++) {
+                        String callerLabel = opt(at(callerLabels, i));
+                        callerText.add(text(callers.get(i)) + (callerLabel.isEmpty() ? "" : " [" + callerLabel + "]"));
+                    }
+                    p.table("#" + ++rank + " · " + text(at(a, 1)), label, count(samples, "sample") + " · " + percent(samples, total) + " self", "Callers: " + String.join(" → ", callerText));
                 }
             }
             case "flame" -> {
                 JsonElement flame = p.use("flame");
                 if (present(flame)) {
                     JsonArray root = flameRoot(model, state.flameZoomPath());
-                    p.paragraph(flameBreadcrumb(model, state.flameZoomPath()) + " · " + count(number(at(root, 1), 0)) + " samples · self " + flameSelf(root) + ownerSuffix(root));
-                    p.paragraph("Click a frame to zoom; use Up or All samples to navigate.");
+                    p.paragraph(flameBreadcrumb(model, state.flameZoomPath()) + " · " + count(number(at(root, 1), 0), "sample") + " · self " + flameSelf(root) + ownerSuffix(root) + flameLabel(root));
+                    p.paragraph("Click a frame to zoom. Up goes back one frame. All samples shows everything.");
                     p.blocks.add(new Block(Kind.LEGEND, "", "", JsonNull.INSTANCE, 0, "", "flame"));
                     p.link("All samples", "Reset zoom", "zoom", "");
                     if (!state.flameZoomPath().isEmpty()) p.link("Up one frame", "Parent", "zoom", parentPath(state.flameZoomPath()));
@@ -378,20 +505,27 @@ final class HyboxIncidentRenderer {
                     JsonArray children = array(at(root, 2));
                     for (int i = 0; i < children.size(); i++) {
                         JsonArray child = array(children.get(i));
-                        p.link(text(at(child, 0)), count(number(at(child, 1), 0)) + " samples · self " + flameSelf(child) + ownerSuffix(child), "zoom", childPath(state.flameZoomPath(), i));
+                        p.link(text(at(child, 0)), count(number(at(child, 1), 0), "sample") + " · self " + flameSelf(child) + ownerSuffix(child) + flameLabel(child), "zoom", childPath(state.flameZoomPath(), i));
                     }
                 }
             }
             case "threads" -> threads(p);
             case "states" -> {
-                p.data("Live threads", "threadTotal"); JsonObject states = object(p.use("threadStates"));
+                JsonObject states = object(p.use("threadStates"));
+                boolean checked = model.has("threadStates");
+                if (checked) {
+                    double blocked = number(states.get("BLOCKED"), 0);
+                    p.row("Threads waiting for a lock", blocked == 0 ? "None at capture."
+                        : count(blocked) + (blocked == 1 ? " thread was" : " threads were") + " waiting for a lock at capture.");
+                }
+                if (!model.array("deadlocked").isEmpty()) p.data("Deadlocked threads", "deadlocked");
+                else { p.use("deadlocked"); p.row("Deadlock", checked ? "No deadlock found." : "Deadlock check did not run."); }
+                JsonElement threads = object(p.use("series")).get("threads");
+                if (dataIsSeries(threads) || model.has("threadTotal") || !states.isEmpty()) p.card("All threads");
+                if (dataIsSeries(threads)) p.chart("Live threads", threads, "count", "threads");
+                p.data("Live threads", "threadTotal");
                 double total = states.entrySet().stream().mapToDouble(e -> number(e.getValue(), 0)).sum();
-                p.row("Live JVM threads by state", count(number(states.get("RUNNABLE"), 0)) + " of " + text(model.field("threadTotal")) + " runnable · " + count(number(states.get("BLOCKED"), 0)) + " blocked");
                 for (var e : states.entrySet()) p.share(e.getKey().replace('_', ' '), count(number(e.getValue(), 0)) + " · " + percent(number(e.getValue(), 0), total), number(e.getValue(), 0) / Math.max(1, total));
-                double blocked = number(states.get("BLOCKED"), 0);
-                p.row("Blocked threads", count(blocked) + " blocked thread" + (blocked == 1 ? "" : "s") + " at capture, waiting to enter a monitor.");
-                p.data("Deadlocked threads", "deadlocked");
-                if (!model.has("deadlocked")) p.row("Deadlock evidence", "Deadlock detection returned no result.");
             }
             case "memory" -> memory(p);
             case "pluginmetrics" -> {
@@ -421,18 +555,22 @@ final class HyboxIncidentRenderer {
             case "network" -> network(p);
             case "worlds" -> {
                 double total = number(model.object("incident").get("samples"), 0); p.use("incident");
-                for (JsonElement element : array(p.use("worlds"))) {
+                JsonArray worlds = array(p.use("worlds"));
+                if (worlds.asList().stream().anyMatch(w -> present(object(w).get("tps")))) p.link("TPS per world", "Key metrics", "section", "metrics");
+                for (JsonElement element : worlds) {
                     JsonObject world = object(element); String name = text(world, "name");
                     p.card(name);
                     int rank = 1;
-                    for (JsonElement other : model.array("worlds")) if (number(object(other).get("samples"), 0) > number(world.get("samples"), 0)) rank++;
-                    p.row("World status", (name.startsWith("instance-") ? "instance" : "persistent") + " · CPU share " + decimal(100 * number(world.get("samples"), 0) / Math.max(1, total), 1) + "% · #" + rank + " of " + model.array("worlds").size() + " by CPU" + ("true".equals(text(world, "stalled")) ? " · stalled world" : ""));
-                    p.flatten(name, world);
+                    for (JsonElement other : worlds) if (number(object(other).get("samples"), 0) > number(world.get("samples"), 0)) rank++;
+                    p.row("World status", (name.startsWith("instance-") ? "instance" : "persistent") + " · CPU share " + decimal(100 * number(world.get("samples"), 0) / Math.max(1, total), 1) + "% · #" + rank + " of " + worlds.size() + " by CPU" + ("true".equals(text(world, "stalled")) ? " · stalled world" : ""));
+                    JsonObject facts = world.deepCopy(); facts.remove("tps");
+                    p.flatten(name, facts);
                 }
                 p.tuples("Entity component breakdown", "entities", "World", "Entity types (type, count)");
             }
             case "system" -> systemFacts(p);
             case "plugins" -> plugins(p, "plugins", "Plugins", state.showCore());
+            case "mixins" -> mixins(p);
             case "assetpacks" -> plugins(p, "assetPacks", "Asset packs", true);
             case "log" -> {
                 JsonArray logs = array(p.use("log"));
@@ -466,15 +604,10 @@ final class HyboxIncidentRenderer {
             return;
         }
         p.card("What the recording shows");
-        p.blocks.add(new Block(Kind.PARAGRAPH, "", spans(f.get("intro")), f.get("intro"), 0, "", ""));
         for (JsonElement entry : array(f.get("evidence"))) finding(p, object(entry), "Evidence");
-        p.card("Assessment");
-        p.row("Severity", text(f, "severity")); p.row("Investigation direction", text(f, "direction"));
         p.card("Next steps");
         int step = 0;
         for (JsonElement entry : array(f.get("steps"))) finding(p, object(entry), "Next step " + ++step);
-        p.row("Tags", join(array(f.get("tags")), " · "));
-        if (present(f.get("caveat"))) p.row("Caveat", text(f, "caveat"));
     }
 
     private static void finding(Plan p, JsonObject finding, String heading) {
@@ -500,7 +633,6 @@ final class HyboxIncidentRenderer {
     }
 
     private static void threads(Plan p) {
-        JsonElement live = p.use("threadTotal");
         JsonArray hot = array(p.use("hotThreads"));
         double total = number(p.model.object("incident").get("samples"), 0); p.use("incident");
         Map<String, double[]> pools = new LinkedHashMap<>();
@@ -514,8 +646,8 @@ final class HyboxIncidentRenderer {
         List<Map.Entry<String, double[]>> poolRows = pools.entrySet().stream().filter(e -> e.getValue()[0] >= 2).sorted((a, b) -> Double.compare(b.getValue()[1], a.getValue()[1])).toList();
         List<Map.Entry<String, double[]>> shown = poolRows.stream().filter(e -> e.getValue()[1] >= total * 0.003).limit(12).toList();
         if (shown.isEmpty() && !poolRows.isEmpty()) shown = poolRows.subList(0, 1);
-        for (var entry : shown) p.share("Thread pool · " + entry.getKey(), count(entry.getValue()[0]) + " threads · " + count(entry.getValue()[1]) + " samples · " + decimal(100 * entry.getValue()[1] / Math.max(1, total), 1) + "%", entry.getValue()[1] / Math.max(1, total));
-        if (poolRows.size() > shown.size()) p.row("Smaller thread pools", "+" + (poolRows.size() - shown.size()) + " smaller pool(s) below 0.3% not shown.");
+        for (var entry : shown) p.share("Thread pool · " + entry.getKey(), count(entry.getValue()[0], "thread") + " · " + count(entry.getValue()[1], "sample") + " · " + decimal(100 * entry.getValue()[1] / Math.max(1, total), 1) + "%", entry.getValue()[1] / Math.max(1, total));
+        if (poolRows.size() > shown.size()) { int hidden = poolRows.size() - shown.size(); p.row("Smaller thread pools", count(hidden, "pool") + " under 0.3% " + (hidden == 1 ? "is" : "are") + " not shown."); }
         if (shown.isEmpty()) p.row("Thread pools", hot.isEmpty() ? "Not captured" : "No sampled threads share a pool name.");
         Map<String, JsonArray> timelines = new LinkedHashMap<>();
         JsonArray timelineEntries = array(p.use("threadTimeline")), axisSeries = new JsonArray();
@@ -524,7 +656,7 @@ final class HyboxIncidentRenderer {
             timelines.put(text(entry, "name"), states);
             if (states.size() > axisSeries.size()) axisSeries = states;
         }
-        p.card("Hot threads · " + (present(live) ? count(number(live, 0)) + " live threads" : "live thread count not captured") + " · ranked by CPU samples");
+        p.card("Hot threads · ranked by CPU samples");
         p.blocks.add(new Block(Kind.LEGEND, "", "", JsonNull.INSTANCE, 0, "", "threads"));
         p.blocks.add(new Block(Kind.THREAD_AXIS, "", "", axisSeries, 0, "", ""));
         if (hot.isEmpty()) p.row("Hot threads", "Not captured.");
@@ -535,10 +667,13 @@ final class HyboxIncidentRenderer {
             for (JsonElement method : array(at(a, 4))) {
                 if (!methods.isEmpty()) methods.append('\n');
                 JsonArray m = array(method);
-                methods.append(text(at(m, 0))).append(" · ").append(count(number(at(m, 1), 0))).append(" samples · ").append(percent(number(at(m, 1), 0), samples));
+                methods.append(text(at(m, 0))).append(" · ").append(count(number(at(m, 1), 0), "sample")).append(" · ").append(percent(number(at(m, 1), 0), samples));
+                String label = opt(at(m, 2));
+                if (!label.isEmpty()) methods.append(" · ").append(label);
             }
-            String name = text(at(a, 2));
-            p.blocks.add(new Block(Kind.THREAD, name, methods.toString(), a, samples / Math.max(1, total), "", Integer.toString(++rank), timelines.get(name)));
+            String name = text(at(a, 2)), mods = threadMods(at(a, 6), samples);
+            String lines = mods.isEmpty() ? methods.toString() : methods.isEmpty() ? mods : mods + "\n" + methods;
+            p.blocks.add(new Block(Kind.THREAD, name, lines, a, samples / Math.max(1, total), "", Integer.toString(++rank), timelines.get(name)));
         }
         boolean others = false;
         for (JsonElement element : timelineEntries) {
@@ -550,70 +685,182 @@ final class HyboxIncidentRenderer {
     }
 
     private static void memory(Plan p) {
-        p.series("heap", "heapCommitted", "rss", "gcPause");
-        p.data("Heap", "heap"); p.data("Process RSS & native memory", "ram"); p.data("Garbage collection", "gc");
-        JsonObject sys = object(p.use("sys"));
-        p.card("Garbage collection & memory");
-        for (String key : List.of("gcYoung", "gcOld", "gcParallel", "gcConc", "nonHeap")) p.flatten(label(key), sys.get(key));
-        p.tuples("Collections since JVM start", "gcByCollector", "Collector", "Collections", "Total time (ms)");
-        p.tuples("GC causes", "gcCauses", "Cause", "Collections", "Total pause (ms)");
+        p.series("heap", "heapCommitted", "gcPause");
+        JsonObject sys = object(p.use("sys")), heap = object(p.use("heap")), ram = object(p.use("ram")), gc = object(p.use("gc"));
+        p.card("Memory");
+        double maxHeap = number(heap.get("max"), number(sys.get("xmxBytes"), 0));
+        if (maxHeap > 0) p.row("Max heap", gib(maxHeap) + " GiB (-Xmx)");
+        if (present(heap.get("peak"))) p.row("Peak heap used", gib(number(heap.get("peak"), 0)) + " GiB");
+        if (present(heap.get("max"))) p.row("Heap utilization", percent(number(heap.get("peak"), 0), number(heap.get("max"), 0)) + " peak");
+        if (present(heap.get("floor"))) p.row("Post-GC floor", "~" + gib(number(heap.get("floor"), 0)) + " GiB");
+        if (present(sys.get("gcYoung")) || present(sys.get("gcOld"))) p.row("Collector", text(sys, "gcYoung") + " + " + text(sys, "gcOld"));
+        if (present(gc.get("collections"))) p.row("Collections", count(number(gc.get("collections"), 0)));
+        if (present(gc.get("maxPauseMs"))) p.row("Longest pause", text(gc, "maxPauseMs") + " ms");
+        if (present(gc.get("totalPauseMs"))) p.row("Total pause time", text(gc, "totalPauseMs") + " ms");
         JsonObject alloc = object(p.use("alloc")); double total = number(alloc.get("total"), 0);
         double window = number(p.model.object("incident").get("windowSec"), 0); p.use("incident");
         if (present(alloc.get("total"))) {
-            p.row("Allocation pressure, not retained RAM", "JFR allocation samples over the entire recording: " + bytes(total) + " sampled" + (window > 0 ? " · ≈ " + bytes(total / window) + "/s" : "") + ". Owner unknown; grouped by package.");
-            p.row("Allocation · total sampled", bytes(total) + " · " + count(total) + " bytes");
+            p.row("Allocated during recording", "Memory allocated during the recording: " + bytes(total) + (window > 0 ? ", " + bytes(total / window) + "/s" : "") + ". GC frees most of it. This is not memory in use.");
+            p.row("Allocation · total sampled", bytes(total));
         } else p.row("Allocation · total sampled", "Not captured");
-        for (String key : List.of("bySubsystem", "byThread", "byClass", "byMod")) p.shares("Allocation · " + label(key), alloc.get(key), total, "bytes");
+        p.shares("Allocation · " + label("bySubsystem"), alloc.get("bySubsystem"), total, "bytes");
+        p.modShares("Allocation · " + label("byMod"), alloc.get("byMod"), total, "bytes", MOD_ALLOC_SPLIT);
         for (JsonElement element : array(alloc.get("byWorld"))) {
             JsonObject world = object(element); String name = text(world, "world"); double size = number(world.get("bytes"), 0);
             p.row("Allocation · " + name, bytes(size) + " · " + percent(size, total));
             p.shares(name + " · subsystem allocation", world.get("bySubsystem"), size, "bytes");
-            p.shares(name + " · mod allocation", world.get("byMod"), size, "bytes");
+            p.modShares(name + " · mod allocation", world.get("byMod"), size, "bytes", "");
         }
+        p.tuples("Retained objects", "retained", "Class", "Samples", "Allocation site");
+        if (!p.model.array("retained").isEmpty()) p.row("", "Sampled, not exact.");
         p.tuples("Heap histogram", "heapHistogram", "Class", "Instances", "Bytes");
         JsonArray histogram = p.model.array("heapHistogram");
         double histTotal = histogram.asList().stream().mapToDouble(e -> number(at(array(e), 2), 0)).sum();
         for (JsonElement item : histogram) { JsonArray a = array(item); p.row(text(at(a, 0)) + " · % of listed", decimal(100 * number(at(a, 2), 0) / Math.max(1, histTotal), 1) + "% · " + bytes(number(at(a, 2), 0))); }
-        p.tuples("Memory pools", "memPools", "Pool", "Used bytes", "Committed bytes", "Maximum bytes", "Post-GC bytes");
-        p.tuples("Retained objects", "retained", "Class", "Samples", "Allocation site");
-        p.tuples("Slow file I/O", "slowIo", "Path", "Duration (ms)", "Bytes", "Operation");
-        JsonObject heap = p.model.object("heap"), ram = p.model.object("ram"), gc = p.model.object("gc");
-        if (present(sys.get("gcYoung")) || present(sys.get("gcOld"))) p.row("Collector", text(sys, "gcYoung") + " + " + text(sys, "gcOld"));
+        p.tuples("Slow file I/O", "slowIo", "Path", "Duration", "Bytes", "Operation");
+        p.use("slowIoThresholdMs");
+        p.card("Advanced");
         if (present(sys.get("gcParallel"))) p.row("GC worker threads", text(sys, "gcParallel") + " parallel, " + text(sys, "gcConc") + " concurrent");
-        if (present(gc.get("collections"))) p.row("Collections", text(gc, "collections"));
-        if (present(gc.get("maxPauseMs"))) p.row("Longest pause", text(gc, "maxPauseMs") + " ms");
-        if (present(gc.get("totalPauseMs"))) p.row("Total pause time", text(gc, "totalPauseMs") + " ms");
-        if (present(heap.get("peak"))) p.row("Peak heap used", gib(number(heap.get("peak"), 0)) + " GiB" + (number(heap.get("max"), 0) > 0 ? " (" + count(100 * number(heap.get("peak"), 0) / number(heap.get("max"), 1)) + "%)" : ""));
         JsonObject nonHeap = object(sys.get("nonHeap"));
         if (present(nonHeap.get("used"))) p.row("Non-heap", bytes(number(nonHeap.get("used"), 0)) + " used / " + bytes(number(nonHeap.get("committed"), 0)) + " committed");
+        if (present(ram.get("rssPeak"))) p.row("Process RSS (peak)", gib(number(ram.get("rssPeak"), 0)) + " GiB");
         double memLimit = number(object(sys.get("container")).get("memLimit"), number(sys.get("ramTotal"), 0));
-        if (memLimit > 0) p.row("Process memory basis", decimal(memLimit / 1e9, 1) + " GB " + (present(object(sys.get("container")).get("memLimit")) ? "container limit" : "machine RAM") + " · RSS " + decimal(100 * number(ram.get("rssLast"), 0) / memLimit, 1) + "%");
-        if (present(heap.get("max"))) p.row("Heap utilization", percent(number(heap.get("peak"), 0), number(heap.get("max"), 0)) + " peak · -Xmx " + gib(number(heap.get("max"), 0)) + " GiB · post-GC floor ~" + gib(number(heap.get("floor"), 0)) + " GiB");
-        if (present(ram.get("rssPeak"))) p.row("Process RSS (peak)", decimal(number(ram.get("rssPeak"), 0) / 1e9, 1) + " GB");
+        if (memLimit > 0) p.row("Process memory basis", gib(memLimit) + " GiB " + (present(object(sys.get("container")).get("memLimit")) ? "container limit" : "machine RAM") + " · RSS " + decimal(100 * number(ram.get("rssLast"), 0) / memLimit, 1) + "%");
         if (present(ram.get("nmtOn")) && !ram.get("nmtOn").getAsBoolean()) p.row("Native memory (NMT)", "n/a, start with -XX:NativeMemoryTracking=summary");
-        if (present(gc.get("explicitDisabled"))) p.row("Explicit GC", gc.get("explicitDisabled").getAsBoolean() ? "disabled (-XX:+DisableExplicitGC)" : "true".equals(text(gc, "explicitConcurrent")) ? "concurrent (invokes concurrent)" : "stop-the-world");
+        if (present(gc.get("explicitDisabled"))) p.row("Explicit GC", gc.get("explicitDisabled").getAsBoolean() ? "disabled (-XX:+DisableExplicitGC)" : "true".equals(text(gc, "explicitConcurrent")) ? "runs alongside the server" : "stop-the-world");
         if (present(gc.get("explicitCalls"))) {
             double calls = array(gc.get("explicitCalls")).asList().stream().mapToDouble(e -> number(at(array(e), 1), 0)).sum();
             p.row("Explicit GC calls", calls == 0 ? "none in window" : count(calls) + " · " + readable(gc.get("explicitCalls")));
         }
-        p.row("Memory capture semantics", "Retained objects are approximate JFR old-object samples, not exact retained bytes. Heap histogram is a point-in-time heap walk: exact instances and shallow bytes. Slow file operations list individual reads/writes at or over the 20 ms JFR threshold.");
+        JsonArray collectors = array(p.use("gcByCollector"));
+        for (int i = 0; i < collectors.size(); i++) {
+            JsonArray a = array(collectors.get(i));
+            p.row(i == 0 ? "Collections since JVM start" : "", text(at(a, 0)) + " · " + count(number(at(a, 1), 0), "collection") + " · " + decimal(number(at(a, 2), 0), 2) + " ms");
+        }
+        JsonArray causes = array(p.use("gcCauses"));
+        for (int i = 0; i < causes.size(); i++) {
+            JsonArray a = array(causes.get(i)); String cause = text(at(a, 0));
+            p.row(i == 0 ? "GC causes" : "", cause + " · " + count(number(at(a, 1), 0), "collection") + " · " + decimal(number(at(a, 2), 0), 1) + " ms pause");
+        }
+        JsonArray pools = array(p.use("memPools"));
+        for (int i = 0; i < pools.size(); i++) {
+            JsonArray a = array(pools.get(i));
+            p.row(i == 0 ? "Memory pools" : "", text(at(a, 0)) + " · " + bytes(number(at(a, 1), -1)) + " used · " + bytes(number(at(a, 2), -1)) + " committed · max " + bytes(number(at(a, 3), -1)) + " · post-GC " + bytes(number(at(a, 4), -1)));
+        }
+        for (String key : List.of("byThread", "byClass")) {
+            for (JsonElement element : array(alloc.get(key))) {
+                JsonArray a = array(element); double amount = number(at(a, 1), 0);
+                p.share("Allocation " + label(key).toLowerCase(Locale.ROOT) + " · " + (key.equals("byThread") ? threadName(a) : text(at(a, 0))), bytes(amount) + " · " + percent(amount, total), amount / Math.max(1, total));
+            }
+        }
     }
 
     private static void config(Plan p) {
-        p.data("Config files", "configs"); p.data("Mixin bootstrapper, configs & conflicts", "mixins");
-        JsonObject mixins = p.model.object("mixins");
+        p.data("Config files", "configs");
+    }
+
+    private static void mixins(Plan p) {
+        JsonObject mixins = object(p.use("mixins"));
         if (mixins.isEmpty()) return;
+        JsonObject hyinit = object(mixins.get("hyinit"));
+        if (hyinit.isEmpty()) {
+            legacyMixins(p, mixins);
+            return;
+        }
+        JsonArray sources = array(mixins.get("sources")), configs = array(mixins.get("configs"));
+        JsonArray problems = array(mixins.get("problems")), overlaps = array(mixins.get("overlaps"));
+        Map<String, String> mods = new LinkedHashMap<>();
+        for (JsonElement element : sources) {
+            JsonArray s = array(element);
+            if (present(at(s, 1))) mods.put(text(at(s, 0)), text(at(s, 1)).substring(text(at(s, 1)).indexOf(':') + 1));
+        }
+        p.card("Problems since startup");
+        if (problems.isEmpty()) p.row("Mixin problems", "None. Every Mixin applied.");
+        for (JsonElement element : problems) {
+            JsonArray problem = array(element);
+            String source = opt(at(problem, 2));
+            p.table(("error".equals(text(at(problem, 0))) ? "ERROR" : "WARN") + (source.isEmpty() ? "" : " · " + source),
+                text(at(problem, 1)), "", opt(at(problem, 3)));
+        }
+        double omitted = number(hyinit.get("problemsOmitted"), 0);
+        if (omitted > 0) p.row("Problems not kept", count(omitted) + " more. The server log has them.");
+        if (!problems.isEmpty()) p.row("Stack traces", "The server log has the full stack traces.");
+        p.card("Versions");
+        p.known("Hyinit", hyinit.get("version"));
+        String mode = opt(hyinit.get("launchMode"));
+        if (!mode.isEmpty()) p.row("Started", mode.equals("earlyPlugin") ? "From the early plugins folder" : mode.equals("launcher") ? "With java -jar" : mode);
+        List<String> versions = new ArrayList<>();
+        if (present(hyinit.get("mixin"))) versions.add("Mixin " + text(hyinit, "mixin"));
+        if (present(hyinit.get("fabricMixin"))) versions.add("Fabric Mixin " + text(hyinit, "fabricMixin"));
+        if (present(hyinit.get("mixinExtras"))) versions.add("MixinExtras " + text(hyinit, "mixinExtras"));
+        if (!versions.isEmpty()) p.row("Mixin", String.join(" · ", versions));
+        if (present(hyinit.get("classesTransformed"))) p.row("Classes transformed", count(number(hyinit.get("classesTransformed"), 0))
+            + (present(hyinit.get("transformMs")) ? " in " + decimal(number(hyinit.get("transformMs"), 0), 1) + " ms" : ""));
+        if (present(hyinit.get("patchedClasses"))) p.row("Classes changed by Mixins", count(number(hyinit.get("patchedClasses"), 0)));
+        if (present(hyinit.get("bootstrapMs"))) p.row("Hyinit startup", count(number(hyinit.get("bootstrapMs"), 0)) + " ms before Hytale started");
+        if (present(mixins.get("note"))) p.row("Note", text(mixins, "note"));
+        p.row("Full list", "Every changed method is in extras/mixins.txt in the bundle.");
+        p.card("Early plugin JARs");
+        if (sources.isEmpty()) p.row("Early plugin JARs", "None");
+        for (JsonElement element : sources) {
+            JsonArray s = array(element);
+            String file = text(at(s, 0)), sha = opt(at(s, 3));
+            String name = mods.getOrDefault(file, file.replaceFirst("(?i)\\.jar$", ""));
+            List<String> facts = new ArrayList<>();
+            facts.add("Version " + (present(at(s, 2)) ? text(at(s, 2)) : "unknown"));
+            facts.add(file);
+            if (!sha.isEmpty()) facts.add("SHA-256 " + sha.substring(0, Math.min(8, sha.length())));
+            if ("true".equals(text(at(s, 6)))) facts.add("Mixins skipped");
+            p.table(name, String.join(" · ", facts), present(at(s, 8)) ? count(number(at(s, 8), 0)) + " methods" : "",
+                array(at(s, 4)).isEmpty() ? "" : "Configs: " + join(array(at(s, 4)), ", "));
+        }
+        p.card("Methods changed by more than one mod");
+        if (overlaps.isEmpty()) p.row("Shared methods", sources.size() >= 2 ? "None. No method is changed by more than one mod." : "None");
+        int shown = 0;
+        for (JsonElement element : overlaps) {
+            if (shown++ >= 30) { p.row("More shared methods", (overlaps.size() - 30) + " more are in extras/mixins.txt."); break; }
+            JsonArray o = array(element);
+            List<String> patches = new ArrayList<>();
+            for (JsonElement patch : array(at(o, 1))) {
+                JsonArray pair = array(patch); String mixin = opt(at(pair, 1));
+                patches.add(text(at(pair, 0)) + (mixin.isEmpty() ? "" : " (" + mixin.substring(mixin.lastIndexOf('.') + 1) + ")"));
+            }
+            p.table(text(at(o, 0)), String.join(", ", patches), "", "");
+        }
+        p.card("Mixin configs");
+        for (JsonElement element : configs) {
+            JsonArray c = array(element);
+            String source = opt(at(c, 2));
+            List<String> classes = new ArrayList<>();
+            for (JsonElement mixin : array(at(c, 1))) classes.add(text(mixin).substring(text(mixin).lastIndexOf('.') + 1));
+            p.table(text(at(c, 0)), "Mod " + mods.getOrDefault(source, source.isEmpty() ? "unknown" : source.replaceFirst("(?i)\\.jar$", ""))
+                + " · " + classes.size() + " Mixins" + (present(at(c, 4)) ? " · " + count(number(at(c, 4), 0)) + " target classes" : ""),
+                "", classes.isEmpty() ? "" : "Mixin classes: " + String.join(", ", classes));
+        }
+    }
+
+    private static void legacyMixins(Plan p, JsonObject mixins) {
+        p.card("Mixins");
+        if (present(mixins.get("bootstrapper"))) p.row("Bootstrapper", text(mixins, "bootstrapper"));
+        if (present(mixins.get("note"))) p.row("Details", text(mixins, "note"));
         JsonArray configs = array(mixins.get("configs"));
         int total = 0;
         for (JsonElement item : configs) {
             JsonArray a = array(item); int count = array(at(a, 1)).size(); total += count;
             p.row("Mixin config · " + text(at(a, 0)), count + " mixins · " + readable(at(a, 1)));
         }
-        p.row("Mixins applied", total + " mixins across " + configs.size() + " config(s)");
+        if (!configs.isEmpty() || !present(mixins.get("note"))) p.row("Mixins applied", total + " mixins across " + configs.size() + " config(s)");
         JsonArray conflicts = array(mixins.get("conflicts"));
-        if (!conflicts.isEmpty()) p.row("Mixin overlap", conflicts.size() + " classes patched by more than one config. Overlapping mixins can interact in load-order-dependent ways; flag these mods first when debugging odd behaviour.");
+        if (!conflicts.isEmpty()) p.row("Mixin overlap", conflicts.size() + " classes patched by more than one config. Two mods change the same code here. If the server misbehaves, test with one of them removed.");
         else if (present(mixins.get("conflicts")) && configs.size() >= 2) p.row("Mixin overlap", "No classes patched by more than one config.");
-        else if (!present(mixins.get("conflicts"))) p.row("Mixin overlap", "Conflict data was not captured.");
+        else if (!present(mixins.get("conflicts")) && !configs.isEmpty()) p.row("Mixin overlap", "Conflict data was not captured.");
+    }
+
+    private static String mixinProblemSuffix(IncidentModel model) {
+        JsonArray problems = array(model.object("mixins").get("problems"));
+        if (problems.isEmpty()) return "";
+        long errors = problems.asList().stream().filter(e -> "error".equals(text(at(array(e), 0)))).count();
+        return errors > 0 ? " · " + errors + (errors == 1 ? " error" : " errors") : " · " + problems.size() + (problems.size() == 1 ? " warning" : " warnings");
     }
 
     private static void plugins(Plan p, String key, String title, boolean showCore) {
@@ -623,15 +870,14 @@ final class HyboxIncidentRenderer {
             if ("true".equals(text(at(a, 3)))) core++;
             if ("INCOMPATIBLE".equals(text(at(a, 5)))) incompatible++;
         }
-        p.row(title + " loaded", plugins.size() + (key.equals("plugins") ? " · " + core + " Hytale core modules · " + (plugins.size() - core) + " community plugins" : " from mods") + " · " + incompatible + " incompatible server ranges");
+        p.row(title + " loaded", key.equals("plugins") ? plugins.size() + " loaded: " + core + " Hytale core, " + (plugins.size() - core) + " community." + (incompatible > 0 ? " " + incompatible + " built for another version." : "") : plugins.size() + " from mods" + (incompatible > 0 ? ". " + incompatible + " built for another version." : ""));
         if (key.equals("plugins") && core > 0) p.link((showCore ? "Hide " : "Show ") + core + " core modules", "", "toggle", "core");
         List<JsonArray> sorted = plugins.asList().stream().map(IncidentModel::array).sorted(java.util.Comparator.comparing(a -> "true".equals(text(at(a, 3))))).toList();
         for (JsonArray a : sorted) {
             boolean corePlugin = key.equals("plugins") && "true".equals(text(at(a, 3)));
             if (corePlugin && !showCore) continue;
             String range = text(at(a, 4)), compat = text(at(a, 5));
-            String details = (!range.equals("*") || !compat.equals("COMPATIBLE")) ? "Compiled for: " + range + " · " + compat : "";
-            if (!corePlugin) details += (details.isEmpty() ? "" : " · ") + "CurseForge search: " + text(at(a, 1));
+            String details = compat.equals("INCOMPATIBLE") ? "Built for another version: " + range : "";
             p.table(text(at(a, 1)), "Author: " + text(at(a, 0)) + " · Version: " + text(at(a, 2)), key.equals("plugins") ? corePlugin ? "CORE" : "COMMUNITY" : "Asset pack", details);
         }
     }
@@ -642,18 +888,18 @@ final class HyboxIncidentRenderer {
         p.known("Interface", net.get("iface"));
         for (JsonElement item : array(net.get("others"))) {
             JsonArray a = array(item);
-            p.row(text(at(a, 0)), "in " + text(at(a, 1)) + "/" + text(at(a, 2)) + " · out " + text(at(a, 3)) + "/" + text(at(a, 4)) + " Mb/s");
+            if (number(at(a, 1), 0) == 0 && number(at(a, 2), 0) == 0 && number(at(a, 3), 0) == 0 && number(at(a, 4), 0) == 0) continue;
+            p.row(text(at(a, 0)), "in " + text(at(a, 1)) + "/" + text(at(a, 2)) + " · out " + text(at(a, 3)) + "/" + text(at(a, 4)) + " Mbit/s");
         }
         if (net.isEmpty()) return;
         double window = number(p.model.object("incident").get("windowSec"), 0); p.use("incident");
-        p.row("Throughput source", "jdk.NetworkUtilization (per-interface, host-wide) · " + array(net.get("others")).size() + " other active interfaces");
         for (String direction : List.of("in", "out")) {
             String average = present(net.get(direction + "Avg")) ? decimal(number(net.get(direction + "Avg"), 0), 1) : "n/a";
             String peak = present(net.get(direction + "Peak")) ? decimal(number(net.get(direction + "Peak"), 0), 1) : "n/a";
-            p.row(direction.equals("in") ? "Inbound avg / peak" : "Outbound avg / peak", average + " / " + peak + " Mb/s");
+            p.row(direction.equals("in") ? "Inbound avg / peak" : "Outbound avg / peak", average + " / " + peak + " Mbit/s");
             if (window > 0 && present(net.get(direction + "Avg"))) {
                 double mb = number(net.get(direction + "Avg"), 0) * window / 8;
-                p.row("Transferred " + direction + " (window)", "≈ " + (mb >= 1000 ? decimal(mb / 1000, 1) + " GB" : count(mb) + " MB"));
+                p.row("Transferred " + direction + " (window)", "about " + bytes(mb * 1e6));
             }
         }
     }
@@ -661,23 +907,26 @@ final class HyboxIncidentRenderer {
     private static void cpuFacts(Plan p) {
         JsonObject cpu = p.model.object("cpu"), sys = object(p.use("sys"));
         double total = number(p.model.object("incident").get("samples"), 0);
-        if (!cpu.isEmpty()) p.row("Host CPU over capture window", "Machine average " + decimal(number(cpu.get("machAvg"), 0), 1) + "% · peak " + decimal(number(cpu.get("machMax"), 0), 1) + "% · process average " + decimal(number(cpu.get("jvmAvg"), 0), 1) + "% · peak " + decimal(number(cpu.get("jvmMax"), 0), 1) + "% · " + text(sys, "hwThreads") + " hardware threads.");
+        if (!cpu.isEmpty()) {
+            p.row("Machine CPU", decimal(number(cpu.get("machAvg"), 0), 1) + "% avg, " + decimal(number(cpu.get("machMax"), 0), 1) + "% peak, " + text(sys, "hwThreads") + " hardware threads");
+            p.row("Server CPU", decimal(number(cpu.get("jvmAvg"), 0), 1) + "% avg, " + decimal(number(cpu.get("jvmMax"), 0), 1) + "% peak");
+        }
         List<JsonObject> worlds = array(p.use("worlds")).asList().stream().map(IncidentModel::object).sorted((a, b) -> Double.compare(number(b.get("samples"), 0), number(a.get("samples"), 0))).toList();
         int rank = 0;
         for (JsonObject w : worlds) {
-            p.share("CPU samples by world thread · #" + ++rank + " " + text(w, "name"), text(w, "samples") + " samples · " + decimal(100 * number(w.get("samples"), 0) / Math.max(1, total), 1) + "%" + ("true".equals(text(w, "stalled")) ? " · stalled" : ""), number(w.get("samples"), 0) / Math.max(1, total));
+            p.share("CPU samples by world thread · #" + ++rank + " " + text(w, "name"), count(number(w.get("samples"), 0), "sample") + " · " + decimal(100 * number(w.get("samples"), 0) / Math.max(1, total), 1) + "%" + ("true".equals(text(w, "stalled")) ? " · stalled" : ""), number(w.get("samples"), 0) / Math.max(1, total));
         }
-        if (total > 0 && total < 300) p.row("Limited CPU sample count", "Only " + count(total) + " execution samples; too few to rank threads reliably.");
+        if (total > 0 && total < 300) p.row("Limited CPU sample count", "Only " + count(total) + " CPU samples. Too few to rank threads.");
     }
 
     private static void recordingFacts(Plan p) {
         JsonObject i = p.model.object("incident"), gc = p.model.object("gc"); p.use("incident"); p.use("sys");
         double window = number(i.get("windowSec"), 0);
-        p.row("Capture window", duration(window * 1000) + " · " + text(i, "samples") + " execution samples");
+        p.row("Capture window", duration(window * 1000));
         if (window > 0 && present(gc.get("totalPauseMs"))) p.row("GC overhead", decimal(100 * number(gc.get("totalPauseMs"), 0) / (window * 1000), 1) + "%");
-        for (JsonElement event : p.model.array("events")) {
+        for (JsonElement event : array(p.use("events"))) {
             JsonArray a = array(event);
-            p.row("Event time · " + clock(text(i, "recStart"), number(at(a, 0), 0) * window), text(at(a, 1)) + " · " + text(at(a, 2)));
+            p.row("Event time · " + clock(text(i, "recStart"), number(at(a, 0), 0) * window), eventType(text(at(a, 1))) + " · " + text(at(a, 2)));
         }
     }
 
@@ -690,7 +939,7 @@ final class HyboxIncidentRenderer {
         long available = java.util.Arrays.stream(keys).filter(key -> array(series.get(key)).size() >= 10).count();
         if (available < 3) return;
         double baselineEnd = Math.max(0.1, marker - 0.1), incidentStart = Math.max(0, marker - 0.02);
-        p.row("Baseline vs incident window", "Calm: first " + count(baselineEnd * 100) + "% of recording. Incident: from just before marker" + (present(incident.get("recoverySec")) ? " through recovery." : " to the end of capture.") + " Averages and delta; below ±5% is neutral.");
+        p.row("Baseline vs incident window", "Baseline is the first " + count(baselineEnd * 100) + "% of the recording. Incident is from just before the marker" + (present(incident.get("recoverySec")) ? " through recovery." : " to the end.") + " Changes under 5% are not marked.");
         for (String key : keys) {
             JsonArray values = array(series.get(key));
             if (values.size() < 10) continue;
@@ -730,20 +979,15 @@ final class HyboxIncidentRenderer {
 
     private static void overview(Plan p) {
         JsonObject i = object(p.use("incident"));
-        p.card("Incident details");
-        p.known("Severity", i.get("severity")); p.known("Trigger", i.get("trigger"));
-        p.known("World", i.get("world")); p.known("Created", i.get("created"));
-        if (present(i.get("stallMs"))) p.row("Stall", count(number(i.get("stallMs"), 0)) + " ms");
-        if (present(i.get("players"))) p.row("Players", playerCount(i.get("players")));
-        if (present(i.get("windowSec"))) p.row("Recording window", duration(number(i.get("windowSec"), 0) * 1000));
-        p.known("Starts at", i.get("recStart")); if (present(i.get("samples"))) p.row("Execution samples", count(number(i.get("samples"), 0)));
         if (present(i.get("recoverySec"))) p.row("Recovery captured", decimal(number(i.get("recoverySec"), 0), 1) + " s");
         p.use("diag");
+        String mixinProblems = mixinProblemSuffix(p.model);
+        if (!mixinProblems.isEmpty()) p.row("Mixin problems", mixinProblems.substring(3) + " since startup. See Mixins.");
         if (present(i.get("note"))) p.row("Capture note", text(i, "note"));
         JsonElement unavailable = p.use("jfrUnavailableReason");
         if (present(unavailable)) p.row("Recording unavailable", text(unavailable));
         JsonElement version = p.use("hyboxVersion");
-        if (present(version)) p.row("Generated by", "Hybox " + text(version));
+        p.row("Bundle", p.model.id() + (present(version) ? " · Hybox " + text(version) : ""));
     }
 
     private static String playerCount(JsonElement value) {
@@ -755,7 +999,9 @@ final class HyboxIncidentRenderer {
     static List<String> consoleSummary(IncidentModel model) {
         JsonObject i = model.object("incident");
         List<String> first = new ArrayList<>();
-        for (String key : List.of("severity", "trigger", "world")) if (present(i.get(key))) first.add(text(i, key));
+        if (present(i.get("severity"))) first.add(DashboardModel.severityLabel(text(i, "severity")));
+        if (present(i.get("trigger"))) first.add(trigger(i));
+        if (present(i.get("world"))) first.add(text(i, "world"));
         List<String> second = new ArrayList<>();
         if (present(i.get("created"))) second.add(text(i, "created"));
         if (present(i.get("stallMs"))) second.add("stall " + count(number(i.get("stallMs"), 0)) + " ms");
@@ -783,43 +1029,43 @@ final class HyboxIncidentRenderer {
         p.known("CPU affinity (cpuset)", s.get("cpuset"));
         List<String> pressure = new ArrayList<>();
         for (String kind : List.of("Cpu", "Io", "Mem")) if (number(s.get("psi" + kind), -1) >= 0) pressure.add(kind.toLowerCase(Locale.ROOT) + " " + decimal(number(s.get("psi" + kind), 0), 1) + "%");
-        if (!pressure.isEmpty()) p.row("Pressure (PSI some avg10)", String.join(" · ", pressure));
+        if (!pressure.isEmpty()) p.row("Stalled on CPU, memory or disk, last 10 s", String.join(" · ", pressure));
         double ramTotal = number(s.get("ramTotal"), 0), hostUsed = number(s.get("hostMemUsed"), -1);
-        if (ramTotal > 0) p.row("Machine RAM (host)", decimal(ramTotal / 1e9, 1) + " GB");
-        if (number(s.get("loadAvg"), -1) >= 0) p.row("Load average (1m, host)", decimal(number(s.get("loadAvg"), 0), 2));
+        if (ramTotal > 0) p.row("Machine RAM", gib(ramTotal) + " GiB");
         double throttled = number(s.get("throttledPeriods"), 0);
         if (throttled > 0) p.row("CPU throttling", count(throttled) + " periods" + (number(s.get("throttledMs"), 0) > 0 ? " · " + duration(number(s.get("throttledMs"), 0)) : "") + " in window");
-        for (String key : List.of("cpuStealPct", "cpuIowaitPct")) if (number(s.get(key), -1) >= 0) p.row(key.equals("cpuStealPct") ? "CPU steal (host)" : "CPU iowait (host)", decimal(number(s.get(key), 0), 1) + "% of window");
-        if (number(s.get("safepointCount"), 0) > 0) p.row("Safepoints", count(number(s.get("safepointCount"), 0)) + (number(s.get("safepointMs"), 0) > 0 ? " · " + decimal(number(s.get("safepointMs"), 0), 0) + " ms to-safepoint" : "") + " in window");
+        for (String key : List.of("cpuStealPct", "cpuIowaitPct")) if (number(s.get(key), -1) >= 0) p.row(key.equals("cpuStealPct") ? "CPU steal (machine)" : "CPU iowait (machine)", decimal(number(s.get(key), 0), 1) + "% of window");
         p.card("Operating system");
-        p.known("OS", s.get("os")); p.known("Architecture", s.get("arch")); p.known("Host", s.get("server"));
+        p.known("OS", s.get("os")); p.known("Architecture", s.get("arch")); p.known("Server name", s.get("server"));
         if (present(s.get("hytale"))) p.row("Server software", "Hytale Dedicated " + text(s, "hytale"));
         if (number(s.get("uptimeMs"), 0) > 0) p.row("Uptime", duration(number(s.get("uptimeMs"), 0)));
-        if (number(disk.get("total"), 0) > 0) p.row("Disk", decimal(number(disk.get("free"), 0) / 1e9, 1) + " GB free of " + decimal(number(disk.get("total"), 0) / 1e9, 1) + " GB");
+        if (number(disk.get("total"), 0) > 0) p.row("Disk", gib(number(disk.get("free"), 0)) + " GiB free of " + gib(number(disk.get("total"), 0)) + " GiB");
         List<String> io = new ArrayList<>();
         for (String direction : List.of("Read", "Write")) if (number(s.get("io" + direction + "Limit"), -1) >= 0) io.add(direction.toLowerCase(Locale.ROOT) + " " + bytes(number(s.get("io" + direction + "Limit"), 0)) + "/s");
         if (!io.isEmpty()) p.row("Block I/O limit", String.join(" · ", io));
-        if (hostUsed >= 0) p.row("Host memory", decimal(hostUsed / 1e9, 1) + " GB" + (ramTotal > 0 ? " of " + decimal(ramTotal / 1e9, 1) + " GB used" : " used"));
-        if (number(swap.get("total"), 0) > 0) p.row("Swap (host)", bytes(Math.max(0, number(swap.get("total"), 0) - number(swap.get("free"), 0))) + " used of " + bytes(number(swap.get("total"), 0)));
+        if (hostUsed >= 0) p.row("Machine memory", gib(hostUsed) + " GiB" + (ramTotal > 0 ? " of " + gib(ramTotal) + " GiB used" : " used"));
+        if (number(swap.get("total"), 0) > 0) p.row("Swap (machine)", bytes(Math.max(0, number(swap.get("total"), 0) - number(swap.get("free"), 0))) + " used of " + bytes(number(swap.get("total"), 0)));
         p.known("Runtime", container.get("runtime")); p.known("Container", container.get("type"));
         if (cpuLimit > 0) p.row("CPU limit", cores > 0 && cpuLimit >= cores ? "unlimited (quota " + count(cpuLimit) + ")" : decimal(cpuLimit, 1) + " cores");
         if (limit > 0) p.row("Memory limit", bytes(limit));
-        if (number(s.get("openFds"), -1) >= 0) p.row("Open files", count(number(s.get("openFds"), 0)) + (number(s.get("maxFds"), 0) > 0 ? " of " + count(number(s.get("maxFds"), 0)) : ""));
+        double openFds = number(s.get("openFds"), -1), maxFds = number(s.get("maxFds"), 0);
+        if (openFds >= 0 && maxFds > 0 && openFds >= maxFds * 0.8) p.row("Open files", count(openFds) + " of " + count(maxFds));
         if (number(s.get("containerMemUsed"), -1) >= 0) p.row("Container memory", bytes(number(s.get("containerMemUsed"), 0)) + (limit > 0 ? " of " + bytes(limit) + " (" + decimal(100 * number(s.get("containerMemUsed"), 0) / limit, 0) + "%)" : ""));
         if (number(s.get("containerSwapUsed"), -1) >= 0) p.row("Container swap", number(s.get("containerSwapMax"), -1) == 0 ? "disabled" : bytes(number(s.get("containerSwapUsed"), 0)) + (number(s.get("containerSwapMax"), -1) > 0 ? " of " + bytes(number(s.get("containerSwapMax"), 0)) : " used"));
         if (number(s.get("oomKills"), 0) > 0) p.row("OOM kills", count(number(s.get("oomKills"), 0)) + " (cumulative)");
         p.card("Java / JVM");
         p.known("Runtime", s.get("jvm")); p.known("Vendor", s.get("javaVendor")); p.known("Version", s.get("javaVersion")); p.known("java.home", s.get("javaHome"));
         for (JsonElement loader : array(s.get("loaders"))) { JsonArray a = array(loader); p.row(text(at(a, 0)) + " loader", text(at(a, 1))); }
-        if (xmx > 0) p.row("Max heap", gib(xmx) + " GiB (-Xmx)");
-        p.card("Garbage collector");
-        p.known("Young", s.get("gcYoung")); p.known("Old", s.get("gcOld")); p.known("Parallel GC threads", s.get("gcParallel")); p.known("Concurrent GC threads", s.get("gcConc")); p.known("GC time ratio", s.get("gcTimeRatio"));
-        JsonObject gc = object(p.use("gc"));
-        if (present(gc.get("explicitDisabled"))) p.row("Explicit GC", gc.get("explicitDisabled").getAsBoolean() ? "disabled" : "true".equals(text(gc, "explicitConcurrent")) ? "concurrent" : "stop-the-world");
         if (limit > 0 && xmx >= limit * 0.9) { p.card("Container memory risk"); p.row("Heap and container limit", "-Xmx " + gib(xmx) + " GiB is at or above " + gib(limit) + " GiB: the JVM can be OOM-killed before GC reacts."); }
         double free = number(disk.get("free"), -1), total = number(disk.get("total"), 0);
-        if (free >= 0 && total > 0 && (free < total * 0.05 || free < 2 * 1073741824.0)) { p.card("Low disk space"); p.row("Free space", decimal(free / 1e9, 1) + " GB free of " + decimal(total / 1e9, 1) + " GB: the JFR recording and incident bundles can fail to write."); }
+        if (free >= 0 && total > 0 && (free < total * 0.05 || free < 2 * 1073741824.0)) { p.card("Low disk space"); p.row("Free space", gib(free) + " GiB free of " + gib(total) + " GiB: the JFR recording and incident bundles can fail to write."); }
         if (present(s.get("startCommand"))) { p.card("Start command"); p.row("Command", text(s, "startCommand")); }
+        p.card("Advanced");
+        if (number(s.get("loadAvg"), -1) >= 0) p.row("Load average (1m, host)", decimal(number(s.get("loadAvg"), 0), 2));
+        if (number(s.get("safepointCount"), 0) > 0) p.row("Safepoints", count(number(s.get("safepointCount"), 0)) + (number(s.get("safepointMs"), 0) > 0 ? " · " + decimal(number(s.get("safepointMs"), 0), 0) + " ms to-safepoint" : "") + " in window");
+        p.known("Young GC", s.get("gcYoung")); p.known("Old GC", s.get("gcOld")); p.known("Parallel GC threads", s.get("gcParallel")); p.known("Concurrent GC threads", s.get("gcConc")); p.known("GC time ratio", s.get("gcTimeRatio"));
+        JsonObject gc = object(p.use("gc"));
+        if (present(gc.get("explicitDisabled"))) p.row("Explicit GC", gc.get("explicitDisabled").getAsBoolean() ? "disabled" : "true".equals(text(gc, "explicitConcurrent")) ? "concurrent" : "stop-the-world");
     }
 
     private enum Kind { CARD, TEXT, PARAGRAPH, LEGEND, SHARE, EVIDENCE, TABLE, THREAD, THREAD_AXIS, CHART, TIMELINE, LINK, FLAME }
@@ -886,9 +1132,8 @@ final class HyboxIncidentRenderer {
                     if (present(cell) && cell.isJsonPrimitive() && cell.getAsJsonPrimitive().isNumber()) {
                         String lower = column.toLowerCase(Locale.ROOT);
                         double n = number(cell, 0);
-                        if (lower.contains("bytes")) valueText = n < 0 ? "Not reported" : bytes(n) + " · " + count(n) + " B";
-                        else if (lower.contains("(ms)") || lower.contains("pause") || lower.contains("time")) valueText = decimal(n, key.equals("slowIo") ? 0 : key.equals("gcCauses") ? 1 : 2) + " ms";
-                        else if (lower.equals("recording position")) valueText = decimal(n * 100, 2) + "% · " + clock(text(model.object("incident"), "recStart"), n * number(model.object("incident").get("windowSec"), 0));
+                        if (lower.contains("bytes")) valueText = n < 0 ? "Not reported" : bytes(n);
+                        else if (lower.contains("(ms)") || lower.contains("duration") || lower.contains("pause") || lower.contains("time")) valueText = decimal(n, key.equals("slowIo") ? 0 : 2) + " ms";
                         else valueText = count(n);
                     }
                     line.append(column).append(": ").append(valueText);
@@ -902,14 +1147,31 @@ final class HyboxIncidentRenderer {
             if (a.isEmpty()) { row(title, "Not captured"); return; }
             for (JsonElement element : a) {
                 JsonArray row = array(element); double amount = number(at(row, 1), 0);
-                share(text(at(row, 0)), (unit.equals("bytes") ? bytes(amount) : count(amount) + " " + unit) + " · " + percent(amount, total), amount / Math.max(1, total));
+                share(text(at(row, 0)), (unit.equals("bytes") ? bytes(amount) : count(amount, unit)) + " · " + percent(amount, total), amount / Math.max(1, total));
+            }
+        }
+        void modShares(String title, JsonElement values, double total, String unit, String note) {
+            JsonArray a = array(values);
+            if (!split(a, 2)) {
+                shares(title, values, total, unit);
+                if (!note.isEmpty() && !a.isEmpty()) row("Older bundle", MOD_OLDER);
+                return;
+            }
+            card(title);
+            if (!note.isEmpty()) paragraph(note);
+            List<JsonArray> rows = modRows(a, 2);
+            if (rows.isEmpty()) row(title, "None");
+            for (JsonArray row : rows) {
+                double self = number(at(row, 2), 0), all = number(at(row, 3), 0);
+                share(text(at(row, 0)), "Self " + amount(self, unit) + " · " + percent(self, total) + ", total " + amount(all, unit) + " · " + percent(all, total), self / Math.max(1, total));
             }
         }
         void share(String title, String value, double ratio) { blocks.add(new Block(Kind.SHARE, title, value, JsonNull.INSTANCE, ratio, "", "")); }
-        void table(String title, String facts, String amount, String details) {
+        void table(String title, String facts, String amount, String details) { table(title, facts, amount, details, -1); }
+        void table(String title, String facts, String amount, String details, double share) {
             JsonObject cells = new JsonObject(); cells.addProperty("amount", amount); cells.addProperty("details", details);
             if (details.length() > 1800) { row(title, facts + " · " + amount + "\n" + details); return; }
-            blocks.add(new Block(Kind.TABLE, title, facts, cells, 0, "", ""));
+            blocks.add(new Block(Kind.TABLE, title, facts, cells, share, "", ""));
         }
         void link(String title, String value, String action, String arg) { blocks.add(new Block(Kind.LINK, title, value, JsonNull.INSTANCE, 0, action, arg)); }
         void chart(String title, JsonElement data, String unit, String key) {
@@ -955,7 +1217,7 @@ final class HyboxIncidentRenderer {
         if (!tableSection) {
             List<Block> page = new ArrayList<>(); int nonCharts = 80;
             for (Block block : blocks) {
-                int cost = switch (block.kind) { case TABLE -> 6; case TEXT, SHARE -> 5; case CARD -> 3; case EVIDENCE -> 3; case CHART -> 45; default -> 0; };
+                int cost = switch (block.kind) { case TABLE -> 7; case TEXT, SHARE -> 5; case CARD -> 3; case EVIDENCE -> 3; case CHART -> 45; default -> 0; };
                 if (nonCharts + cost > 1320 && !page.isEmpty()) { result.add(page); page = new ArrayList<>(); nonCharts = 80; }
                 page.add(block); nonCharts += cost;
             }
@@ -979,7 +1241,7 @@ final class HyboxIncidentRenderer {
             else if (b.kind == Kind.THREAD) {
                 base += 17;
                 if (b.timeline != null && !b.timeline.isEmpty()) threadStrips++;
-            } else base += switch (b.kind) { case TABLE -> 6; case CARD, EVIDENCE -> 3; case TEXT, SHARE -> 5; case PARAGRAPH -> 2; case LEGEND -> 21; case THREAD_AXIS -> 6; case FLAME -> 1353; default -> 1; };
+            } else base += switch (b.kind) { case TABLE -> 7; case CARD, EVIDENCE -> 3; case TEXT, SHARE -> 5; case PARAGRAPH -> 2; case LEGEND -> 21; case THREAD_AXIS -> 6; case FLAME -> 1353; default -> 1; };
         }
         int elementTarget = timelines + threadStrips > 0 ? 1100 : 1400;
         int free = elementTarget - base - charts * 25 - timelines * 23, users = charts + timelines + threadStrips;
@@ -996,7 +1258,7 @@ final class HyboxIncidentRenderer {
             case THREAD -> 17 + (b.timeline == null ? 0 : Math.min(cells, b.timeline.size()) + Math.min(columns, b.timeline.size()));
             case THREAD_AXIS -> 6;
             case FLAME -> 3 + flameSegments(model, state).size() * 3;
-            case LINK -> 1; case TABLE -> 6; case CARD, EVIDENCE -> 3; case TEXT, SHARE -> 5; case PARAGRAPH -> 2; case LEGEND -> 21;
+            case LINK -> 1; case TABLE -> 7; case CARD, EVIDENCE -> 3; case TEXT, SHARE -> 5; case PARAGRAPH -> 2; case LEGEND -> 21;
         };
     }
 
@@ -1059,6 +1321,8 @@ final class HyboxIncidentRenderer {
         String stats = rate
             ? "avg " + chartValue(average, block.value, precision) + " · max " + chartValue(max, block.value, precision) + extra
             : "min " + chartValue(min, block.value, precision) + " · avg " + chartValue(average, block.value, precision) + " · max " + chartValue(max, block.value, precision) + " · now " + chartValue(now, block.value, precision) + extra;
+        String churn = switch (block.arg) { case "connects" -> "connect"; case "joins" -> "join"; case "leaves" -> "leave"; default -> ""; };
+        if (!churn.isEmpty() && sum < 10) stats = count(sum, churn);
         cmd.set(selector + " #ChartStats.Text", stats);
         axes(model, selector, range, series.size(), cmd);
         int count = range[1] - range[0];
@@ -1110,9 +1374,11 @@ final class HyboxIncidentRenderer {
             for (int sample = from; sample < to; sample++) counts[Math.max(0, Math.min(4, (int) number(series.get(sample), 0)))]++;
             int value = 0; for (int candidate = 1; candidate < counts.length; candidate++) if (counts[candidate] > counts[value]) value = candidate;
             int left = column * CHART_WIDTH / Math.max(1, columns), width = Math.max(1, (column + 1) * CHART_WIDTH / Math.max(1, columns) - left);
-            String color = switch (value) { case 1 -> COLORS[1]; case 2 -> COLORS[0]; case 3 -> COLORS[2]; case 4 -> COLORS[3]; default -> COLORS[5]; };
-            cmd.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Top: 0, Width: " + width + ", Height: 18); Background: " + color + "(0.8); }");
+            if (value > 0) cmd.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Top: 0, Width: " + width + ", Height: 18); Background: " + stateColor(value) + "; }");
         }
+    }
+    static String stateColor(int code) {
+        return HyboxChartImage.hex(HyboxChartImage.STATES[Math.max(1, Math.min(HyboxChartImage.STATES.length - 1, code))]);
     }
     private static int[] stateCodes(JsonArray series, int[] range) {
         int[] codes = new int[Math.max(0, range[1] - range[0])];
@@ -1130,7 +1396,7 @@ final class HyboxIncidentRenderer {
             int value = 0;
             for (int candidate = 1; candidate < counts.length; candidate++) if (counts[candidate] > counts[value]) value = candidate;
             String name = switch (value) { case 1 -> "RUNNABLE"; case 2 -> "WAITING"; case 3 -> "TIMED_WAITING"; case 4 -> "BLOCKED"; default -> "no samples"; };
-            tips.add(timeAt(model, from, series.size()) + "–" + timeAt(model, to - 1, series.size()) + " · " + name);
+            tips.add(timeAt(model, from, series.size()) + " to " + timeAt(model, to - 1, series.size()) + " · " + name);
         }
         return tips;
     }
@@ -1174,7 +1440,7 @@ final class HyboxIncidentRenderer {
             String s = "#FlameFrames[" + i++ + "] #Frame";
             cmd.setObject(s + ".Anchor", anchor(segment.left, segment.depth * 25, Math.max(1, segment.width - 1), 23));
             cmd.set(s + " #FrameLabel.Text", segment.width >= 60 ? text(at(segment.node, 0)) : "");
-            cmd.set(s + ".TooltipText", text(at(segment.node, 0)) + " · " + count(number(at(segment.node, 1), 0)) + " samples · self " + flameSelf(segment.node) + ownerSuffix(segment.node));
+            cmd.set(s + ".TooltipText", text(at(segment.node, 0)) + " · " + count(number(at(segment.node, 1), 0), "sample") + " · self " + flameSelf(segment.node) + ownerSuffix(segment.node) + flameLabel(segment.node));
             String style = switch (kind) { case 1 -> "EngineStyle"; case 2 -> "ModStyle"; case 3 -> "JdkStyle"; default -> "DefaultStyle"; };
             cmd.set(s + ".Style", com.hypixel.hytale.server.core.ui.Value.ref("Pages/HyboxIncidentFlame.ui", style));
             bind(ev, s, "zoom", segment.path);
@@ -1194,6 +1460,11 @@ final class HyboxIncidentRenderer {
         anchor.setWidth(com.hypixel.hytale.server.core.ui.Value.of(width));
         anchor.setHeight(com.hypixel.hytale.server.core.ui.Value.of(height));
         return anchor;
+    }
+
+    private static String flameLabel(JsonArray node) {
+        String label = opt(at(node, 4));
+        return label.isEmpty() ? "" : " · " + label;
     }
 
     private static String ownerSuffix(JsonArray node) {
@@ -1241,6 +1512,12 @@ final class HyboxIncidentRenderer {
         return presets;
     }
 
+    private static String rangeScope(String rangeId) {
+        if (rangeId.equals("incident")) return "From 1 min before the incident";
+        int seconds = rangeId.startsWith("d") ? Integer.parseInt(rangeId.substring(1)) : rangeId.equals("5m") ? 300 : 60;
+        return "Last " + (seconds >= 86400 ? seconds / 86400 + " d" : seconds >= 3600 ? seconds / 3600 + " h" : seconds / 60 + " min");
+    }
+
     private static int[] range(IncidentModel model, ViewState state, int size) {
         if (size == 0) return new int[]{0, 0};
         double window = number(model.object("incident").get("windowSec"), 0);
@@ -1267,6 +1544,39 @@ final class HyboxIncidentRenderer {
         catch (java.time.DateTimeException ignored) { return "+" + decimal(offset, 0) + "s"; }
     }
     private static boolean present(JsonElement value) { return value != null && !value.isJsonNull(); }
+    private static String opt(JsonElement value) { return present(value) ? text(value) : ""; }
+    private static boolean split(JsonArray rows, int self) {
+        for (JsonElement row : rows) if (array(row).size() > self) return true;
+        return false;
+    }
+    private static List<JsonArray> modRows(JsonArray rows, int self) {
+        List<JsonArray> result = new ArrayList<>();
+        for (JsonElement row : rows) {
+            JsonArray a = array(row);
+            if (a.size() > self && (number(at(a, self), 0) > 0 || number(at(a, self + 1), 0) > 0)) result.add(a);
+        }
+        result.sort((a, b) -> number(at(a, self), 0) != number(at(b, self), 0) ? Double.compare(number(at(b, self), 0), number(at(a, self), 0))
+            : Double.compare(number(at(b, self + 1), 0), number(at(a, self + 1), 0)));
+        return result;
+    }
+    private static String shortMethod(String method) {
+        int dot = method.lastIndexOf('.');
+        if (dot <= 0) return method;
+        String name = method.substring(dot + 1);
+        Matcher handler = MIXIN_HANDLER.matcher(name);
+        return method.substring(method.lastIndexOf('.', dot - 1) + 1, dot + 1) + (handler.matches() ? handler.group(1) + "..." + handler.group(2) : name);
+    }
+    private static String threadMods(JsonElement mods, double samples) {
+        List<String> shown = new ArrayList<>();
+        for (JsonElement element : array(mods)) {
+            JsonArray m = array(element); double self = 100 * number(at(m, 1), 0) / Math.max(1, samples), all = 100 * number(at(m, 2), 0) / Math.max(1, samples);
+            if ((self >= 0.5 || all >= 0.5) && shown.size() < 3) shown.add(text(at(m, 0)) + " (self " + decimal(self, 1) + "%, total " + decimal(all, 1) + "%)");
+        }
+        return shown.isEmpty() ? "" : "Mods on this thread: " + String.join(", ", shown);
+    }
+    private static String amount(double n, String unit) { return unit.equals("bytes") ? bytes(n) : count(n, unit); }
+    private static String threadName(JsonArray share) { JsonElement size = at(share, 2); return text(at(share, 0)) + (present(size) ? " (" + count(number(size, 0), "thread") + ")" : ""); }
+    private static String eventType(String type) { return type.startsWith(MOD_EVENT) ? type.substring(MOD_EVENT.length()) : type; }
     private static boolean dataIsSeries(JsonElement value) { return value != null && value.isJsonArray() && !value.getAsJsonArray().isEmpty(); }
     private static String join(JsonArray a, String separator) { return String.join(separator, a.asList().stream().map(IncidentModel::text).toList()); }
     private static String readable(JsonElement value) {
@@ -1281,7 +1591,7 @@ final class HyboxIncidentRenderer {
         double n = number(value, 0);
         int separator = key.lastIndexOf(" · ");
         String lower = key.substring(separator < 0 ? 0 : separator + 3).toLowerCase(Locale.ROOT).replace(" ", "");
-        boolean memory = key.startsWith("Heap") || key.startsWith("Process RSS") || key.contains("Non-heap") || Set.of("bytes", "rsslast", "rsspeak", "ramtotal", "machineram(host)", "hostmemused", "hostmemory", "free", "total", "memlimit", "xmxbytes", "maxheap(-xmx)", "used", "committed").contains(lower) || lower.endsWith("bytes");
+        boolean memory = key.startsWith("Heap") || key.startsWith("Process RSS") || key.contains("Non-heap") || Set.of("bytes", "rsslast", "rsspeak", "ramtotal", "machineram", "machinememoryused", "machinememory", "free", "total", "memlimit", "xmxbytes", "maxheap(-xmx)", "used", "committed").contains(lower) || lower.endsWith("bytes");
         if (memory && !lower.equals("nmton")) return bytes(n);
         if (lower.endsWith("ms") || lower.endsWith("(ms)")) return (n == Math.rint(n) ? count(n) : decimal(n, 2)) + " ms";
         if (lower.equals("windowsec") || lower.equals("recoverysec")) return decimal(n, 1) + " s";
@@ -1296,27 +1606,24 @@ final class HyboxIncidentRenderer {
         return switch (key) {
             case "cpu", "cpuJvm" -> "%";
             case "heap", "heapCommitted" -> "GiB";
-            case "rss", "hostMem", "disk" -> "GB";
+            case "rss", "hostMem", "disk" -> "GiB";
             case "diskRead", "diskWrite" -> "MB/s";
             case "mspt", "gcPause", "ping" -> "ms";
-            case "netIn", "netOut" -> "Mb/s";
-            case "tps" -> "tps";
+            case "netIn", "netOut" -> "Mbit/s";
+            case "tps" -> "TPS";
             default -> "count";
         };
     }
-    private static String bytes(double n) {
-        if (n < 0) return "n/a";
-        if (n < 1024) return count(n) + " B";
-        String[] units = {"KiB", "MiB", "GiB", "TiB"}; int i = -1;
-        do { n /= 1024; i++; } while (n >= 1024 && i < 3);
-        return decimal(n, 1) + " " + units[i];
-    }
+    private static String bytes(double n) { return Units.bytes(Math.round(n)); }
     private static String gib(double n) { return decimal(n / 1073741824.0, 1); }
     private static String duration(double ms) { long seconds = Math.max(0, (long) ms / 1000); return seconds >= 3600 ? seconds / 3600 + "h " + seconds % 3600 / 60 + "m" : seconds >= 60 ? seconds / 60 + "m " + seconds % 60 + "s" : seconds + "s"; }
     private static String percent(double amount, double total) { return total > 0 ? decimal(100 * amount / total, 2) + "%" : "n/a"; }
-    private static String count(double n) { return String.format(Locale.US, "%,.0f", n); }
+    private static String count(double n) { return Units.number(Math.round(n)); }
+    private static String count(double n, String unit) { return Units.count(Math.round(n), unit); }
     private static String decimal(double n, int places) { return String.format(Locale.US, "%1$." + places + "f", n); }
     private static String threadGroup(String name) {
+        Matcher id = THREAD_ID.matcher(name);
+        if (id.matches()) return id.group(1) + "*";
         int i = name.length() - 1;
         while (i >= 0 && Character.isDigit(name.charAt(i))) i--;
         return i >= 0 && i < name.length() - 1 && (name.charAt(i) == '-' || name.charAt(i) == '#') ? name.substring(0, i) : name;
@@ -1324,18 +1631,19 @@ final class HyboxIncidentRenderer {
     private static String label(String key) { return LABELS.getOrDefault(key, key.replaceAll("([a-z])([A-Z])", "$1 $2").replace('_', ' ')); }
     private static Map<String, String> labels() {
         Map<String, String> labels = new LinkedHashMap<>();
-        String[][] pairs = {{"jvmAvg","JVM CPU average (%)"},{"jvmMax","JVM CPU peak (%)"},{"machAvg","Machine CPU average (%)"},{"machMax","Machine CPU peak (%)"},{"cpu","Machine CPU"},{"cpuJvm","JVM CPU"},{"heap","Heap used"},{"heapCommitted","Heap committed"},{"rss","Process RSS"},{"hostMem","Host memory used"},{"mspt","Tick interval"},{"tps","Tick rate"},{"gcPause","GC pause per bucket"},{"netIn","Network inbound"},{"netOut","Network outbound"},{"players","Players online"},{"exceptions","Exceptions"},{"ping","Player ping"},{"disk","Disk free"},{"diskRead","Disk read"},{"diskWrite","Disk write"},{"chunksGenerated","Chunks generated"},{"chunksLoaded","Chunks loaded"},{"bySubsystem","By subsystem"},{"byThread","By thread"},{"byClass","By class"},{"byMod","By mod"},{"cpuBrand","Brand"},{"cpuCores","Cores"},{"hwThreads","Hardware threads"},{"sockets","Sockets"},{"os","OS"},{"arch","Architecture"},{"loadAvg","Load average (1m, host)"},{"openFds","Open files"},{"maxFds","Open files limit"},{"cpuset","CPU affinity (cpuset)"},{"ramTotal","Machine RAM (host)"},{"hostMemUsed","Host memory"},{"safepointCount","Safepoints"},{"safepointMs","Time to safepoint (ms)"},{"gcYoung","Young collector"},{"gcOld","Old collector"},{"gcParallel","Parallel GC threads"},{"gcConc","Concurrent GC threads"},{"gcTimeRatio","GC time ratio"},{"jvm","Runtime"},{"javaVendor","Vendor"},{"javaVersion","Version"},{"javaHome","java.home"},{"hytale","Server software"},{"server","Host"},{"xmxBytes","Max heap (-Xmx)"},{"msptP50","Tick interval p50 (ms)"},{"msptP95","Tick interval p95 (ms)"},{"msptMax","Worst single tick (ms)"}};
+        String[][] pairs = {{"jvmAvg","Server CPU average (%)"},{"jvmMax","Server CPU peak (%)"},{"machAvg","Machine CPU average (%)"},{"machMax","Machine CPU peak (%)"},{"cpu","Machine CPU"},{"cpuJvm","Server CPU"},{"heap","Heap used"},{"heapCommitted","Heap committed"},{"rss","Process RSS"},{"hostMem","Machine memory used"},{"mspt","Tick time"},{"tps","TPS"},{"gcPause","GC pause per bucket"},{"netIn","Network inbound"},{"netOut","Network outbound"},{"players","Players online"},{"exceptions","Exceptions"},{"ping","Player ping"},{"disk","Disk free"},{"diskRead","Disk read"},{"diskWrite","Disk write"},{"chunksGenerated","Chunks generated"},{"chunksLoaded","Chunks loaded"},{"bySubsystem","By subsystem"},{"byThread","By thread"},{"byClass","By class"},{"byMod","By mod"},{"cpuBrand","Brand"},{"cpuCores","Cores"},{"hwThreads","Hardware threads"},{"sockets","Sockets"},{"os","OS"},{"arch","Architecture"},{"loadAvg","Load average (1m, machine)"},{"openFds","Open files"},{"maxFds","Open files limit"},{"cpuset","CPU affinity (cpuset)"},{"ramTotal","Machine RAM"},{"hostMemUsed","Machine memory"},{"safepointCount","Safepoints"},{"safepointMs","Time to safepoint (ms)"},{"gcYoung","Young collector"},{"gcOld","Old collector"},{"gcParallel","Parallel GC threads"},{"gcConc","Concurrent GC threads"},{"gcTimeRatio","GC time ratio"},{"jvm","Runtime"},{"javaVendor","Vendor"},{"javaVersion","Version"},{"javaHome","java.home"},{"hytale","Server software"},{"server","Server name"},{"xmxBytes","Max heap (-Xmx)"},{"msptP50","Tick time p50 (ms)"},{"msptP95","Tick time p95 (ms)"},{"msptMax","Worst single tick (ms)"}};
         for (String[] pair : pairs) labels.put(pair[0], pair[1]);
         labels.putAll(Map.ofEntries(
             Map.entry("peak", "Peak used"), Map.entry("floor", "Post-GC floor"), Map.entry("max", "Maximum"),
+            Map.entry("connects", "Connects"), Map.entry("joins", "Joins"), Map.entry("leaves", "Leaves"),
             Map.entry("committed", "Committed"), Map.entry("rssLast", "Process RSS at capture"), Map.entry("rssPeak", "Peak process RSS"),
             Map.entry("nmtOn", "Native memory tracking"), Map.entry("nativeCommitted", "Native memory committed"),
             Map.entry("collections", "Collections"), Map.entry("maxPauseMs", "Longest pause"), Map.entry("totalPauseMs", "Total pause time"),
             Map.entry("explicitDisabled", "Explicit GC disabled"), Map.entry("explicitConcurrent", "Explicit GC concurrent"), Map.entry("explicitCalls", "Explicit GC calls"),
-            Map.entry("world", "World"), Map.entry("name", "Name"), Map.entry("samples", "Execution samples"), Map.entry("target", "Target TPS"), Map.entry("avg", "Average TPS"), Map.entry("min", "Minimum TPS"),
-            Map.entry("iface", "Interface"), Map.entry("inAvg", "Inbound average (Mb/s)"), Map.entry("inPeak", "Inbound peak (Mb/s)"), Map.entry("outAvg", "Outbound average (Mb/s)"), Map.entry("outPeak", "Outbound peak (Mb/s)"), Map.entry("others", "Other interfaces"),
-            Map.entry("playerNames", "Connected players"), Map.entry("entities", "Entities"), Map.entry("chunks", "Chunks"), Map.entry("stalled", "Stalled world"), Map.entry("mspt", "Mean tick interval"),
-            Map.entry("bootstrapper", "Bootstrapper"), Map.entry("configs", "Mixin configs"), Map.entry("conflicts", "Overlapping target classes"), Map.entry("title", "File"), Map.entry("content", "Contents")
+            Map.entry("world", "World"), Map.entry("name", "Name"), Map.entry("samples", "CPU samples"), Map.entry("target", "Target TPS"), Map.entry("avg", "TPS"), Map.entry("min", "Minimum TPS"),
+            Map.entry("iface", "Interface"), Map.entry("inAvg", "Inbound average (Mbit/s)"), Map.entry("inPeak", "Inbound peak (Mbit/s)"), Map.entry("outAvg", "Outbound average (Mbit/s)"), Map.entry("outPeak", "Outbound peak (Mbit/s)"), Map.entry("others", "Other interfaces"),
+            Map.entry("playerNames", "Connected players"), Map.entry("entities", "Entities"), Map.entry("chunks", "Chunks"), Map.entry("stalled", "Stalled world"), Map.entry("mspt", "Tick time"),
+            Map.entry("title", "File"), Map.entry("content", "Contents")
         ));
         return labels;
     }

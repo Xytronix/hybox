@@ -20,16 +20,30 @@ class HyboxChatFormatterTest {
     void healthyStatusIsCompactWithoutDiagnosticNoise() {
         var health = health(null, null, new CallbackExecutor.Health(42, 0, 0, 0, 0, 0, null));
 
-        var lines = HyboxChatFormatter.status(health, NOW, 0);
+        var lines = HyboxChatFormatter.status(health, null, NOW, 0);
 
         assertTrue(lines.size() <= 3, lines.toString());
         assertEquals(2, lines.size());
-        assertTrue(lines.get(0).contains("Recorder running · capture idle"));
+        assertTrue(lines.get(0).contains("Recorder running, capture idle, 5 bundles."));
         assertTrue(lines.get(1).contains(INCIDENT));
-        assertTrue(lines.get(1).contains("1m ago · outcome: captured"));
+        assertTrue(lines.get(1).contains("1m ago. Outcome: captured."));
         assertFalse(String.join("\n", lines).contains("Callbacks"));
         assertFalse(String.join("\n", lines).contains("Storage"));
         assertFalse(String.join("\n", lines).contains("Config:"));
+    }
+
+    @Test
+    void statusLeadsWithLiveHealthNumbers() {
+        var health = health(null, null, new CallbackExecutor.Health(42, 0, 0, 0, 0, 0, null));
+        long gib = 1024L * 1024 * 1024;
+        var live = new HytaleTelemetrySampler.Status(30, 3.94, 9.4, 966367641L, 4 * gib);
+
+        var lines = HyboxChatFormatter.status(health, live, NOW, 0);
+
+        assertEquals("TPS 30.0, tick 3.9 ms, CPU 9%, heap 0.9 of 4.0 GiB", lines.get(1));
+        assertEquals("TPS 30.0, heap 0.9 GiB",
+            HyboxChatFormatter.healthLine(new HytaleTelemetrySampler.Status(30, -1, -1, 966367641L, -1)));
+        assertNull(HyboxChatFormatter.healthLine(null));
     }
 
     @Test
@@ -37,17 +51,14 @@ class HyboxChatFormatterTest {
         var callbacks = new CallbackExecutor.Health(7, 2, 1, 4, 1, 2, "failing callback");
         var health = health("IOException", "Staging budget reached", callbacks);
 
-        var lines = HyboxChatFormatter.status(health, NOW, 29);
+        var lines = HyboxChatFormatter.status(health, null, NOW, 29);
 
         assertEquals(3, lines.size());
-        assertTrue(lines.get(2).contains("snapshot error"));
-        assertTrue(lines.get(2).contains("storage pressure"));
-        assertTrue(lines.get(2).contains("callback failures=2"));
-        assertTrue(lines.get(2).contains("callback timeouts=1"));
-        assertTrue(lines.get(2).contains("callbacks quarantined=1"));
-        assertTrue(lines.get(2).contains("callbacks rejected=4"));
-        assertTrue(lines.get(2).contains("callback workers exhausted"));
-        assertTrue(lines.get(2).contains("profile 29s remaining"));
+        assertTrue(lines.get(2).startsWith("Warnings: crash backup error, storage pressure, 2 callback failures, "
+            + "1 callback timeout, 1 callback quarantined, 4 callbacks rejected, callback workers exhausted."), lines.get(2));
+        assertTrue(lines.get(2).endsWith(" Profile ends in 29 s."), lines.get(2));
+        assertFalse(lines.get(2).contains(";"));
+        assertFalse(lines.get(2).contains("="));
         assertTrue(lines.stream().noneMatch(line -> line.contains("\n")));
     }
 
@@ -55,15 +66,16 @@ class HyboxChatFormatterTest {
     void stoppedRecorderAndCaptureFailureAreNotPresentedAsHealthy() {
         var health = new HyboxRuntime.Health(false, NOW, null, false, "idle", null, null,
             CaptureResult.failed("disk full"), "disk full", 0, 0, 0, 0, null, true,
-            new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null));
+            new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null), new HytaleMixins.ProblemCounts(0, 0));
 
-        var messages = HyboxChatFormatter.statusMessages(health, NOW, 0);
+        var messages = HyboxChatFormatter.statusMessages(health, null, NOW, 0);
 
         assertEquals(3, messages.size());
-        assertEquals("#ef8181", messages.get(0).getChildren().get(1).getColor());
-        assertEquals("#ef8181", messages.get(1).getChildren().get(1).getColor());
-        assertEquals("#ef8181", messages.get(2).getChildren().get(1).getColor());
-        assertTrue(HyboxChatFormatter.status(health, NOW, 0).get(2).contains("capture error"));
+        assertEquals("#f0626b", messages.get(0).getChildren().get(1).getColor());
+        assertEquals("#f0626b", messages.get(1).getChildren().get(1).getColor());
+        assertEquals("#f0626b", messages.get(2).getChildren().get(1).getColor());
+        assertEquals("#ffd21f", messages.get(0).getChildren().get(0).getColor());
+        assertTrue(HyboxChatFormatter.status(health, null, NOW, 0).get(2).contains("capture error"));
     }
 
     @Test
@@ -85,19 +97,22 @@ class HyboxChatFormatterTest {
         assertFalse(triggers.get(1).armed());
         assertTrue(triggers.get(2).armed());
         String summary = HyboxChatFormatter.triggerSummary(triggers);
-        assertTrue(summary.contains("disabled: heartbeat stall, tick degraded, net saturation, log error"), summary);
+        assertTrue(summary.contains("Disabled: Heartbeat stall, Slow ticks, Network saturation, Log errors."), summary);
         assertFalse(summary.contains(">="));
-        assertTrue(triggers.get(0).details().contains("2000 ms"));
+        assertEquals("Heartbeat stall (disabled): Degraded at 2 s, critical at 10 s", triggers.get(0).details());
+        assertEquals("At most one capture every 60 s. Repeats within 5 s are ignored.", HyboxChatFormatter.timing(policy));
+        assertFalse(triggers.stream().anyMatch(trigger -> trigger.threshold().contains("PT")), triggers.toString());
     }
 
     @Test
     void compactIncidentRowsFlattenHeadlinesAndHidePathsUntilRequested() {
         var incident = new HyboxIncidents.Incident(INCIDENT, Path.of("/private/server/incidents/example.zip"),
-            NOW.minusSeconds(120), "HEAP_PRESSURE", "Heap pressure\nwith a tab\tand details", "DEGRADED", "world");
+            NOW.minusSeconds(120), "HEARTBEAT_STALL", "World stopped\nwith a tab\tand details", "DEGRADED", "world");
 
         String compact = HyboxChatFormatter.incidentLine(incident, NOW, false);
 
-        assertTrue(compact.contains("HEAP_PRESSURE/Heap pressure with a tab and details"));
+        assertTrue(compact.contains("Freeze: World stopped with a tab and details"), compact);
+        assertFalse(compact.contains("HEARTBEAT_STALL"), compact);
         assertTrue(compact.endsWith("2m ago"));
         assertFalse(compact.contains("/private/"));
         assertTrue(HyboxChatFormatter.incidentLine(incident, NOW, true).endsWith(incident.path().toString()));
@@ -110,7 +125,7 @@ class HyboxChatFormatterTest {
         String player = HyboxChatFormatter.captureLine(result, directory, true);
         String console = HyboxChatFormatter.captureLine(result, directory, false);
 
-        assertTrue(player.endsWith("incident-" + INCIDENT + ".zip"));
+        assertTrue(player.contains("incident-" + INCIDENT + ".zip. "));
         assertFalse(player.contains("/private/"));
         assertTrue(console.contains(directory.toString()));
         assertEquals("trend.html", HyboxChatFormatter.outputPath(directory.resolve("trend.html"), true));
@@ -122,9 +137,26 @@ class HyboxChatFormatterTest {
     void busyCaptureFeedbackAsksForAnotherAttempt() {
         var result = CaptureResult.of(CaptureResult.Status.BUSY);
 
-        assertEquals("Capture busy; try again shortly.", HyboxChatFormatter.captureMessage(result));
-        assertEquals("Capture busy; try again shortly.",
+        assertEquals("A capture is already running. Try again when it ends.", HyboxChatFormatter.captureMessage(result));
+        assertEquals("A capture is already running. Try again when it ends.",
             HyboxChatFormatter.captureLine(result, Path.of("incidents"), true));
+    }
+
+    @Test
+    void captureResultAndStatusSayWhatRetentionRemovedAndWhatIsInUse() {
+        var result = CaptureResult.captured(new IncidentId(INCIDENT), "Removed 15 bundles older than 7 days.");
+        assertEquals("Saved incident-" + INCIDENT + ".zip. Removed 15 bundles older than 7 days. "
+            + HyboxChatFormatter.SHARING_NOTE, HyboxChatFormatter.captureLine(result, Path.of("incidents"), true));
+        assertEquals("Captured incident " + INCIDENT + ". Removed 15 bundles older than 7 days.",
+            HyboxChatFormatter.captureMessage(result));
+
+        long mib = 1024L * 1024;
+        var policy = new io.github.xytronix.hybox.core.retention.RetentionPolicy(25, 1024 * mib, Duration.ofHours(168));
+        var usage = new io.github.xytronix.hybox.core.retention.RetentionUsage(16, 640 * mib, 15, 8 * 1024 * mib,
+            100 * 1024 * mib, policy);
+        assertEquals("Storage: 16 of 25 bundles · 640 MiB of 1 GiB · kept for 7 days · 8 GiB free on disk. "
+            + "15 bundles older than 7 days are removed after the next capture.", HyboxChatFormatter.storageLine(usage));
+        assertEquals(HyboxChatFormatter.Tone.WARN, HyboxChatFormatter.storageTone(usage));
     }
 
     @Test
@@ -132,9 +164,9 @@ class HyboxChatFormatterTest {
         var config = HytaleHyboxConfig.loadOrCreate(dir, System.getLogger("formatter-test"));
         var health = new HyboxRuntime.Health(true, NOW.minusSeconds(5), "snapshot broke", false, "idle", INCIDENT,
             NOW.minusSeconds(60), CaptureResult.failed("disk full"), "disk full", 0, 0, 0, 5, "Staging budget reached",
-            true, new CallbackExecutor.Health(3, 1, 0, 0, 0, 0, "bad callback"));
+            true, new CallbackExecutor.Health(3, 1, 0, 0, 0, 0, "bad callback"), new HytaleMixins.ProblemCounts(0, 0));
 
-        var lines = HyboxChatFormatter.statusDetails(health, config, dir.resolve("hybox.json"), dir, NOW);
+        var lines = HyboxChatFormatter.statusDetails(health, config, dir.resolve("hybox.json"), dir, NOW, false);
 
         var labels = lines.stream().map(line -> line.substring(0, line.indexOf(':'))).toList();
         assertEquals(labels.size(), labels.stream().distinct().count(), () -> "duplicate rows: " + lines);
@@ -144,10 +176,25 @@ class HyboxChatFormatterTest {
         }
     }
 
+    @Test
+    void verboseStatusForPlayersHidesAbsolutePaths(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+        var config = HytaleHyboxConfig.loadOrCreate(dir, System.getLogger("formatter-test"));
+        var health = health(null, null, new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null));
+
+        String player = String.join("\n",
+            HyboxChatFormatter.statusDetails(health, config, dir.resolve("hybox.json"), dir, NOW, true));
+        String console = String.join("\n",
+            HyboxChatFormatter.statusDetails(health, config, dir.resolve("hybox.json"), dir, NOW, false));
+
+        assertFalse(player.contains(dir.toAbsolutePath().toString()), player);
+        assertTrue(player.contains("hybox.json"), player);
+        assertTrue(console.contains(dir.resolve("hybox.json").toString()), console);
+    }
+
     private static HyboxRuntime.Health health(String snapshotError, String storagePressure,
                                                CallbackExecutor.Health callbacks) {
         return new HyboxRuntime.Health(true, NOW.minusSeconds(5), snapshotError, false, "idle", INCIDENT,
             NOW.minusSeconds(60), CaptureResult.captured(new IncidentId(INCIDENT)), null,
-            0, 0, 0, 5, storagePressure, true, callbacks);
+            0, 0, 0, 5, storagePressure, true, callbacks, new HytaleMixins.ProblemCounts(0, 0));
     }
 }

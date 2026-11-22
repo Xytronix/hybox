@@ -80,7 +80,55 @@ class RetentionManagerTest {
 
         assertEquals(1, stats.deleted());
         assertTrue(Files.exists(newest));
-        assertEquals(java.util.List.of("Retention would remove newest incident; stopping deletions."), warnings);
+        assertEquals(java.util.List.of("Retention would remove the newest incident. Stopping deletions."), warnings);
+    }
+
+    @Test
+    void enforce_reportsEveryRemovedBundleWithItsRuleInTheLogAndForThePlayer(@TempDir Path tempDir) {
+        createIncidentZip(tempDir, "incident-20260110-010000.000Z-000001.zip", 10);
+        createIncidentZip(tempDir, "incident-20260110-020000.000Z-000002.zip", 10);
+        createIncidentZip(tempDir, "incident-20260110-030000.000Z-000003.zip", 10);
+        createIncidentZip(tempDir, "incident-20260119-010000.000Z-000004.zip", 10);
+        createIncidentZip(tempDir, "incident-20260119-020000.000Z-000005.zip", 10);
+        createIncidentZip(tempDir, "incident-20260119-030000.000Z-000006.zip", 10);
+        java.util.List<String> info = new java.util.ArrayList<>();
+        System.Logger logger = new System.Logger() {
+            public String getName() { return "retention-test"; }
+            public boolean isLoggable(Level level) { return true; }
+            public void log(Level level, java.util.ResourceBundle bundle, String message, Throwable thrown) {
+                if (level == Level.INFO) info.add(message);
+            }
+            public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
+                if (level == Level.INFO) info.add(format);
+            }
+        };
+        RetentionManager manager = new RetentionManager(
+            Clock.fixed(Instant.parse("2026-01-20T00:00:00Z"), ZoneOffset.UTC), logger, FileDeleter.defaultDeleter());
+        RetentionPolicy policy = new RetentionPolicy(2, 1024L * 1024 * 1024, Duration.ofHours(168));
+
+        RetentionUsage before = manager.usage(tempDir, policy);
+        RetentionStats stats = manager.enforce(tempDir, policy);
+
+        assertEquals(6, before.bundles());
+        assertEquals(3, before.expired());
+        assertEquals(java.util.List.of(
+            new RetentionStats.Removal("incident-20260110-010000.000Z-000001.zip", RetentionStats.Rule.AGE, 10),
+            new RetentionStats.Removal("incident-20260110-020000.000Z-000002.zip", RetentionStats.Rule.AGE, 10),
+            new RetentionStats.Removal("incident-20260110-030000.000Z-000003.zip", RetentionStats.Rule.AGE, 10),
+            new RetentionStats.Removal("incident-20260119-010000.000Z-000004.zip", RetentionStats.Rule.COUNT, 10)),
+            stats.removals());
+        assertEquals("Removed 4 bundles: 3 older than 7 days, 1 to keep the newest 2.",
+            RetentionText.removalLine(stats, policy));
+        assertEquals(java.util.List.of(
+            "Retention removed incident-20260110-010000.000Z-000001.zip (10 B): age, older than MaxAge 7 days.",
+            "Retention removed incident-20260110-020000.000Z-000002.zip (10 B): age, older than MaxAge 7 days.",
+            "Retention removed incident-20260110-030000.000Z-000003.zip (10 B): age, older than MaxAge 7 days.",
+            "Retention removed incident-20260119-010000.000Z-000004.zip (10 B): count, more than MaxCount 2 bundles.",
+            "Retention removed 4 bundles (3 by age, 1 by count, 0 by size) and freed 40 B. 2 bundles and 20 B remain."),
+            info);
+        assertEquals("Removed 15 bundles older than 7 days.", RetentionText.removalLine(new RetentionStats(16, 15, 0, 0, 0, 1,
+            java.util.Collections.nCopies(15, new RetentionStats.Removal("x.zip", RetentionStats.Rule.AGE, 0))), policy));
+        assertEquals(null, RetentionText.removalLine(new RetentionStats(1, 0, 0, 0, 10, 1, java.util.List.of()), policy));
     }
 
     private static RetentionManager managerCollecting(java.util.List<String> warnings) {

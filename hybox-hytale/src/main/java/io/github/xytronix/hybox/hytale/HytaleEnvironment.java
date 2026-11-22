@@ -25,7 +25,9 @@ final class HytaleEnvironment {
 
     static Map<String, String> snapshot() {
         Map<String, String> out = new LinkedHashMap<>();
-        putIfPresent(out, "Hyinit", detectLoader(HYINIT_CLASSES));
+        if (!HyinitReader.get().present()) {
+            putIfPresent(out, "Hyinit", detectLoader(HYINIT_CLASSES));
+        }
         putIfPresent(out, "Hyxin", detectLoader(HYXIN_CLASSES));
         putIfPresent(out, "Server name", serverName());
         putIfPresent(out, "Hytale version", HytaleServerVersion.get());

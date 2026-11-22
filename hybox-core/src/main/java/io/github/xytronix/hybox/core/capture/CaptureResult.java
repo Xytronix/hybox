@@ -4,7 +4,7 @@ import java.util.Objects;
 
 import io.github.xytronix.hybox.core.incident.IncidentId;
 
-public record CaptureResult(Status status, IncidentId incidentId, String detail) {
+public record CaptureResult(Status status, IncidentId incidentId, String detail, String retention) {
     public enum Status {
         CAPTURED,
         DISABLED,
@@ -22,20 +22,34 @@ public record CaptureResult(Status status, IncidentId incidentId, String detail)
         if ((status == Status.CAPTURED) != (incidentId != null)) {
             throw new IllegalArgumentException("Only captured results must have an incident ID");
         }
-        if (detail != null) {
-            StringBuilder bounded = new StringBuilder(Math.min(detail.length(), 128));
-            for (int i = 0; i < Math.min(detail.length(), 128); i++) {
-                char character = detail.charAt(i);
-                if (!Character.isISOControl(character) && Character.getType(character) != Character.FORMAT) {
-                    bounded.append(character);
-                }
-            }
-            detail = bounded.toString();
+        detail = bounded(detail, 128);
+        retention = bounded(retention, 256);
+    }
+
+    public CaptureResult(Status status, IncidentId incidentId, String detail) {
+        this(status, incidentId, detail, null);
+    }
+
+    private static String bounded(String text, int limit) {
+        if (text == null) {
+            return null;
         }
+        StringBuilder bounded = new StringBuilder(Math.min(text.length(), limit));
+        for (int i = 0; i < Math.min(text.length(), limit); i++) {
+            char character = text.charAt(i);
+            if (!Character.isISOControl(character) && Character.getType(character) != Character.FORMAT) {
+                bounded.append(character);
+            }
+        }
+        return bounded.toString();
     }
 
     public static CaptureResult captured(IncidentId incidentId) {
-        return new CaptureResult(Status.CAPTURED, Objects.requireNonNull(incidentId, "incidentId"), null);
+        return captured(incidentId, null);
+    }
+
+    public static CaptureResult captured(IncidentId incidentId, String retention) {
+        return new CaptureResult(Status.CAPTURED, Objects.requireNonNull(incidentId, "incidentId"), null, retention);
     }
 
     public static CaptureResult of(Status status) {

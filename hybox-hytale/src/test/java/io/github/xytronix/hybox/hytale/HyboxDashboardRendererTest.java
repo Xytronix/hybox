@@ -48,6 +48,19 @@ class HyboxDashboardRendererTest {
     }
 
     @Test
+    void theOpenTabIsMarkedWithTheSelectedStyleAndItsBar() {
+        for (String tab : List.of("overview", "incidents", "triggers", "heap")) {
+            var commands = new UICommandBuilder();
+            HyboxDashboardRenderer.render(model(), tab, commands, new UIEventBuilder());
+            for (String other : List.of("Overview", "Incidents", "Triggers", "Heap")) {
+                boolean open = other.equalsIgnoreCase(tab);
+                assertEquals(open, bool(commands, "#" + other + "Marker.Visible"), other);
+                assertEquals(open, command(commands, "#" + other + "Button.Style").data.contains("SelectedButtonStyle"), other);
+            }
+        }
+    }
+
+    @Test
     void profileUsesNativeCountdownAndCaptureUsesUnknownStepWithoutFakeEta() {
         var commands = new UICommandBuilder();
         HyboxDashboardRenderer.render(model(), "overview", commands, new UIEventBuilder());
@@ -58,7 +71,7 @@ class HyboxDashboardRendererTest {
         assertTrue(timer.text.contains("TimerLabel { Seconds: 150;"));
         assertNotNull(command(commands, "#ProfileTimerHost", CustomUICommandType.Clear));
         assertTrue(Arrays.stream(commands.getCommands()).noneMatch(command -> command.selector != null && command.selector.endsWith(".Seconds")));
-        assertTrue(command(commands, "#ProfileCaptureAt.Text").data.contains("12:02:30 UTC · started by"));
+        assertTrue(command(commands, "#ProfileCaptureAt.Text").data.contains("12:02:30 UTC, started by"));
         assertTrue(command(commands, "#CaptureStep.Text").data.contains("Injected"));
         assertTrue(bool(commands, "#CaptureStep.Visible"));
         assertTrue(Arrays.stream(commands.getCommands()).noneMatch(command -> command.selector != null
@@ -79,6 +92,26 @@ class HyboxDashboardRendererTest {
         assertNotNull(command(commands, "#IncidentRows[0] #Trigger.Text"));
         assertNotNull(command(commands, "#IncidentRows[0] #World.Text"));
         assertNotNull(command(commands, "#IncidentRows[0] #Headline.Text"));
+    }
+
+    @Test
+    void incidentRowsShowTriggerAndSeverityInPlainWords() {
+        var incident = new HyboxIncidents.Incident("000011", Path.of("incident-000011.zip"), NOW, "HEARTBEAT_STALL", "World stopped", "CRITICAL", "default");
+        var model = new DashboardModel(List.of(), List.of(), null, null, List.of(incident), "",
+            List.of(new HyboxChatFormatter.Trigger("Deadlock", false, "When JVM threads deadlock")), "", "", true, "", false, true, true, true, false, true,
+            DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+        var commands = new UICommandBuilder();
+        HyboxDashboardRenderer.render(model, "incidents", commands, new UIEventBuilder());
+        assertEquals("Freeze", string(commands, "#IncidentRows[0] #Trigger.Text"));
+        assertTrue(command(commands, "#IncidentRows[0] #Severity.TextSpans").data.contains("Critical"));
+        assertFalse(command(commands, "#IncidentRows[0] #Severity.TextSpans").data.contains("CRITICAL"));
+        var triggers = new UICommandBuilder();
+        HyboxDashboardRenderer.render(model, "triggers", triggers, new UIEventBuilder());
+        assertTrue(command(triggers, "#TriggerRows[0] #Armed.TextSpans").data.contains("Disabled"));
+        assertEquals("Info", DashboardModel.severityLabel("INFO"));
+        assertEquals("Degraded", DashboardModel.severityLabel("DEGRADED"));
+        assertEquals("Unknown", DashboardModel.severityLabel(null));
+        assertEquals("#a29d93", DashboardModel.Tone.INFO.color);
     }
 
     @Test
@@ -112,13 +145,14 @@ class HyboxDashboardRendererTest {
         var alphaColor = java.util.regex.Pattern.compile("#[0-9a-fA-F]{6}\\(");
         for (var tone : DashboardModel.Tone.values()) {
             var model = new DashboardModel(List.of(new DashboardModel.Tile("t", "v", "d", tone, "SEV")),
-                List.of(new DashboardModel.Warning("w", tone)), null, "dumping recording",
+                List.of(new DashboardModel.Warning("w", tone)), null, "saving the recording",
                 List.of(new HyboxIncidents.Incident("i", Path.of("i.zip"), NOW, "K", "h", "CRITICAL", "w")),
                 "", List.of(new HyboxChatFormatter.Trigger("t", tone == DashboardModel.Tone.OK, "x")), "", "", true, "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
-            for (String tab : List.of("overview", "incidents", "triggers")) {
+            for (String tab : List.of("overview", "incidents", "triggers", "heap")) {
                 var commands = new UICommandBuilder();
                 HyboxDashboardRenderer.render(model, tab, commands, new UIEventBuilder());
                 for (var command : commands.getCommands()) {
+                    if (command.text != null) assertFalse(alphaColor.matcher(command.text).find(), command.selector + " = " + command.text);
                     if (command.type != CustomUICommandType.Set || command.data == null) continue;
                     assertFalse(alphaColor.matcher(command.data).find(), command.selector + " = " + command.data);
                 }
@@ -129,11 +163,11 @@ class HyboxDashboardRendererTest {
     @Test
     void captureStepListDistinguishesCompletedCurrentAndPendingSteps() {
         var commands = new UICommandBuilder();
-        var model = new DashboardModel(List.of(), List.of(), null, "dumping recording", List.of(), "", List.of(), "", "", false,
+        var model = new DashboardModel(List.of(), List.of(), null, "saving the recording", List.of(), "", List.of(), "", "", false,
             "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         HyboxDashboardRenderer.render(model, "overview", commands, new UIEventBuilder());
         for (int i = 0; i < 5; i++) {
-            assertEquals(i < 3 ? "#80c991" : i == 3 ? "#d3e3ed" : "#96a9be",
+            assertEquals(i < 3 ? "#4cc38a" : i == 3 ? "#ece9e2" : "#a29d93",
                 string(commands, "#CaptureStage" + i + ".Style.TextColor"));
             assertEquals(i == 3, bool(commands, "#CaptureStage" + i + ".Style.RenderBold"));
         }
@@ -229,7 +263,7 @@ class HyboxDashboardRendererTest {
         var profile = new DashboardModel.Profile(NOW, Duration.ofMinutes(5), NOW, null);
         for (boolean stopAllowed : List.of(false, true)) {
             for (boolean cancelAllowed : List.of(false, true)) {
-                var running = new DashboardModel(List.of(), List.of(), profile, "waiting for post-incident evidence", List.of(), "",
+                var running = new DashboardModel(List.of(), List.of(), profile, "waiting for the server to recover", List.of(), "",
                     List.of(), "", "", true, "", false, stopAllowed, cancelAllowed, stopAllowed, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
                 var commands = new UICommandBuilder();
                 HyboxDashboardRenderer.render(running, "overview", commands, new UIEventBuilder());
@@ -245,7 +279,7 @@ class HyboxDashboardRendererTest {
                 }
             }
         }
-        var dumping = new DashboardModel(List.of(), List.of(), null, "dumping recording", List.of(), "",
+        var dumping = new DashboardModel(List.of(), List.of(), null, "saving the recording", List.of(), "",
             List.of(), "", "", true, "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         var commands = new UICommandBuilder();
         HyboxDashboardRenderer.render(dumping, "overview", commands, new UIEventBuilder());
@@ -254,17 +288,18 @@ class HyboxDashboardRendererTest {
 
     @Test
     void saveNowShowsSavingUntilTheCaptureStepsTakeOver() {
-        var waiting = DashboardModel.from(health(false), NOW, null, List.of(), "", List.of(), "", "", true,
+        var waiting = DashboardModel.from(health(false), DashboardModelTest.STORAGE, NOW, null, List.of(), "", List.of(), "", "", true,
             "", false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         assertTrue(waiting.profileSaving());
         var commands = new UICommandBuilder();
         HyboxDashboardRenderer.render(waiting, "overview", commands, new UIEventBuilder());
         assertTrue(bool(commands, "#ProfileSaving.Visible"));
         assertFalse(bool(commands, "#NothingRunning.Visible"));
-        var capturing = DashboardModel.from(health(true), NOW, null, List.of(), "", List.of(), "", "", true,
+        var capturing = DashboardModel.from(health(true), DashboardModelTest.STORAGE, NOW, null, List.of(), "", List.of(), "", "", true,
             "", false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         assertFalse(capturing.profileSaving(), "Capture steps replace the saving card once the bundle is being written");
-        var stillProfiling = DashboardModel.from(health(false), NOW, new DashboardModel.Profile(NOW, Duration.ofMinutes(5), NOW, null),
+        var stillProfiling = DashboardModel.from(health(false), DashboardModelTest.STORAGE, NOW,
+            new DashboardModel.Profile(NOW, Duration.ofMinutes(5), NOW, null),
             List.of(), "", List.of(), "", "", true, "", false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         assertFalse(stillProfiling.profileSaving());
     }
@@ -279,6 +314,8 @@ class HyboxDashboardRendererTest {
         assertTrue(bool(commands, "#ProfileStartPanel.Visible"));
         for (int minutes : HyboxDashboardRenderer.PROFILE_MINUTES) {
             assertEquals(minutes == 15, bool(commands, "#ProfileMinutes" + minutes + ".Disabled"), "minutes " + minutes);
+            assertEquals(minutes == 15, bool(commands, "#ProfileMinutes" + minutes + "Marker.Visible"), "minutes " + minutes);
+            assertEquals(minutes == 15, command(commands, "#ProfileMinutes" + minutes + ".Style").data.contains("SelectedButtonStyle"));
             assertTrue(Arrays.stream(events.getEvents()).anyMatch(event -> ("#ProfileMinutes" + minutes).equals(event.selector)
                 && event.data.contains("profile:minutes:" + minutes)));
         }
@@ -333,7 +370,7 @@ class HyboxDashboardRendererTest {
                 && "Pages/HyboxIncidentRow.ui".equals(command.text)).count());
         assertTrue(bool(commands, "#HeapRows[0] #Share.Visible"));
         assertEquals(0.6, org.bson.BsonDocument.parse(command(commands, "#HeapRows[0] #Share.Value").data).getNumber("0").doubleValue(), 1e-6);
-        assertTrue(string(commands, "#HeapRows[0] #Value.Text").endsWith("60.0% of heap"));
+        assertTrue(string(commands, "#HeapRows[0] #Value.Text").endsWith("60.0% of the memory found"));
         assertEquals("Walk again", string(commands, "#HeapWalkButton.Text"));
         assertTrue(string(commands, "#HeapSummary.Text").startsWith("Taken at 12:00:00 UTC"));
         for (var command : commands.getCommands()) {
@@ -358,7 +395,7 @@ class HyboxDashboardRendererTest {
 
     private static HyboxRuntime.Health health(boolean capturing) {
         return new HyboxRuntime.Health(true, NOW, null, capturing, capturing ? "collecting" : "idle", null, null, null, null,
-            0, 0, 0, 0, null, true, new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null));
+            0, 0, 0, 0, null, true, new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null), new HytaleMixins.ProblemCounts(0, 0));
     }
 
     private static boolean bool(UICommandBuilder commands, String selector) {

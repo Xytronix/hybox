@@ -33,6 +33,8 @@ import io.github.xytronix.hybox.core.incident.IncidentReport;
 import io.github.xytronix.hybox.core.incident.Severity;
 import io.github.xytronix.hybox.core.jfr.JfrRepository;
 import io.github.xytronix.hybox.core.retention.RetentionManager;
+import io.github.xytronix.hybox.core.retention.RetentionText;
+import io.github.xytronix.hybox.core.retention.RetentionUsage;
 import io.github.xytronix.hybox.core.trigger.TriggerDecision;
 import io.github.xytronix.hybox.core.trigger.TriggerEngine;
 import io.github.xytronix.hybox.core.trigger.TriggerEvent;
@@ -157,7 +159,7 @@ public final class CapturePipeline {
         this.tempDir = Objects.requireNonNull(tempDir, "tempDir");
         this.policy = Objects.requireNonNull(policy, "policy");
         this.logger = Objects.requireNonNull(logger, "logger");
-        this.redactor = new TextRedactor(policy.redactPatterns());
+        this.redactor = new TextRedactor(policy.redactPatterns(), diagnosticsProvider::knownVersions);
     }
 
     public boolean isEnabled() {
@@ -170,6 +172,10 @@ public final class CapturePipeline {
 
     public boolean storageChecked() {
         return storageChecked;
+    }
+
+    public RetentionUsage storageUsage() {
+        return retentionManager.usage(incidentDir, policy.retention());
     }
 
     public CaptureResult handle(TriggerEvent event) {
@@ -228,9 +234,7 @@ public final class CapturePipeline {
             if (wantReport) {
                 snapshot = withHotThreads(snapshot, dumpedRecording);
             }
-            List<DiagnosticSection> diagnostics = wantReport
-                ? withModContribution(safeDiagnostics(), dumpedRecording)
-                : List.of();
+            List<DiagnosticSection> diagnostics = wantReport ? safeDiagnostics(false) : List.of();
             if (wantReport) {
                 diagnostics = StalledThread.prependTo(diagnostics, event, policy.frameworkPrefixes());
                 diagnostics = DeadlockCycle.prependTo(diagnostics, event);
@@ -263,8 +267,10 @@ public final class CapturePipeline {
             bundleBuilder.build(report, dumpedRecording, outputZip, extras, policy.artifacts());
             bundled = true;
 
+            String retention = null;
             try {
-                retentionManager.enforce(incidentDir, policy.retention());
+                retention = RetentionText.removalLine(retentionManager.enforce(incidentDir, policy.retention()),
+                    policy.retention());
             } catch (Exception e) {
                 logger.log(System.Logger.Level.WARNING, "Retention enforcement failed.", e);
             }
@@ -275,7 +281,7 @@ public final class CapturePipeline {
                 logger.log(System.Logger.Level.WARNING, "Incident notification failed.", e);
             }
 
-            return CaptureResult.captured(id);
+            return CaptureResult.captured(id, retention);
         } catch (InterruptedException | java.nio.channels.ClosedByInterruptException e) {
             Thread.currentThread().interrupt();
             return CaptureResult.of(CaptureResult.Status.CANCELLED);
@@ -346,14 +352,13 @@ public final class CapturePipeline {
                 JfrRepository.finalizeOrphan(recording);
             } catch (Exception e) {
                 logger.log(System.Logger.Level.WARNING,
-                    "Failed to finalize recovered recording " + recording + "; it may be unreadable.", e);
+                    "Failed to finalize recovered recording " + recording + ". It may be unreadable.", e);
             }
             IncidentId id = IncidentIds.next(clock);
             Instant when = occurredAt != null ? occurredAt : clock.instant();
             boolean wantReport = policy.artifacts().contains(BundleArtifacts.REPORT);
             HealthSnapshot snapshot = wantReport ? JfrSnapshot.parse(recording, 1000) : null;
-            List<DiagnosticSection> diagnostics = wantReport
-                ? withModContribution(safeDiagnostics(), recording) : List.of();
+            List<DiagnosticSection> diagnostics = wantReport ? safeDiagnostics(true) : List.of();
             String threadDump = wantReport ? JfrThreadDump.lastDump(recording) : null;
             if (wantReport && threadDump != null) {
                 DiagnosticSection stuck = JfrThreadDump.stuckSection(threadDump, policy.frameworkPrefixes());
@@ -482,9 +487,9 @@ public final class CapturePipeline {
         }
     }
 
-    private List<DiagnosticSection> safeDiagnostics() {
+    private List<DiagnosticSection> safeDiagnostics(boolean recovered) {
         try {
-            return diagnosticsProvider.sections();
+            return recovered ? diagnosticsProvider.recoveredSections() : diagnosticsProvider.sections();
         } catch (Exception e) {
             logger.log(System.Logger.Level.WARNING, "Diagnostics provider failed.", e);
             return List.of();
@@ -528,28 +533,13 @@ public final class CapturePipeline {
                 HealthCollector.system(),
                 HealthCollector.disk(),
                 HealthCollector.threads(),
+                worlds.onlinePlayers(),
                 worlds.worlds(),
                 List.of()
             );
         } catch (Exception e) {
             logger.log(System.Logger.Level.WARNING, "Health snapshot capture failed.", e);
             return null;
-        }
-    }
-
-    private List<DiagnosticSection> withModContribution(List<DiagnosticSection> base, Path recording) {
-        try {
-            java.util.LinkedHashMap<String, String> mods = JfrHotThreads.modContribution(recording, 1000);
-            if (mods.isEmpty()) {
-                return base;
-            }
-            List<DiagnosticSection> out = new ArrayList<>(base.size() + 1);
-            out.add(new DiagnosticSection("Mod hot-path contribution (JFR)", mods));
-            out.addAll(base);
-            return out;
-        } catch (Exception e) {
-            logger.log(System.Logger.Level.WARNING, "JFR mod-attribution parse failed.", e);
-            return base;
         }
     }
 
@@ -566,6 +556,7 @@ public final class CapturePipeline {
                 snapshot.system(),
                 snapshot.disk(),
                 snapshot.threads(),
+                snapshot.onlinePlayers(),
                 snapshot.worlds(),
                 JfrHotThreads.parse(recording, 1000)
             );

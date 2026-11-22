@@ -8,12 +8,12 @@ Nodes are relative to `xytronix.hybox.command.hybox`. See [Permissions](installi
 
 | Command | Nodes | What it does |
 | --- | --- | --- |
-| `/hybox`, `/hybox ui` | `.ui` | Opens the dashboard. Bare `/hybox` in the console prints the usage line. |
+| `/hybox`, `/hybox ui` | `.ui` | Opens the dashboard. Bare `/hybox` in the console lists the commands, one per line. |
 | `/hybox dump` | `.dump` | Saves a bundle now. |
 | `/hybox incident [id]` | `.incident` | Opens the latest incident, or the one given. The id is the full id, or the part after its last dash, for example `000001`. |
 | `/hybox profile [--minutes=5] [--keep-buffer=true]` | `.profile` | Starts a [profile](#profiling). |
 | `/hybox profile stop`, `/hybox profile cancel` | `.profile` plus `.profile.stop` or `.profile.cancel` | Ends the profile and saves it, or ends it without saving. |
-| `/hybox status [--verbose]` | `.status` | Recorder health, last capture outcome, storage and plugin callback problems. `--verbose` adds paths and settings. |
+| `/hybox status [--verbose]` | `.status` | Recorder health, then a line with TPS, tick time, server CPU and heap, for example `TPS 30.0, tick 3.9 ms, CPU 9%, heap 0.9 of 4.0 GiB`. Then the last capture outcome, bundle storage against the retention limits and free disk space, and plugin callback problems. `--verbose` adds paths and settings. |
 | `/hybox list [--count=5] [--details]` | `.list` | Players: the Incidents tab, which also needs `.ui`. Console: 1 to 50 recent incidents, with paths if `--details`. |
 | `/hybox triggers [--details]` | `.triggers` | Players: the Triggers tab, which also needs `.ui`. Console: armed and disabled detectors, with thresholds if `--details`. |
 | `/hybox histogram` | `.histogram` | Players: the Heap tab, which also needs `.ui`. Console: the 10 largest heap classes. Walking the heap pauses the server, often for seconds. |
@@ -24,6 +24,8 @@ Nodes are relative to `xytronix.hybox.command.hybox`. See [Permissions](installi
 ## Dashboard
 
 The Overview tab shows recorder health and the running capture or profile, with buttons for capture, profile, trends and settings. The Incidents, Triggers and Heap tabs match `/hybox list`, `triggers` and `histogram`. The player who starts a capture sees its progress on screen and a message when it ends.
+
+The Storage tile compares the size of the bundle folder with `Retention.MaxTotalBytes` and checks free disk space. It shows "Near limit" at 90% of the limit and "Low disk space" when less than 2 GiB or 5% of the disk is free. A warning lists bundles older than `Retention.MaxAge`, which are deleted after the next capture.
 
 ## Incidents
 
@@ -39,8 +41,10 @@ A profile switches the recording to JFR's `profile` preset for 1 to 30 minutes, 
 
 With `Metrics.Enabled` on, Hybox writes one row of health metrics per `Jfr.SampleInterval`, and `/hybox trend` charts them.
 
+In `trend-report.html` each incident is a red dashed line on every chart. Hover or tap it to see its time, severity, headline, trigger and bundle file. Click or tap keeps the details open, and the file name links to the bundle in `incidents/`. The incidents button shows or hides the lines.
+
 ## Sharing a bundle
 
 1. Read [Privacy](privacy.md).
 2. Unzip the bundle and check the text files, especially `extras/server-log.txt`, config sections in `report.html`, and files from other plugins.
-3. Decide whether to keep `recording.jfr`. See [The recording](privacy.md#the-recording).
+3. `recording.jfr` is already cleaned of paths, player names, IP addresses and environment variables. See [The recording](privacy.md#the-recording) for what it still holds.

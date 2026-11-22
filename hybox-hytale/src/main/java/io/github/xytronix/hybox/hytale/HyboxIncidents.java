@@ -29,8 +29,27 @@ final class HyboxIncidents {
     }
 
     static List<Incident> recent(Path incidentDir, int limit) throws IOException {
-        if (limit <= 0 || !Files.exists(incidentDir)) return List.of();
+        if (limit <= 0) return List.of();
+        List<Incident> incidents = list(incidentDir);
+        incidents.sort(NEWEST_FIRST);
+        List<Incident> recent = new ArrayList<>(Math.min(limit, incidents.size()));
+        for (int i = 0; i < Math.min(limit, incidents.size()); i++) recent.add(details(incidents.get(i)));
+        return List.copyOf(recent);
+    }
+
+    static List<Incident> within(Path incidentDir, Instant from, Instant to) throws IOException {
         List<Incident> incidents = new ArrayList<>();
+        for (Incident incident : list(incidentDir)) {
+            Instant at = incident.createdAt();
+            if (at != null && !at.isBefore(from) && !at.isAfter(to)) incidents.add(incident);
+        }
+        incidents.sort(NEWEST_FIRST.reversed());
+        return List.copyOf(incidents);
+    }
+
+    private static List<Incident> list(Path incidentDir) throws IOException {
+        List<Incident> incidents = new ArrayList<>();
+        if (!Files.isDirectory(incidentDir)) return incidents;
         try (var entries = Files.list(incidentDir)) {
             entries.filter(Files::isRegularFile)
                 .filter(path -> path.getFileName().toString().endsWith(".zip")).forEach(path -> {
@@ -40,10 +59,7 @@ final class HyboxIncidents {
                 incidents.add(new Incident(id, path, createdAt(id), null, "headline unavailable", null, null));
             });
         }
-        incidents.sort(NEWEST_FIRST);
-        List<Incident> recent = new ArrayList<>(Math.min(limit, incidents.size()));
-        for (int i = 0; i < Math.min(limit, incidents.size()); i++) recent.add(readMetadata(incidents.get(i)));
-        return List.copyOf(recent);
+        return incidents;
     }
 
     private static Instant createdAt(String id) {
@@ -56,7 +72,7 @@ final class HyboxIncidents {
         }
     }
 
-    private static Incident readMetadata(Incident incident) {
+    static Incident details(Incident incident) {
         try (ZipFile zip = new ZipFile(incident.path().toFile())) {
             var entry = zip.getEntry("incident.json");
             if (entry == null) return incident;

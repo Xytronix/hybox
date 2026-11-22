@@ -6,6 +6,7 @@ Hybox records what a Hytale server was doing when it lagged, froze or crashed. I
 
 - [Installing Hybox](installing.md): requirements, build, data folder and permissions.
 - [Using Hybox](using.md): commands, the dashboard, incidents, profiling and sharing a bundle.
+- [Reading a report](reading-a-report.md): what Evidence shows, tick time and TPS, and how to read each section.
 - [Triggers](triggers.md): what each detector measures and when it saves a bundle.
 - [Privacy](privacy.md): what a bundle contains and what Hybox hides.
 - [Troubleshooting](troubleshooting.md): what Hybox's messages mean and how to fix them.
