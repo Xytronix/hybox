@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 Group {
   LayoutMode: Left;
   Anchor: (Bottom: 8);
@@ -11,6 +12,6 @@ Group {
     @Text = "";
     Anchor: (Width: 145, Height: 28);
     Padding: (Horizontal: 8);
-    TextTooltipStyle: $C.@DefaultTextTooltipStyle;
+    TextTooltipStyle: $H.@TooltipStyle;
   }
 }

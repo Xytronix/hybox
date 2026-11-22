@@ -4,10 +4,22 @@ import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import java.util.Locale;
 
 final class HyboxChartRenderer {
+    static final int HOVER_CELLS = 20;
+
     private HyboxChartRenderer() {}
 
-    static void plot(String selector, double[] values, double[] markers, int columnCap, String unit,
-                     int precision, boolean shadeIncident, HyboxIncidentRenderer.ChartImages images, UICommandBuilder commands) {
+    static void hover(UICommandBuilder commands, String container, int width, int height, java.util.List<String> tips) {
+        for (int c = 0; c < tips.size(); c++) {
+            int left = c * width / tips.size(), right = (c + 1) * width / tips.size();
+            commands.append(container, "Pages/HyboxChartHover.ui");
+            String cell = container + "[" + c + "]";
+            commands.setObject(cell + ".Anchor", HyboxIncidentRenderer.anchor(left, 0, right - left, height));
+            commands.set(cell + ".TooltipText", tips.get(c));
+        }
+    }
+
+    static void plot(String selector, double[] values, double[] markers, int columnCap, String unit, int precision,
+                     double statedMax, boolean shadeIncident, HyboxIncidentRenderer.ChartImages images, UICommandBuilder commands) {
         int columns = Math.min(columnCap, values.length);
         double[] bars = new double[columns];
         double tallest = 0, peak = 0;
@@ -21,10 +33,11 @@ final class HyboxChartRenderer {
                 peak = Math.max(peak, values[i]);
                 count++;
             }
-            bars[c] = count == 0 ? shadeIncident ? 0 : Double.NaN : Math.max(0, sum / count);
+            bars[c] = count == 0 ? Double.NaN : Math.max(0, sum / count);
             if (Double.isFinite(bars[c])) tallest = Math.max(tallest, bars[c]);
         }
-        double scale = tallest > 0 ? tallest : 1;
+        double top = Double.isFinite(statedMax) ? statedMax : 0;
+        double scale = Math.max(top, tallest) > 0 ? Math.max(top, tallest) : 1;
         labels(selector, scale, unit, precision, commands);
         commands.set(selector + " #ChartLegend.Text", "red = incident · bars = average per column");
         for (int c = 0; c < columns; c++) {
@@ -45,7 +58,7 @@ final class HyboxChartRenderer {
             commands.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Bottom: 0, Width: 1, Height: 96); Background: #ef8181(0.8); }");
         }
         if (images == null || values.length < 2) return;
-        double lineScale = peak > 0 ? peak : 1;
+        double lineScale = Math.max(top, peak) > 0 ? Math.max(top, peak) : 1;
         images.request(new HyboxIncidentRenderer.ChartRequest(
             () -> shadeIncident && markers.length == 1
                 ? HyboxChartImage.line(values, lineScale, markers[0]) : HyboxChartImage.line(values, lineScale, markers),
@@ -69,7 +82,11 @@ final class HyboxChartRenderer {
         }
         if (unit.equals("GiB")) number /= 1073741824.0;
         if (unit.equals("GB")) number /= 1e9;
-        return String.format(Locale.ROOT, "%." + precision + "f", number) + (unit.isBlank() ? "" : " " + unit);
+        return String.format(Locale.ROOT, "%." + precision + "f", number) + suffix(unit);
+    }
+
+    static String suffix(String unit) {
+        return unit.isBlank() ? "" : unit.startsWith("/") ? unit : " " + unit;
     }
 
     private static void labels(String selector, double scale, String unit, int precision, UICommandBuilder commands) {

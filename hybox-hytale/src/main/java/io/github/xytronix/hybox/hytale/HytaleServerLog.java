@@ -14,11 +14,15 @@ final class HytaleServerLog {
     }
 
     static List<DiagnosticSection> appendTo(List<DiagnosticSection> base, boolean includeServerLog,
-                                            int tailLines, PlayerNameMasker nameMasker, boolean sanitize) {
+                                            int tailLines, PlayerNameMasker nameMasker) {
         if (!includeServerLog || tailLines <= 0) {
             return base;
         }
-        Path log = HytaleBundleExtrasProvider.latestServerLog();
+        return appendTo(base, HytaleBundleExtrasProvider.latestServerLog(), tailLines, nameMasker);
+    }
+
+    static List<DiagnosticSection> appendTo(List<DiagnosticSection> base, Path log, int tailLines,
+                                            PlayerNameMasker nameMasker) {
         if (log == null) {
             return base;
         }
@@ -32,7 +36,7 @@ final class HytaleServerLog {
             return base;
         }
         List<DiagnosticSection> out = new ArrayList<>(base);
-        out.add(new DiagnosticSection("Server log", Map.of(), sanitize ? nameMasker.maskText(tail) : tail));
+        out.add(new DiagnosticSection("Server log", Map.of(), nameMasker.maskText(tail)));
         return out;
     }
 }

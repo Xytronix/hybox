@@ -42,7 +42,7 @@ class HyboxUiDocumentsTest {
         String dashboard = Files.readString(Path.of(getClass().getResource("/Common/UI/Custom/Pages/HyboxDashboard.ui").toURI()));
         var hint = Pattern.compile("Label #CaptureHint \\{([^}]*)}").matcher(dashboard);
         assertTrue(hint.find());
-        assertTrue(hint.group(1).contains("Text: \"Saves the last 15 minutes of recording, thread dumps, server log and config as an incident bundle.\";"));
+        assertTrue(hint.group(1).contains("Text: \"Saves the last 15 minutes of recording and thread dumps as an incident bundle.\";"));
         assertFalse(hint.group(1).contains("TooltipText:"));
         assertFalse(hint.group(1).contains("TextTooltipStyle:"));
     }

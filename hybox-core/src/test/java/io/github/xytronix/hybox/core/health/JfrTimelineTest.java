@@ -178,11 +178,11 @@ class JfrTimelineTest {
         try (Recording recording = new Recording()) {
             recording.enable(HyboxPluginMetricEvent.class).withoutStackTrace();
             recording.start();
-            commitMetric("ChunkUnloader unloaded", 120, true);
-            commitMetric("AiTickThrottler frozen", 42, false);
+            commitMetric("ChunkUnloader unloaded", 120, true, 120);
+            commitMetric("AiTickThrottler frozen", 42, false, 0);
             Thread.sleep(120);
-            commitMetric("ChunkUnloader unloaded", 60, true);
-            commitMetric("AiTickThrottler frozen", 50, false);
+            commitMetric("ChunkUnloader unloaded", 60, true, 180);
+            commitMetric("AiTickThrottler frozen", 50, false, 0);
             recording.dump(target);
         }
 
@@ -194,18 +194,76 @@ class JfrTimelineTest {
         JfrTimeline.PluginMetric count = metric(timeline, "ChunkUnloader unloaded");
         assertEquals("count", count.kind());
         assertEquals(JfrTimeline.BUCKETS, count.series().length);
-        assertEquals(120.0, count.series()[0], 0.001);
-        assertEquals(180.0, java.util.Arrays.stream(count.series()).sum(), 0.001);
-        assertEquals(60.0, lastNonZero(count.series()), 0.001);
-        assertEquals(0.0, count.series()[JfrTimeline.BUCKETS / 2], 0.001);
+        assertEquals(2, count.events());
+        assertEquals(180.0, count.total(), 0.001);
+        assertEquals(180.0, count.cumulative(), 0.001);
+        double rate = count.series()[JfrTimeline.BUCKETS / 2];
+        assertTrue(rate > 0);
+        for (double v : count.series()) {
+            assertTrue(Double.isNaN(v) || Math.abs(v - rate) < 1e-6 * rate);
+        }
 
         JfrTimeline.PluginMetric gauge = metric(timeline, "AiTickThrottler frozen");
         assertEquals("gauge", gauge.kind());
         assertEquals(42.0, gauge.series()[0], 0.001);
         assertEquals(42.0, gauge.series()[JfrTimeline.BUCKETS / 2], 0.001);
         assertEquals(50.0, gauge.series()[gauge.series().length - 1], 0.001);
+        assertTrue(Double.isNaN(gauge.cumulative()));
 
         assertTrue(timeline.retained().isEmpty());
+    }
+
+    @Test
+    void keepsSingleEventAndZeroPluginMetrics(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("recording.jfr");
+        try (Recording recording = new Recording()) {
+            recording.enable(HyboxPluginMetricEvent.class).withoutStackTrace();
+            recording.start();
+            commitMetric("radius", 8, false, 0);
+            commitMetric("boot only", 9063, true, 9063);
+            commitMetric("never reached", 0, true, 0);
+            Thread.sleep(120);
+            commitMetric("radius", 8, false, 0);
+            recording.dump(target);
+        }
+
+        JfrTimeline timeline = JfrTimeline.parse(target);
+
+        assertNotNull(timeline);
+        assertEquals(java.util.List.of("boot only", "never reached", "radius"),
+            timeline.pluginMetrics().stream().map(JfrTimeline.PluginMetric::name).toList());
+        JfrTimeline.PluginMetric boot = metric(timeline, "boot only");
+        assertEquals(1, boot.events());
+        assertEquals(9063.0, boot.total(), 0.001);
+        assertEquals("single", boot.uncharted());
+        assertNull(boot.series());
+        JfrTimeline.PluginMetric never = metric(timeline, "never reached");
+        assertEquals("zero", never.uncharted());
+        assertNull(never.series());
+        assertEquals(0.0, never.total(), 0.001);
+        assertNull(metric(timeline, "radius").uncharted());
+    }
+
+    @Test
+    void convertsCounterDeltasToRateOverIrregularIntervals() {
+        java.util.List<JfrTimelineParser.Pt> deltas = java.util.List.of(
+            new JfrTimelineParser.Pt(1000, 10),
+            new JfrTimelineParser.Pt(3000, 40),
+            new JfrTimelineParser.Pt(3500, 2),
+            new JfrTimelineParser.Pt(3500, 3));
+
+        double[] rate = JfrTimelineParser.counterRate(deltas, 0, 9999, 10);
+
+        double[] expected = {Double.NaN, 20, 20, 10, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN};
+        for (int i = 0; i < expected.length; i++) {
+            assertEquals(expected[i], rate[i], 1e-9, "bucket " + i);
+        }
+    }
+
+    @Test
+    void lonePluginCounterDeltaHasNoRate() {
+        assertNull(JfrTimelineParser.counterRate(
+            java.util.List.of(new JfrTimelineParser.Pt(4500, 7), new JfrTimelineParser.Pt(4500, 2)), 0, 9999, 10));
     }
 
     @Test
@@ -240,11 +298,12 @@ class JfrTimelineTest {
         event.commit();
     }
 
-    private static void commitMetric(String name, double value, boolean counter) {
+    private static void commitMetric(String name, double value, boolean counter, double total) {
         HyboxPluginMetricEvent event = new HyboxPluginMetricEvent();
         event.name = name;
         event.value = value;
         event.counter = counter;
+        event.total = total;
         event.commit();
     }
 
@@ -253,15 +312,6 @@ class JfrTimelineTest {
             .filter(m -> m.name().equals(name))
             .findFirst()
             .orElseThrow();
-    }
-
-    private static double lastNonZero(double[] series) {
-        for (int i = series.length - 1; i >= 0; i--) {
-            if (series[i] != 0) {
-                return series[i];
-            }
-        }
-        return 0;
     }
 
     @Test

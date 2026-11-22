@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 
 $C.@PageOverlay {}
 
@@ -25,7 +26,7 @@ $C.@Container {
         Label #Headline { FlexWeight: 1; Style: (FontSize: 17, RenderBold: true, VerticalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 11); }
       }
       Label #IncidentMeta { Anchor: (Height: 18); Style: (FontSize: 12, TextColor: #bfcdd5, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9); }
-      Label #BlockedIn { Anchor: (Height: 18); Style: (FontSize: 11, TextColor: #96a9be, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9); TextTooltipStyle: $C.@DefaultTextTooltipStyle; }
+      Label #BlockedIn { Anchor: (Height: 18); Style: (FontSize: 11, TextColor: #96a9be, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9); TextTooltipStyle: $H.@TooltipStyle; }
     }
     Group {
       LayoutMode: Left;

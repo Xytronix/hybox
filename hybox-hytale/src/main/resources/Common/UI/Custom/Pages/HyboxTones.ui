@@ -4,3 +4,9 @@
 @OkBanner = #80c991(0.10);
 @WarnBanner = #efbd62(0.10);
 @ErrorBanner = #ef8181(0.10);
+@TooltipStyle = TextTooltipStyle(
+  Background: (TexturePath: "../Common/TooltipDefaultBackground.png", Border: 24),
+  MaxWidth: 320,
+  LabelStyle: (Wrap: true, FontSize: 12),
+  Padding: 18
+);

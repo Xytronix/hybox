@@ -36,7 +36,8 @@ public final class JfrTimeline {
 
     public record ConnEvent(long timeMs, String player, String phase, String detail) {}
 
-    public record PluginMetric(String name, String kind, double[] series) {}
+    public record PluginMetric(String name, String kind, double[] series, double[] amounts, double bucketSeconds, int events,
+                               double total, double cumulative, String uncharted) {}
 
     public record Retained(String className, long count, String allocSite) {}
 

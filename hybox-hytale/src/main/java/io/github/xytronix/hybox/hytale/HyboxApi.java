@@ -3,9 +3,11 @@ package io.github.xytronix.hybox.hytale;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.DoubleSupplier;
@@ -210,16 +212,18 @@ public final class HyboxApi {
             if (!store.containsKey(key) && ownerEntries(store, owner) >= MAX_PER_PLUGIN) {
                 return;
             }
+            double total = 0;
+            if (counter) {
+                total = store.merge(key, value, Double::sum);
+            } else {
+                store.put(key, value);
+            }
             HyboxPluginMetricEvent event = new HyboxPluginMetricEvent();
             event.name = key;
             event.value = value;
             event.counter = counter;
+            event.total = total;
             event.commit();
-            if (counter) {
-                store.merge(key, value, Double::sum);
-            } else {
-                store.put(key, value);
-            }
         } catch (Throwable ignored) {
         }
     }
@@ -359,6 +363,7 @@ public final class HyboxApi {
             long deadline = captured.callbacks().deadline();
             var policy = captured.config();
             List<BundleAttachment> all = new ArrayList<>();
+            Set<String> paths = new HashSet<>();
             for (OwnedExtras entry : EXTRAS) {
                 if (System.nanoTime() - deadline >= 0) {
                     break;
@@ -374,7 +379,14 @@ public final class HyboxApi {
                     return result == null ? List.of() : List.copyOf(result);
                 }, deadline);
                 if (attachments != null && allowed(config) && captured.config() == policy && entry.token().active()) {
-                    all.addAll(attachments);
+                    for (BundleAttachment attachment : attachments) {
+                        if (paths.add(attachment.pathInZip())) {
+                            all.add(attachment);
+                        } else {
+                            captured.logger().log(System.Logger.Level.WARNING, "Skipping duplicate bundle entry "
+                                + attachment.pathInZip() + " from plugin '" + entry.owner() + "'; the first entry is kept.");
+                        }
+                    }
                 }
             }
             return allowed(config) && captured.config() == policy ? all : List.of();

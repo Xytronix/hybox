@@ -1,6 +1,8 @@
 package io.github.xytronix.hybox.core.report;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.MathContext;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -97,13 +99,38 @@ final class ReportActivityWriter {
         }
         json.name("pluginMetrics").beginArray();
         for (JfrTimeline.PluginMetric metric : metrics) {
+            boolean counter = "count".equals(metric.kind());
             json.beginObject();
             json.name("name").value(metric.name());
             json.name("kind").value(metric.kind());
-            ReportJson.writeDoubleSeries(json, "series", metric.series());
+            json.name("events").value(metric.events());
+            json.name("uncharted").value(metric.uncharted());
+            json.name("total").value(ReportJson.round2(metric.total()));
+            if (counter) {
+                json.name("bucketSec").value(significant(metric.bucketSeconds()));
+                ReportJson.writeNullableDouble(json, "cumulative",
+                    Double.isFinite(metric.cumulative()) ? metric.cumulative() : null);
+                if (metric.amounts() != null) {
+                    ReportJson.writeDoubleSeries(json, "amounts", metric.amounts());
+                }
+            }
+            json.name("series");
+            if (metric.series() == null) {
+                json.nullValue();
+            } else {
+                json.beginArray();
+                for (double v : metric.series()) {
+                    json.value(counter ? significant(v) : ReportJson.round2(v));
+                }
+                json.endArray();
+            }
             json.endObject();
         }
         json.endArray();
+    }
+
+    private static double significant(double v) {
+        return v == 0 || !Double.isFinite(v) ? v : new BigDecimal(v).round(new MathContext(4)).doubleValue();
     }
 
     private record TickSystemRow(String system, String world, double avg1m, double max1m,

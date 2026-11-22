@@ -55,6 +55,7 @@ final class HyboxIncidentRenderer {
     private static final int PLOT_WIDTH = 940;
     private static final int CHART_WIDTH = 880;
     private static final String[] COLORS = {"#7a9cc6", "#80c991", "#efbd62", "#ef8181", "#7ac7bf", "#acb9ca"};
+    private static final String PLUGIN_METRIC_KEY = "pluginMetric:";
     private static final Map<String, String> LABELS = labels();
 
     private HyboxIncidentRenderer() {}
@@ -103,7 +104,8 @@ final class HyboxIncidentRenderer {
         cmd.set("#PagePrev.Disabled", pageIndex == 0);
         cmd.set("#PageNext.Disabled", pageIndex + 1 >= pages.size());
         if (state.sectionId().equals("top")) overviewTiles(model, cmd);
-        int columns = chartColumns(visible);
+        int[] budget = budget(visible);
+        int columns = budget[0], hoverCells = budget[1];
         String parent = "#SectionBody";
         int child = 0;
         int row = 0;
@@ -125,8 +127,8 @@ final class HyboxIncidentRenderer {
             }
             String selector = parent + "[" + child++ + "]";
             switch (block.kind) {
-                case CHART -> chart(model, state, block, parent, selector, columns, images, cmd);
-                case TIMELINE -> timeline(model, state, block, parent, selector, columns, images, cmd);
+                case CHART -> chart(model, state, block, parent, selector, columns, hoverCells, images, cmd);
+                case TIMELINE -> timeline(model, state, block, parent, selector, columns, hoverCells, images, cmd);
                 case THREAD -> {
                     cmd.append(parent, "Pages/HyboxIncidentThread.ui");
                     JsonArray thread = array(block.data);
@@ -151,16 +153,7 @@ final class HyboxIncidentRenderer {
                     cmd.set(selector + " #Strip.Visible", hasTimeline);
                     if (hasTimeline) {
                         int[] selected = range(model, state, series.size());
-                        StringBuilder intervals = new StringBuilder();
-                        int position = selected[0];
-                        while (position < selected[1]) {
-                            int value = (int) number(series.get(position), 0), end = position + 1;
-                            while (end < selected[1] && (int) number(series.get(end), 0) == value) end++;
-                            String stateName = switch (value) { case 1 -> "RUNNABLE"; case 2 -> "WAITING"; case 3 -> "TIMED_WAITING"; case 4 -> "BLOCKED"; default -> "no samples"; };
-                            intervals.append(position).append('–').append(end - 1).append(": ").append(stateName).append('\n');
-                            position = end;
-                        }
-                        cmd.set(selector + " #Strip.TooltipText", intervals.toString());
+                        HyboxChartRenderer.hover(cmd, selector + " #StripHover", PLOT_WIDTH, 12, stateTips(model, series, selected, hoverCells));
                         int stripColumns = Math.min(columns, selected[1] - selected[0]);
                         if (images != null) {
                             int[] codes = stateCodes(series, selected);
@@ -222,11 +215,9 @@ final class HyboxIncidentRenderer {
                     cmd.append(parent, "Pages/HyboxIncidentTable.ui");
                     JsonObject cells = object(block.data);
                     cmd.set(selector + " #Name.Text", block.label);
-                    cmd.set(selector + " #Name.TooltipText", block.label);
                     cmd.set(selector + " #Facts.Text", block.value);
                     cmd.set(selector + " #Amount.Text", text(cells, "amount"));
                     cmd.set(selector + " #Details.Text", text(cells, "details"));
-                    cmd.set(selector + " #Details.TooltipText", text(cells, "details"));
                     cmd.set(selector + " #Details.Visible", !text(cells, "details").isEmpty());
                 }
                 case LINK -> {
@@ -240,7 +231,6 @@ final class HyboxIncidentRenderer {
                     cmd.set(selector + " #Key.Text", block.label);
                     cmd.set(selector + " #Value.Text", block.value);
                     if (block.data.isJsonArray()) cmd.set(selector + " #Value.TextSpans", styledSpans(block.data));
-                    cmd.set(selector + " #Value.TooltipText", block.value);
                     if (block.kind == Kind.SHARE) {
                         cmd.set(selector + " #Share.Visible", true);
                         cmd.set(selector + " #Share.Value", Math.max(0, Math.min(1, block.share)));
@@ -262,9 +252,9 @@ final class HyboxIncidentRenderer {
         ViewState state = new ViewState(section, 0, "", "all", false);
         int max = 0;
         for (List<Block> page : pages(plan(model, state), section)) {
-            int columns = chartColumns(page);
+            int[] budget = budget(page);
             int elements = 80;
-            for (Block block : page) elements += elements(block, columns, model, state);
+            for (Block block : page) elements += elements(block, budget, model, state);
             if (section.equals("top")) elements += 24;
             max = Math.max(max, elements);
         }
@@ -405,10 +395,28 @@ final class HyboxIncidentRenderer {
             }
             case "memory" -> memory(p);
             case "pluginmetrics" -> {
-                for (JsonElement element : array(p.use("pluginMetrics"))) {
-                    JsonObject metric = object(element);
-                    p.chart(text(metric, "name") + " · " + text(metric, "kind"), metric.get("series"), text(metric, "kind"), text(metric, "name"));
+                JsonArray metrics = array(p.use("pluginMetrics"));
+                Map<String, List<String>> uncharted = new LinkedHashMap<>();
+                for (String heading : List.of("Published once, no rate", "Zero for the whole window", "Not charted, over the limit")) uncharted.put(heading, new ArrayList<>());
+                for (int i = 0; i < metrics.size(); i++) {
+                    JsonObject metric = object(metrics.get(i));
+                    String name = text(metric, "name");
+                    boolean counter = "count".equals(text(metric, "kind"));
+                    if (!dataIsSeries(metric.get("series"))) {
+                        String reason = text(metric, "uncharted");
+                        String withTotal = counter ? name + " · total " + count(number(metric.get("total"), 0)) : name;
+                        if (reason.equals("zero")) uncharted.get("Zero for the whole window").add(name);
+                        else if (reason.equals("single")) uncharted.get("Published once, no rate").add(withTotal);
+                        else uncharted.get("Not charted, over the limit").add(withTotal);
+                        continue;
+                    }
+                    boolean rate = counter && present(metric.get("bucketSec"));
+                    p.chart(name + " · " + (rate ? "counter, per second" : counter ? "count per interval" : "gauge"),
+                        metric.get("series"), rate ? "/s" : "", PLUGIN_METRIC_KEY + i);
                 }
+                uncharted.forEach((heading, names) -> {
+                    for (int i = 0; i < names.size(); i++) p.row(i == 0 ? heading : "", names.get(i));
+                });
             }
             case "network" -> network(p);
             case "worlds" -> {
@@ -947,7 +955,7 @@ final class HyboxIncidentRenderer {
         if (!tableSection) {
             List<Block> page = new ArrayList<>(); int nonCharts = 80;
             for (Block block : blocks) {
-                int cost = switch (block.kind) { case TABLE -> 6; case TEXT, SHARE -> 5; case CARD -> 3; case EVIDENCE -> 3; default -> 0; };
+                int cost = switch (block.kind) { case TABLE -> 6; case TEXT, SHARE -> 5; case CARD -> 3; case EVIDENCE -> 3; case CHART -> 45; default -> 0; };
                 if (nonCharts + cost > 1320 && !page.isEmpty()) { result.add(page); page = new ArrayList<>(); nonCharts = 80; }
                 page.add(block); nonCharts += cost;
             }
@@ -963,32 +971,36 @@ final class HyboxIncidentRenderer {
         return result.isEmpty() ? List.of(List.of()) : result;
     }
 
-    private static int chartColumns(List<Block> blocks) {
+    private static int[] budget(List<Block> blocks) {
         int base = 80, charts = 0, timelines = 0, threadStrips = 0;
         for (Block b : blocks) {
             if (b.kind == Kind.CHART) charts++;
             else if (b.kind == Kind.TIMELINE) timelines++;
             else if (b.kind == Kind.THREAD) {
-                base += 16;
+                base += 17;
                 if (b.timeline != null && !b.timeline.isEmpty()) threadStrips++;
             } else base += switch (b.kind) { case TABLE -> 6; case CARD, EVIDENCE -> 3; case TEXT, SHARE -> 5; case PARAGRAPH -> 2; case LEGEND -> 21; case THREAD_AXIS -> 6; case FLAME -> 1353; default -> 1; };
         }
         int elementTarget = timelines + threadStrips > 0 ? 1100 : 1400;
-        return Math.max(1, Math.min(CHART_COLUMNS, (elementTarget - base - charts * 24 - timelines * 22) / Math.max(1, charts * 2 + timelines + threadStrips)));
+        int free = elementTarget - base - charts * 25 - timelines * 23, users = charts + timelines + threadStrips;
+        int cells = users == 0 ? 0 : Math.max(0, Math.min(HyboxChartRenderer.HOVER_CELLS, free / (3 * users)));
+        int columns = Math.max(1, Math.min(CHART_COLUMNS, (free - users * cells) / Math.max(1, charts * 2 + timelines + threadStrips)));
+        return new int[] {columns, cells};
     }
 
-    private static int elements(Block b, int columns, IncidentModel model, ViewState state) {
+    private static int elements(Block b, int[] budget, IncidentModel model, ViewState state) {
+        int columns = budget[0], cells = budget[1];
         return switch (b.kind) {
-            case CHART -> 24 + 2 * Math.min(columns, array(b.data).size());
-            case TIMELINE -> 22 + Math.min(columns, array(b.data).size());
-            case THREAD -> 16 + (b.timeline == null ? 0 : Math.min(columns, b.timeline.size()));
+            case CHART -> 25 + Math.min(cells, array(b.data).size()) + 2 * Math.min(columns, array(b.data).size());
+            case TIMELINE -> 23 + Math.min(cells, array(b.data).size()) + Math.min(columns, array(b.data).size());
+            case THREAD -> 17 + (b.timeline == null ? 0 : Math.min(cells, b.timeline.size()) + Math.min(columns, b.timeline.size()));
             case THREAD_AXIS -> 6;
             case FLAME -> 3 + flameSegments(model, state).size() * 3;
             case LINK -> 1; case TABLE -> 6; case CARD, EVIDENCE -> 3; case TEXT, SHARE -> 5; case PARAGRAPH -> 2; case LEGEND -> 21;
         };
     }
 
-    private static void chart(IncidentModel model, ViewState state, Block block, String parent, String selector, int columnCap, ChartImages images, UICommandBuilder cmd) {
+    private static void chart(IncidentModel model, ViewState state, Block block, String parent, String selector, int columnCap, int hoverCells, ChartImages images, UICommandBuilder cmd) {
         cmd.append(parent, "Pages/HyboxIncidentChart.ui");
         JsonArray series = array(block.data); int[] range = range(model, state, series.size());
         double min = Double.POSITIVE_INFINITY, max = Double.NEGATIVE_INFINITY, sum = 0, now = 0; int samples = 0;
@@ -1015,6 +1027,20 @@ final class HyboxIncidentRenderer {
         }
         String extra = "";
         if (Set.of("exceptions", "connects", "joins", "leaves", "chunksGenerated", "chunksLoaded").contains(block.arg)) extra += " · total " + count(sum);
+        JsonObject plugin = block.arg.startsWith(PLUGIN_METRIC_KEY)
+            ? object(model.array("pluginMetrics").get(Integer.parseInt(block.arg.substring(PLUGIN_METRIC_KEY.length())))) : null;
+        boolean rate = plugin != null && block.value.equals("/s");
+        if (plugin != null && "count".equals(text(plugin, "kind"))) {
+            double total = sum;
+            if (rate) {
+                JsonArray amounts = array(plugin.get("amounts"));
+                total = 0;
+                if (state.timeRangeId().equals("all") || amounts.isEmpty()) total = number(plugin.get("total"), 0);
+                else for (int i = range[0]; i < Math.min(range[1], amounts.size()); i++) total += number(amounts.get(i), 0);
+            }
+            extra += " · total " + count(total);
+            if (present(plugin.get("cumulative"))) extra += " · since start " + count(number(plugin.get("cumulative"), 0));
+        }
         if (block.arg.equals("mspt")) {
             double markerFraction = number(model.object("incident").get("markerFrac"), -1);
             int markerIndex = (int) (markerFraction * series.size());
@@ -1026,12 +1052,14 @@ final class HyboxIncidentRenderer {
         if (Set.of("tps", "mspt").contains(block.arg) && present(model.object("tps").get("world"))) title += " · " + text(model.object("tps"), "world");
         if (Set.of("netIn", "netOut").contains(block.arg) && present(model.object("net").get("iface"))) title += " · " + text(model.object("net"), "iface");
         cmd.set(selector + " #ChartTitle.Text", title);
-        int precision = Set.of("count", "players", "entities", "chunks").contains(block.value) ? 0 : block.arg.equals("gcPause") ? 2 : 1;
+        int precision = Set.of("count", "players", "entities", "chunks").contains(block.value) || rate && max >= 100 ? 0 : block.arg.equals("gcPause") ? 2 : 1;
         double factor = block.value.equals("GiB") ? 1073741824.0 : block.value.equals("GB") ? 1e9 : 1;
         double span = Math.abs(max - min) / factor;
         if (span > 0) precision = Math.max(precision, Math.min(6, (int) Math.ceil(-Math.log10(span))));
-        cmd.set(selector + " #ChartStats.Text", "min " + chartValue(min, block.value, precision) + " · avg " + chartValue(average, block.value, precision) + " · max " + chartValue(max, block.value, precision) + " · now " + chartValue(now, block.value, precision) + extra);
-        cmd.set(selector + " #ChartStats.TooltipText", "min " + chartValue(min, block.value, precision) + " · avg " + chartValue(average, block.value, precision) + " · max " + chartValue(max, block.value, precision) + " · now " + chartValue(now, block.value, precision) + extra);
+        String stats = rate
+            ? "avg " + chartValue(average, block.value, precision) + " · max " + chartValue(max, block.value, precision) + extra
+            : "min " + chartValue(min, block.value, precision) + " · avg " + chartValue(average, block.value, precision) + " · max " + chartValue(max, block.value, precision) + " · now " + chartValue(now, block.value, precision) + extra;
+        cmd.set(selector + " #ChartStats.Text", stats);
         axes(model, selector, range, series.size(), cmd);
         int count = range[1] - range[0];
         double[] values = new double[count];
@@ -1042,10 +1070,19 @@ final class HyboxIncidentRenderer {
         double marker = number(model.object("incident").get("markerFrac"), -1) * Math.max(0, series.size() - 1);
         double[] markers = marker >= range[0] && marker <= range[1] - 1
             ? new double[] {marker - range[0]} : new double[0];
-        HyboxChartRenderer.plot(selector, values, markers, columnCap, block.value, precision, true, images, cmd);
+        HyboxChartRenderer.plot(selector, values, markers, columnCap, block.value, precision, max, true, images, cmd);
+        int cells = Math.min(hoverCells, count);
+        List<String> tips = new ArrayList<>();
+        for (int c = 0; c < cells; c++) {
+            int from = c * count / cells, to = (c + 1) * count / cells;
+            double cellSum = 0; int n = 0;
+            for (int i = from; i < to; i++) if (!Double.isNaN(values[i])) { cellSum += values[i]; n++; }
+            tips.add(timeAt(model, range[0] + from, series.size()) + " · " + (n == 0 ? "no data" : chartValue(cellSum / n, block.value, precision)));
+        }
+        HyboxChartRenderer.hover(cmd, selector + " #Hover", CHART_WIDTH, 96, tips);
     }
 
-    private static void timeline(IncidentModel model, ViewState state, Block block, String parent, String selector, int columnCap, ChartImages images, UICommandBuilder cmd) {
+    private static void timeline(IncidentModel model, ViewState state, Block block, String parent, String selector, int columnCap, int hoverCells, ChartImages images, UICommandBuilder cmd) {
         cmd.append(parent, "Pages/HyboxIncidentChart.ui");
         JsonArray series = array(block.data); int[] range = range(model, state, series.size());
         cmd.set(selector + " #ChartTitle.Text", block.label);
@@ -1055,16 +1092,7 @@ final class HyboxIncidentRenderer {
         cmd.setObject(selector + " #Plot.Anchor", anchor(0, 0, CHART_WIDTH, 18));
         for (String grid : List.of("#GridMax", "#GridMid", "#Baseline")) cmd.set(selector + " " + grid + ".Visible", false);
         axes(model, selector, range, series.size(), cmd);
-        StringBuilder intervals = new StringBuilder();
-        int position = range[0];
-        while (position < range[1]) {
-            int value = (int) number(series.get(position), 0), end = position + 1;
-            while (end < range[1] && (int) number(series.get(end), 0) == value) end++;
-            String stateName = switch (value) { case 1 -> "RUNNABLE"; case 2 -> "WAITING"; case 3 -> "TIMED_WAITING"; case 4 -> "BLOCKED"; default -> "no samples"; };
-            intervals.append(position).append('–').append(end - 1).append(": ").append(stateName).append('\n');
-            position = end;
-        }
-        cmd.set(selector + " #Plot.TooltipText", intervals.toString());
+        HyboxChartRenderer.hover(cmd, selector + " #Hover", CHART_WIDTH, 18, stateTips(model, series, range, hoverCells));
         if (images != null && range[1] > range[0]) {
             int[] codes = stateCodes(series, range);
             images.request(new ChartRequest(() -> HyboxChartImage.states(codes, CHART_WIDTH, 18), (path, swap) -> {
@@ -1090,6 +1118,25 @@ final class HyboxIncidentRenderer {
         int[] codes = new int[Math.max(0, range[1] - range[0])];
         for (int i = 0; i < codes.length; i++) codes[i] = Math.max(0, Math.min(4, (int) number(series.get(range[0] + i), 0)));
         return codes;
+    }
+    private static List<String> stateTips(IncidentModel model, JsonArray series, int[] range, int hoverCells) {
+        int count = range[1] - range[0], cells = Math.min(hoverCells, Math.max(0, count));
+        List<String> tips = new ArrayList<>();
+        int[] counts = new int[5];
+        for (int c = 0; c < cells; c++) {
+            int from = range[0] + c * count / cells, to = range[0] + (c + 1) * count / cells;
+            java.util.Arrays.fill(counts, 0);
+            for (int i = from; i < to; i++) counts[Math.max(0, Math.min(4, (int) number(series.get(i), 0)))]++;
+            int value = 0;
+            for (int candidate = 1; candidate < counts.length; candidate++) if (counts[candidate] > counts[value]) value = candidate;
+            String name = switch (value) { case 1 -> "RUNNABLE"; case 2 -> "WAITING"; case 3 -> "TIMED_WAITING"; case 4 -> "BLOCKED"; default -> "no samples"; };
+            tips.add(timeAt(model, from, series.size()) + "–" + timeAt(model, to - 1, series.size()) + " · " + name);
+        }
+        return tips;
+    }
+    private static String timeAt(IncidentModel model, int index, int size) {
+        JsonObject incident = model.object("incident");
+        return clock(text(incident, "recStart"), number(incident.get("windowSec"), 0) * index / Math.max(1, size - 1));
     }
 
     private record FlameSegment(JsonArray node, String path, int left, int width, int depth) {}
@@ -1140,7 +1187,7 @@ final class HyboxIncidentRenderer {
             }));
         }
     }
-    private static com.hypixel.hytale.server.core.ui.Anchor anchor(int left, int top, int width, int height) {
+    static com.hypixel.hytale.server.core.ui.Anchor anchor(int left, int top, int width, int height) {
         var anchor = new com.hypixel.hytale.server.core.ui.Anchor();
         anchor.setLeft(com.hypixel.hytale.server.core.ui.Value.of(left));
         anchor.setTop(com.hypixel.hytale.server.core.ui.Value.of(top));
@@ -1243,7 +1290,7 @@ final class HyboxIncidentRenderer {
     private static String chartValue(double n, String unit, int precision) {
         if (unit.equals("GiB")) n /= 1073741824.0;
         if (unit.equals("GB")) n /= 1e9;
-        return unit.equals("bytes") ? bytes(n) : decimal(n, precision) + (unit.isBlank() ? "" : " " + unit);
+        return unit.equals("bytes") ? bytes(n) : decimal(n, precision) + HyboxChartRenderer.suffix(unit);
     }
     private static String unit(String key) {
         return switch (key) {

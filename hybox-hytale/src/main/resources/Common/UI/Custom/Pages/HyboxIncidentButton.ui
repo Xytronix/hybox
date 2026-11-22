@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 @SelectedStyle = (
   Default: (Background: #ffffff(0.08), LabelStyle: (FontSize: 12, RenderBold: true, TextColor: #ffffff, HorizontalAlignment: Start, VerticalAlignment: Center)),
   Hovered: (Background: #ffffff(0.08), LabelStyle: (FontSize: 12, RenderBold: true, TextColor: #ffffff, HorizontalAlignment: Start, VerticalAlignment: Center)),
@@ -15,6 +16,6 @@ $C.@SecondaryTextButton #Button {
   @Text = "";
   Anchor: (Height: 24, Bottom: 2);
   Padding: (Horizontal: 10);
-  TextTooltipStyle: $C.@DefaultTextTooltipStyle;
+  TextTooltipStyle: $H.@TooltipStyle;
   Style: @DefaultStyle;
 }

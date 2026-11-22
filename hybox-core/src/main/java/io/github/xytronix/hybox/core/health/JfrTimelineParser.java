@@ -7,11 +7,14 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import jdk.jfr.consumer.RecordedClass;
 import jdk.jfr.consumer.RecordedClassLoader;
@@ -58,8 +61,7 @@ final class JfrTimelineParser {
     private static final int ALLOC_CLASS_LIMIT = 15;
     private static final int ALLOC_MOD_LIMIT = 10;
     private static final int PLUGIN_EVENT_CAP = 2000;
-    private static final int PLUGIN_METRIC_LIMIT = 24;
-    private static final int PLUGIN_METRIC_MIN_EVENTS = 2;
+    private static final int PLUGIN_METRIC_LIMIT = 64;
     private static final int RETAINED_LIMIT = 20;
     private static final int SLOW_IO_LIMIT = 15;
     private static final int SYSTEM_TICK_LIMIT = 24;
@@ -86,7 +88,7 @@ final class JfrTimelineParser {
         }
     }
 
-    private record Pt(long t, double v) {}
+    record Pt(long t, double v) {}
 
     private record StackInfo(String leaf, String[] flameFrames, int[] flameOwners, String cpuModId,
                              String cpuModMethod, String chain, String subsystem, String allocMod) {}
@@ -185,6 +187,7 @@ final class JfrTimelineParser {
         ArrayDeque<ConnEvent> connEvents = new ArrayDeque<>();
         Map<String, List<Pt>> metricPts = new LinkedHashMap<>();
         Map<String, Boolean> metricIsCounter = new HashMap<>();
+        Map<String, Pt> metricRunningTotal = new HashMap<>();
         Map<String, List<Pt>> systemTickPts = new LinkedHashMap<>();
         Map<String, long[]> oldObjectCounts = new HashMap<>();
         Map<String, Map<String, long[]>> oldObjectSites = new HashMap<>();
@@ -367,9 +370,14 @@ final class JfrTimelineParser {
                     case "io.github.xytronix.hybox.PluginMetric" -> {
                         String name = getS(e, "name");
                         if (t > 0 && name != null && !name.isBlank()) {
-                            metricIsCounter.putIfAbsent(name, Boolean.TRUE.equals(getB(e, "counter")));
+                            boolean counter = Boolean.TRUE.equals(getB(e, "counter"));
+                            metricIsCounter.putIfAbsent(name, counter);
                             metricPts.computeIfAbsent(name, k -> new ArrayList<>())
                                 .add(new Pt(t, getD(e, "value")));
+                            if (counter && e.hasField("total")) {
+                                Pt running = new Pt(t, getD(e, "total"));
+                                metricRunningTotal.merge(name, running, (a, b) -> b.t() >= a.t() ? b : a);
+                            }
                         }
                     }
                     case "jdk.OldObjectSample" -> {
@@ -615,20 +623,8 @@ final class JfrTimelineParser {
             alloc = new Alloc(allocTotal, bySubsystem, byThread, byClass, byMod, byWorld);
         }
 
-        List<PluginMetric> pluginMetrics = new ArrayList<>();
-        metricPts.entrySet().stream()
-            .filter(en -> en.getValue().size() >= PLUGIN_METRIC_MIN_EVENTS)
-            .sorted((a, b) -> Integer.compare(b.getValue().size(), a.getValue().size()))
-            .limit(PLUGIN_METRIC_LIMIT)
-            .forEach(en -> {
-                boolean isCounter = Boolean.TRUE.equals(metricIsCounter.get(en.getKey()));
-                double[] series = isCounter
-                    ? bucketSumZeroFilled(en.getValue(), lo, hi, buckets)
-                    : bucketLast(en.getValue(), lo, hi, buckets);
-                if (series != null) {
-                    pluginMetrics.add(new PluginMetric(en.getKey(), isCounter ? "count" : "gauge", series));
-                }
-            });
+        List<PluginMetric> pluginMetrics = pluginMetrics(metricPts, metricIsCounter, metricRunningTotal,
+            lo, hi, buckets);
 
         List<Retained> retained = new ArrayList<>();
         oldObjectCounts.entrySet().stream()
@@ -1483,13 +1479,102 @@ final class JfrTimelineParser {
         return fillGaps(out, seen);
     }
 
-    private static double[] bucketSumZeroFilled(List<Pt> pts, long minT, long maxT, int buckets) {
-        if (pts == null || pts.size() < 2 || maxT <= minT) {
+    private static List<PluginMetric> pluginMetrics(Map<String, List<Pt>> pts, Map<String, Boolean> isCounter,
+                                                    Map<String, Pt> runningTotals, long lo, long hi, int buckets) {
+        Map<String, String> uncharted = new HashMap<>();
+        List<Map.Entry<String, List<Pt>>> chartable = new ArrayList<>();
+        for (Map.Entry<String, List<Pt>> en : pts.entrySet()) {
+            if (allZero(en.getValue())) {
+                uncharted.put(en.getKey(), "zero");
+            } else if (Boolean.TRUE.equals(isCounter.get(en.getKey()))
+                && en.getValue().stream().mapToLong(Pt::t).distinct().count() < 2) {
+                uncharted.put(en.getKey(), "single");
+            } else {
+                chartable.add(en);
+            }
+        }
+        chartable.sort((a, b) -> Integer.compare(b.getValue().size(), a.getValue().size()));
+        for (int i = PLUGIN_METRIC_LIMIT; i < chartable.size(); i++) {
+            uncharted.put(chartable.get(i).getKey(), "limit");
+        }
+        double bucketSeconds = (hi - lo + 1) / 1000.0 / buckets;
+        List<PluginMetric> out = new ArrayList<>();
+        for (Map.Entry<String, List<Pt>> en : pts.entrySet()) {
+            String name = en.getKey();
+            List<Pt> values = en.getValue();
+            boolean counter = Boolean.TRUE.equals(isCounter.get(name));
+            String reason = uncharted.get(name);
+            double[] series = reason != null ? null
+                : counter ? counterRate(values, lo, hi, buckets) : gaugeSeries(values, lo, hi, buckets);
+            double total;
+            double cumulative = Double.NaN;
+            if (counter) {
+                total = values.stream().mapToDouble(Pt::v).sum();
+                Pt running = runningTotals.get(name);
+                if (running != null && running.v() >= total - 1e-9 * Math.abs(total)) {
+                    cumulative = running.v();
+                }
+            } else {
+                total = values.stream().max(Comparator.comparingLong(Pt::t)).map(Pt::v).orElse(0.0);
+            }
+            double[] amounts = null;
+            if (counter && series != null) {
+                amounts = new double[buckets];
+                for (Pt p : values) {
+                    amounts[bucketOf(p.t(), lo, hi, buckets)] += p.v();
+                }
+            }
+            out.add(new PluginMetric(name, counter ? "count" : "gauge", series, amounts, bucketSeconds, values.size(),
+                total, cumulative, reason));
+        }
+        out.sort(Comparator.comparing(PluginMetric::name, String.CASE_INSENSITIVE_ORDER));
+        return out;
+    }
+
+    private static boolean allZero(List<Pt> pts) {
+        return pts.stream().allMatch(p -> p.v() == 0);
+    }
+
+    private static double[] gaugeSeries(List<Pt> pts, long lo, long hi, int buckets) {
+        double[] out = new double[buckets];
+        boolean[] seen = new boolean[buckets];
+        for (Pt p : pts) {
+            int b = bucketOf(p.t(), lo, hi, buckets);
+            out[b] = p.v();
+            seen[b] = true;
+        }
+        return fillGaps(out, seen);
+    }
+
+    static double[] counterRate(List<Pt> pts, long lo, long hi, int buckets) {
+        TreeMap<Long, Double> byTime = new TreeMap<>();
+        for (Pt p : pts) {
+            byTime.merge(p.t(), p.v(), Double::sum);
+        }
+        if (byTime.size() < 2) {
             return null;
         }
+        long[] times = byTime.keySet().stream().mapToLong(Long::longValue).toArray();
+        double[] deltas = byTime.values().stream().mapToDouble(Double::doubleValue).toArray();
+        double span = hi - lo + 1;
+        double bucketMs = span / buckets;
+        double[] amount = new double[buckets];
+        double[] covered = new double[buckets];
+        for (int i = 1; i < times.length; i++) {
+            double perMs = deltas[i] / (times[i] - times[i - 1]);
+            double a = Math.max(times[i - 1], lo);
+            double b = Math.min(times[i], lo + span);
+            for (int k = Math.max(0, (int) ((a - lo) / bucketMs)); k < buckets && lo + k * bucketMs < b; k++) {
+                double overlap = Math.min(b, lo + (k + 1) * bucketMs) - Math.max(a, lo + k * bucketMs);
+                if (overlap > 0) {
+                    amount[k] += perMs * overlap;
+                    covered[k] += overlap;
+                }
+            }
+        }
         double[] out = new double[buckets];
-        for (Pt p : pts) {
-            out[bucketOf(p.t(), minT, maxT, buckets)] += p.v();
+        for (int k = 0; k < buckets; k++) {
+            out[k] = covered[k] > 0 ? amount[k] / covered[k] * 1000.0 : Double.NaN;
         }
         return out;
     }
