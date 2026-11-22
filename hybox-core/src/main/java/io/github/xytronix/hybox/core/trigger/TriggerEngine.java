@@ -25,7 +25,8 @@ public final class TriggerEngine {
         Objects.requireNonNull(event, "event");
         Instant now = event.at() == null ? clock.instant() : event.at();
 
-        if (lastAcceptedAt != null && !policy.cooldownExemptKinds().contains(event.kind())) {
+        boolean profileCompletion = event.kind() == TriggerKind.MANUAL && event.attrs().containsKey("profileStartMs");
+        if (!profileCompletion && lastAcceptedAt != null && !policy.cooldownExemptKinds().contains(event.kind())) {
             Instant cooldownUntil = lastAcceptedAt.plus(policy.cooldown());
             if (now.isBefore(cooldownUntil)) {
                 return new TriggerResult(TriggerDecision.COOLDOWN, Severity.INFO,
@@ -35,7 +36,7 @@ public final class TriggerEngine {
 
         String key = event.kind() + "|" + event.scope();
         Instant lastForKey = lastAcceptedByKey.get(key);
-        if (lastForKey != null) {
+        if (!profileCompletion && lastForKey != null) {
             Instant debounceUntil = lastForKey.plus(policy.debounce());
             if (now.isBefore(debounceUntil)) {
                 return new TriggerResult(TriggerDecision.DEBOUNCE, Severity.INFO,
@@ -44,8 +45,8 @@ public final class TriggerEngine {
         }
 
         TriggerResult accepted = decideAccepted(event);
-        lastAcceptedAt = now;
-        lastAcceptedByKey.put(key, now);
+        lastAcceptedAt = lastAcceptedAt != null && lastAcceptedAt.isAfter(now) ? lastAcceptedAt : now;
+        lastAcceptedByKey.merge(key, now, (previous, current) -> previous.isAfter(current) ? previous : current);
         return accepted;
     }
 

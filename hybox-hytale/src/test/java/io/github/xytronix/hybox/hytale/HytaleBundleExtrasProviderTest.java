@@ -71,7 +71,7 @@ class HytaleBundleExtrasProviderTest {
     @Test
     void emitsNumberedThreadDumpsWhenMultipleCaptured() {
         List<BundleAttachment> extras =
-            HytaleBundleExtrasProvider.threadDumpAttachments(List.of("dump-A", "dump-B", "dump-C"));
+            HytaleBundleExtrasProvider.threadDumpAttachments(List.of("dump-A", "dump-B", "dump-C"), true);
 
         assertEquals("dump-A", contentOf(extras, "extras/threads-1.txt"));
         assertEquals("dump-B", contentOf(extras, "extras/threads-2.txt"));
@@ -82,7 +82,7 @@ class HytaleBundleExtrasProviderTest {
     @Test
     void usesSingleCapturedDumpAsThreadsTxt() {
         List<BundleAttachment> extras =
-            HytaleBundleExtrasProvider.threadDumpAttachments(List.of("only-dump"));
+            HytaleBundleExtrasProvider.threadDumpAttachments(List.of("only-dump"), false);
 
         assertEquals("only-dump", contentOf(extras, "extras/threads.txt"));
     }
@@ -90,9 +90,14 @@ class HytaleBundleExtrasProviderTest {
     @Test
     void capturesLiveThreadDumpWhenNoneProvided() {
         List<BundleAttachment> extras =
-            HytaleBundleExtrasProvider.threadDumpAttachments(List.of());
+            HytaleBundleExtrasProvider.threadDumpAttachments(List.of(), true);
 
         assertTrue(contentOf(extras, "extras/threads.txt").startsWith("threads="));
+    }
+
+    @Test
+    void takesNoLiveThreadDumpWhenDumpsAreDisabled() {
+        assertTrue(HytaleBundleExtrasProvider.threadDumpAttachments(List.of(), false).isEmpty());
     }
 
     private static String contentOf(List<BundleAttachment> extras, String path) {

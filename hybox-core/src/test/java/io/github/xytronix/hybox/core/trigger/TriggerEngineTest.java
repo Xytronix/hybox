@@ -14,6 +14,44 @@ import io.github.xytronix.hybox.core.testutil.MutableClock;
 class TriggerEngineTest {
 
     @Test
+    void profileCompletionBypassesCooldownAndDebounce() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        TriggerPolicy policy = new TriggerPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60), 1000, 5000, 100, 250);
+        TriggerEngine engine = new TriggerEngine(clock, policy);
+        TriggerEvent manual = new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(), Map.of());
+        assertEquals(TriggerDecision.ACCEPT, engine.evaluate(manual).decision());
+        assertEquals(TriggerDecision.COOLDOWN, engine.evaluate(new TriggerEvent(TriggerKind.MANUAL, "server",
+            clock.instant(), Map.of("reason", "profile lead-up"))).decision());
+        TriggerEvent completion = new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(),
+            Map.of("reason", "profile session", "profileStartMs", "0"));
+        assertEquals(TriggerDecision.ACCEPT, engine.evaluate(completion).decision());
+        assertEquals(TriggerDecision.COOLDOWN, engine.evaluate(manual).decision());
+    }
+
+    @Test
+    void deferredProfileCompletionDoesNotMoveCooldownOrDebounceBackwards() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        TriggerPolicy policy = new TriggerPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60), 1000, 5000, 100, 250);
+        TriggerEngine engine = new TriggerEngine(clock, policy);
+        TriggerEvent completion = new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(),
+            Map.of("reason", "profile session", "profileStartMs", "0"));
+        clock.advance(Duration.ofSeconds(10));
+        assertEquals(TriggerDecision.ACCEPT,
+            engine.evaluate(new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(), Map.of())).decision());
+        assertEquals(TriggerDecision.ACCEPT, engine.evaluate(completion).decision());
+
+        clock.advance(Duration.ofSeconds(25));
+        assertEquals(TriggerDecision.COOLDOWN,
+            engine.evaluate(new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(), Map.of())).decision());
+        clock.advance(Duration.ofSeconds(30));
+        assertEquals(TriggerDecision.DEBOUNCE,
+            engine.evaluate(new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(), Map.of())).decision());
+        clock.advance(Duration.ofSeconds(10));
+        assertEquals(TriggerDecision.ACCEPT,
+            engine.evaluate(new TriggerEvent(TriggerKind.MANUAL, "server", clock.instant(), Map.of())).decision());
+    }
+
+    @Test
     void cooldownAndDebounceApplyInOrder() {
         MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
         TriggerPolicy policy = new TriggerPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60), 1000, 5000, 100, 250);
