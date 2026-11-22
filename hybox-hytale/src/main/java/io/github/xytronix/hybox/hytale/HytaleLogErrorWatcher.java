@@ -41,7 +41,7 @@ final class HytaleLogErrorWatcher {
         } catch (Throwable t) {
             unregister();
             logger.log(System.Logger.Level.WARNING,
-                "Failed to subscribe to the server log; log-error captures disabled.", t);
+                "Failed to subscribe to the server log. Log-error captures are off.", t);
         }
     }
 

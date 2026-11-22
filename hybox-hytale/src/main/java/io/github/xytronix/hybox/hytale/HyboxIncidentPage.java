@@ -50,7 +50,7 @@ final class HyboxIncidentPage extends InteractiveCustomUIPage<HyboxIncidentPage.
             @Override public void update(UICommandBuilder commands) {
                 if (!dismissed) sendUpdate(commands, false);
             }
-        }, failure -> logger.log(System.Logger.Level.WARNING, "Chart images unavailable; showing native charts.", failure));
+        }, failure -> logger.log(System.Logger.Level.WARNING, "Chart images failed to render. Charts are shown as bars.", failure));
     }
 
     private World currentWorld() {
@@ -64,7 +64,8 @@ final class HyboxIncidentPage extends InteractiveCustomUIPage<HyboxIncidentPage.
     }
 
     static CompletableFuture<Void> open(HyboxRuntime runtime, Ref<EntityStore> ref, Store<EntityStore> store,
-                                       World world, String incidentId, Runnable onBack) {
+                                       World world, String incidentId, Runnable onBack,
+                                       java.util.function.Consumer<String> onError) {
         CompletableFuture<Void> result = new CompletableFuture<>();
         if (!ref.isValid() || ref.getStore() != store) return CompletableFuture.completedFuture(null);
         Player player = store.getComponent(ref, Player.getComponentType());
@@ -89,17 +90,20 @@ final class HyboxIncidentPage extends InteractiveCustomUIPage<HyboxIncidentPage.
                 });
             } catch (IOException | RuntimeException failure) {
                 world.execute(() -> {
-                    if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN,
-                        "Unable to open incident: " + failure.getMessage()));
+                    failed(ref, playerRef, onError, "Unable to open incident: " + failure.getMessage());
                     result.complete(null);
                 });
             }
         }, () -> world.execute(() -> {
-            if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN,
-                "Hybox worker is busy or stopping; try /hybox incident again."));
+            failed(ref, playerRef, onError, "Hybox is busy. Try again in a moment.");
             result.complete(null);
         }));
         return result;
+    }
+
+    private static void failed(Ref<EntityStore> ref, PlayerRef playerRef, java.util.function.Consumer<String> onError, String message) {
+        if (onError != null) onError.accept(message);
+        else if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN, message));
     }
 
     static CompletableFuture<Void> open(CommandContext context, HyboxRuntime runtime, String id) {
@@ -109,7 +113,7 @@ final class HyboxIncidentPage extends InteractiveCustomUIPage<HyboxIncidentPage.
         Store<EntityStore> store = ref.getStore();
         World world = store.getExternalData().getWorld();
         CompletableFuture<Void> result = new CompletableFuture<>();
-        world.execute(() -> open(runtime, ref, store, world, id, null).whenComplete((ignored, failure) -> {
+        world.execute(() -> open(runtime, ref, store, world, id, null, null).whenComplete((ignored, failure) -> {
             if (failure == null) result.complete(null); else result.completeExceptionally(failure);
         }));
         return result;
@@ -129,7 +133,7 @@ final class HyboxIncidentPage extends InteractiveCustomUIPage<HyboxIncidentPage.
                 result.complete(null);
             }
         }, () -> {
-            context.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN, "Hybox worker is busy or stopping; try again later."));
+            context.sendMessage(HyboxChatFormatter.message(HyboxChatFormatter.Tone.WARN, "Hybox is busy. Try again in a moment."));
             result.complete(null);
         });
         return result;
@@ -146,7 +150,7 @@ final class HyboxIncidentPage extends InteractiveCustomUIPage<HyboxIncidentPage.
             String candidate = incidents.get(i).id();
             if (candidate.equals(requested)) return i;
             if (candidate.endsWith("-" + requested)) {
-                if (selected >= 0) throw new IOException("Incident id is ambiguous; use the full id");
+                if (selected >= 0) throw new IOException("Incident id matches more than one incident. Use the full id");
                 selected = i;
             }
         }

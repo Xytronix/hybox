@@ -4,14 +4,14 @@
 
 | Requirement | Detail |
 | --- | --- |
-| Hytale server | The version in `hytaleServerVersion` in `gradle.properties`, currently `0.7.7`. On another version the server still loads Hybox but warns that it is out of date. Set `hytaleServerVersion` to your server's version and rebuild. |
+| Hytale server | 0.7.7 or later, and 0.8.0 pre-releases from pre-release 5. One jar covers all of them. The range is `hytaleServerRange` in `gradle.properties`. Hytale only accepts a pre-release that the range names, so on a later pre-release such as 0.9.0-pre.1 the server still loads Hybox but warns that it is out of date. |
 | Java 25 | Needed to build. Gradle downloads a Java 25 toolchain if none is installed. |
 
 ## Build and install
 
 1. Run `./gradlew clean build`.
 2. Stop the server.
-3. Copy `hybox-hytale/build/libs/Hybox-<version>.jar`, for example `Hybox-1.0.0.jar`, into the server's `mods/` folder.
+3. Copy `hybox-hytale/build/libs/Hybox-<version>.jar`, for example `Hybox-1.1.0.jar`, into the server's `mods/` folder.
 4. Start the server. Hybox logs `Hybox started.` and `Config: <path>`.
 
 To remove Hybox, stop the server and delete the JAR. The data folder stays until you delete it.

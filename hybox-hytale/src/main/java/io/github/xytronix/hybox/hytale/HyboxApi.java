@@ -384,7 +384,7 @@ public final class HyboxApi {
                             all.add(attachment);
                         } else {
                             captured.logger().log(System.Logger.Level.WARNING, "Skipping duplicate bundle entry "
-                                + attachment.pathInZip() + " from plugin '" + entry.owner() + "'; the first entry is kept.");
+                                + attachment.pathInZip() + " from plugin '" + entry.owner() + "'. The first entry is kept.");
                         }
                     }
                 }

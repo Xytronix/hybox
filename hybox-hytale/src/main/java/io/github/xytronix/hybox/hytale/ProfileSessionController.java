@@ -69,12 +69,12 @@ final class ProfileSessionController {
                     Map.of("reason", "profile lead-up")));
                 if (!leadUp.captured()) {
                     profileActive.set(false);
-                    return "Profile lead-up capture: " + leadUp.status() + "; recording unchanged.";
+                    return "Profile lead-up capture: " + leadUp.status() + ". The recording is unchanged.";
                 }
             } catch (Exception e) {
                 logger.log(System.Logger.Level.WARNING, "Failed to capture the pre-profile lead-up.", e);
                 profileActive.set(false);
-                return "Failed to capture the pre-profile lead-up; recording unchanged.";
+                return "Failed to capture the pre-profile lead-up. The recording is unchanged.";
             }
         }
         try {

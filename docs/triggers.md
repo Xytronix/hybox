@@ -21,7 +21,14 @@ A trigger asks Hybox to save a bundle. Defaults are in [Configuration](configura
 
 Each detector fires once, then re-arms: tick, heap, GC, CPU and network below 90% of the threshold, heartbeat when the world runs the task again, player drop when the count is no longer a drop.
 
-The scope is the world name for `HEARTBEAT_STALL`, `TICK_DEGRADED` and `WORLD_FAILURE`; `jvm` for deadlock, heap, GC and CPU; `net` for network; and `server` otherwise.
+The scope groups triggers for debounce:
+
+| Scope | Triggers |
+| --- | --- |
+| The world name | `HEARTBEAT_STALL`, `TICK_DEGRADED`, `WORLD_FAILURE` |
+| `jvm` | `DEADLOCK`, `HEAP_PRESSURE`, `GC_PRESSURE`, `CPU_SATURATION` |
+| `net` | `NET_SATURATION` |
+| `server` | All others |
 
 ### Log error filters
 
@@ -40,7 +47,7 @@ Hybox checks each trigger in this order. The capture at the end of a profile ski
 | --- | --- |
 | Cooldown | Any trigger was accepted within `Cooldown`, unless the kind is in `CooldownExemptKinds`. Manual captures count. |
 | Debounce | The same kind and scope was accepted within `Debounce`. |
-| One at a time | A capture, including its post-incident wait, is running. Automatic triggers are dropped; manual captures reply `Capture busy; try again shortly.` |
+| One at a time | A capture, including its post-incident wait, is running. Automatic triggers are dropped. Manual captures reply `A capture is already running. Try again when it ends.` |
 
 ## Severity
 

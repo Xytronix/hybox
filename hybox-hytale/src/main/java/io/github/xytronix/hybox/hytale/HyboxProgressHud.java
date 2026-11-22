@@ -84,7 +84,7 @@ final class HyboxProgressHud extends CustomUIHud {
             if (switched || !java.util.Objects.equals(previous.startedAt(), state.startedAt())) {
                 commands.clear("#TimerHost");
                 commands.appendInline("#TimerHost", "TimerLabel { Seconds: " + Math.max(0, state.remainingSeconds())
-                    + "; Style: (FontSize: 24, RenderBold: true, TextColor: #ffffff); }");
+                    + "; Style: (FontSize: 24, RenderBold: true, TextColor: " + DashboardModel.Tone.NEUTRAL.color + "); }");
             }
         } else if (switched || !previous.step().equals(state.step())) {
             commands.set("#Step.Text", state.step());

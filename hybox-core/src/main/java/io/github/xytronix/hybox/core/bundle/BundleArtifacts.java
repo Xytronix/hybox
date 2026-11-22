@@ -37,7 +37,7 @@ public final class BundleArtifacts {
         if (zipPath.equals("extras/server-log.txt")) {
             return SERVER_LOG;
         }
-        if (zipPath.equals("extras/plugins.txt")) {
+        if (zipPath.equals("extras/plugins.txt") || zipPath.equals("extras/mixins.txt")) {
             return PLUGINS;
         }
         if (zipPath.equals("extras/worlds.txt")) {

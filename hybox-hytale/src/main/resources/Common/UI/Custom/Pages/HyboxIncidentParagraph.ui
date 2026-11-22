@@ -1,5 +1,6 @@
+$H = "HyboxTones.ui";
 Group {
   LayoutMode: Top;
   Anchor: (Bottom: 10);
-  Label #Paragraph { Style: (FontSize: 13, TextColor: #ffffff(0.92), Wrap: true); }
+  Label #Paragraph { Style: (FontSize: 13, TextColor: $H.@Text, Wrap: true); }
 }
