@@ -91,11 +91,12 @@ final class HytaleHyboxConfig {
     private static final boolean DEFAULT_CAPTURE_INCLUDE_SERVER_CONFIG = false;
     private static final boolean DEFAULT_CAPTURE_INCLUDE_MOD_CONFIGS = false;
     private static final boolean DEFAULT_CAPTURE_ALLOW_MOD_CONFIG_OPT_IN = true;
-    private static final boolean DEFAULT_CAPTURE_SANITIZE_LOG = true;
     private static final List<String> DEFAULT_CAPTURE_REDACT_PATTERNS = TextRedactor.DEFAULT_PATTERNS;
     private static final List<String> FRAMEWORK_PREFIXES = List.of("com.hypixel.hytale.");
     private static final List<String> DEFAULT_CAPTURE_ARTIFACTS =
-            List.of("jfr", "report", "env", "threads", "serverLog", "plugins", "worlds", "heartbeats", "server");
+            List.of("jfr", "report", "env", "threads", "serverLog", "plugins", "worlds", "heartbeats", "server", "metrics");
+    private static final Set<String> LEGACY_DEFAULT_CAPTURE_ARTIFACTS =
+            Set.of("jfr", "report", "env", "threads", "serverLog", "plugins", "worlds", "heartbeats", "server");
 
     private HytaleHyboxConfig() {
     }
@@ -724,7 +725,6 @@ final class HytaleHyboxConfig {
                         captureCfg.includeServerConfig,
                         captureCfg.includeModConfigs,
                         captureCfg.allowModConfigOptIn,
-                        captureCfg.sanitizeLog,
                         FRAMEWORK_PREFIXES
                     ),
                     new DiscordWebhookConfig(webhookUrl, webhookCooldown, requestTimeout, username),
@@ -933,7 +933,6 @@ final class HytaleHyboxConfig {
         public boolean includeServerConfig = DEFAULT_CAPTURE_INCLUDE_SERVER_CONFIG;
         public boolean includeModConfigs = DEFAULT_CAPTURE_INCLUDE_MOD_CONFIGS;
         public boolean allowModConfigOptIn = DEFAULT_CAPTURE_ALLOW_MOD_CONFIG_OPT_IN;
-        public boolean sanitizeLog = DEFAULT_CAPTURE_SANITIZE_LOG;
 
         static final BuilderCodec<Capture> CODEC = BuilderCodec
             .builder(Capture.class, Capture::new)
@@ -977,11 +976,6 @@ final class HytaleHyboxConfig {
                     c.allowModConfigOptIn = v;
                 }
             }, (c, ei) -> c.allowModConfigOptIn).add()
-            .append(new KeyedCodec<>("SanitizeLog", Codec.BOOLEAN), (c, v, ei) -> {
-                if (v != null) {
-                    c.sanitizeLog = v;
-                }
-            }, (c, ei) -> c.sanitizeLog).add()
             .append(new KeyedCodec<>("RedactPatterns", Codec.STRING_ARRAY), (c, v, ei) -> {
                 if (v != null) {
                     c.redactPatterns = Arrays.stream(v).filter(Objects::nonNull).toList();
@@ -990,6 +984,9 @@ final class HytaleHyboxConfig {
             .append(new KeyedCodec<>("Artifacts", Codec.STRING_ARRAY), (c, v, ei) -> {
                 if (v != null) {
                     c.artifacts = new ArrayList<>(List.of(v));
+                    if (Set.copyOf(c.artifacts).equals(LEGACY_DEFAULT_CAPTURE_ARTIFACTS)) {
+                        c.artifacts.add("metrics");
+                    }
                 }
             }, (c, ei) -> c.artifacts.toArray(new String[0])).add()
             .build();
