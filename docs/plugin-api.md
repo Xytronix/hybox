@@ -8,7 +8,7 @@ Hybox is not published to a Maven repository. [Build it](installing.md#build-and
 
 ```kotlin
 dependencies {
-    compileOnly(files("libs/Hybox-1.0.0.jar"))
+    compileOnly(files("libs/Hybox-1.1.0.jar"))
 }
 ```
 
@@ -39,9 +39,16 @@ Each method takes an owner string first: use your plugin name. Hybox trims it, r
 | `Registration registerConfig(String plugin, Path file)` | 64 | Adds a config file to the report, read at each capture. Limits are in [Privacy](privacy.md#report-sections). If the file is already registered, returns a handle that removes that registration. |
 | `void clearPlugin(String plugin)` | | Closes every registration of the owner and deletes its counter and gauge values. |
 
-Metric names are cut to 64 characters. Blank names and values that are not finite are ignored. Each `record` call is written to the recording as `io.github.xytronix.hybox.PluginMetric` and shown in the report. With Prometheus on, metrics also appear there; see [Metrics](configuration.md#metrics).
+Metric names are cut to 64 characters. Blank names and values that are not finite are ignored. Each `record` call is written to the recording as `io.github.xytronix.hybox.PluginMetric` and shown in the report. With Prometheus on, metrics also appear there. See [Metrics](configuration.md#metrics).
 
-The report and the in-game viewer give each metric its own chart. Gauges are drawn as recorded. Counters are drawn as a rate per second: each delta is spread over the time since the previous `recordCount` call for that name, so publishing a batched delta every 30 seconds gives a steady line, not spikes. The first delta in the recording has no known start, so the line starts at the second delta and stops at the last one; no rate is drawn before or after. A counter published only once in the window gets no chart and is listed with its total. A counter's stats show the total over the recording window, which counts every delta, and, when the recording has it, the running total since start. Metrics that stay at zero for the whole window are listed by name under the charts. Up to 64 metrics across all plugins get a chart; any beyond that are listed with their totals.
+The report and the in-game viewer give each metric its own chart:
+
+- **Gauges** are drawn as recorded.
+- **Counters** are drawn as a rate per second. Each delta is spread over the time since the previous `recordCount` call for that name, so a batched delta every 30 seconds gives a steady line, not spikes. The first delta has no known start, so the line starts at the second delta and stops at the last one. The stats show the total over the recording window, which counts every delta, and the running total since start when the recording has it.
+- **Counters reported once** in the window get no chart and are listed with their total.
+- **Metrics that stay at zero** for the whole window are listed by name under the charts.
+
+Up to 64 metrics across all plugins get a chart. Any beyond that are listed with their totals.
 
 `registerExtras` returns a handle that does nothing if Hybox is not running or `Capture.AllowPluginExtras` is off. `registerConfig` does the same with `Capture.AllowModConfigOptIn`. Turning either setting on later does not revive such a registration.
 
@@ -57,7 +64,7 @@ The report and the in-game viewer give each metric its own chart. Gauges are dra
 | `List<BundleAttachment> historicalExtras()` | When Hybox rebuilds a bundle after a crash. Defaults to none. |
 | `List<BundleAttachment> configExtras()` | When Hybox rebuilds a bundle after a crash, while `Capture.AllowModConfigOptIn` is on. Defaults to none. |
 
-`BundleAttachment(String pathInZip, byte[] data)` is in `io.github.xytronix.hybox.core.bundle`. The path must be relative, use `/`, and have no empty, `.` or `..` segments. Use `extras/<your plugin>/`. If a path is already taken, Hybox keeps the first entry and logs a warning. Text files are masked and redacted; see [Privacy](privacy.md#masking-and-redaction).
+`BundleAttachment(String pathInZip, byte[] data)` is in `io.github.xytronix.hybox.core.bundle`. The path must be relative, use `/`, and have no empty, `.` or `..` segments. Use `extras/<your plugin>/`. If a path is already taken, Hybox keeps the first entry and logs a warning. Text files are masked and redacted. See [Privacy](privacy.md#masking-and-redaction).
 
 ## Callbacks
 

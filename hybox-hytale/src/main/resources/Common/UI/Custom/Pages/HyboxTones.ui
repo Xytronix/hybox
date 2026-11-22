@@ -1,12 +1,115 @@
-@OkPill = #80c991(0.14);
-@WarnPill = #efbd62(0.14);
-@ErrorPill = #ef8181(0.14);
-@OkBanner = #80c991(0.10);
-@WarnBanner = #efbd62(0.10);
-@ErrorBanner = #ef8181(0.10);
+$C = "../Common.ui";
+
+@Bg = #0f0f0f;
+@Bg2 = #141414;
+@Panel = #191919;
+@Panel2 = #1f1f1f;
+@PanelHover = #262626;
+@Border = #2b2b2b;
+@Border2 = #383838;
+@Border3 = #474747;
+@Text = #ece9e2;
+@Text2 = #bdb8ad;
+@Text3 = #a29d93;
+@Text4 = #948f86;
+@Accent = #ffd21f;
+@AccentHover = #ffe066;
+@AccentPressed = #e6bd1c;
+@OnAccent = #0b0b0b;
+@AccentTint = #352f1a;
+@Good = #4cc38a;
+@Warn = #ff8a3d;
+@Bad = #f0626b;
+@Critical = #ff4d5e;
+@Info = #6aa9e9;
+@Series1 = #ffd21f;
+@Series2 = #6aa9e9;
+@Series3 = #c2b0f5;
+@SeriesNeutral = #8f8a81;
+@SeriesOther = #bdb8ad;
+
+@OkPill = #1f2d27;
+@WarnPill = #35271d;
+@ErrorPill = #332223;
+@CriticalPill = #351f21;
+@InfoPill = #232a32;
+@NeutralPill = #262626;
+@MutedPill = #262626;
+@OkBanner = #15211b;
+@WarnBanner = #271b14;
+@ErrorBanner = #261718;
+
+@PageBackground = #0f0f0f(0.96);
+@TitleBackground = #141414(0.98);
+@HudBackground = #0f0f0f(0.85);
+
+@FrameBackground = PatchStyle(TexturePath: "../Hybox/Frame.png", Border: 2);
+
 @TooltipStyle = TextTooltipStyle(
-  Background: (TexturePath: "../Common/TooltipDefaultBackground.png", Border: 24),
+  Background: (TexturePath: "../Hybox/Frame.png", Border: 2),
   MaxWidth: 320,
-  LabelStyle: (Wrap: true, FontSize: 12),
-  Padding: 18
+  LabelStyle: (Wrap: true, FontSize: 12, TextColor: #ece9e2),
+  Padding: 14
 );
+
+@ButtonLabel = LabelStyle(...$C.@DefaultButtonLabelStyle, TextColor: #ece9e2);
+@ButtonLabelOnAccent = LabelStyle(...$C.@DefaultButtonLabelStyle, TextColor: #0b0b0b);
+@ButtonLabelAccent = LabelStyle(...$C.@DefaultButtonLabelStyle, TextColor: #ffd21f);
+@ButtonLabelMuted = LabelStyle(...$C.@DefaultButtonLabelStyle, TextColor: #bdb8ad);
+@ButtonLabelDisabled = LabelStyle(...$C.@DefaultButtonLabelStyle, TextColor: #948f86);
+@SmallLinkLabel = LabelStyle(...$C.@SmallSecondaryButtonLabelStyle, TextColor: #ffd21f);
+@SmallLinkLabelHovered = LabelStyle(...$C.@SmallSecondaryButtonLabelStyle, TextColor: #ffe066);
+@SmallLinkLabelDisabled = LabelStyle(...$C.@SmallSecondaryButtonLabelStyle, TextColor: #948f86);
+
+@PrimaryButtonStyle = TextButtonStyle(
+  Default: (Background: #ffd21f, LabelStyle: @ButtonLabelOnAccent),
+  Hovered: (Background: #ffe066, LabelStyle: @ButtonLabelOnAccent),
+  Pressed: (Background: #e6bd1c, LabelStyle: @ButtonLabelOnAccent),
+  Disabled: (Background: #1f1f1f, LabelStyle: @ButtonLabelDisabled),
+  Sounds: $C.@ButtonSounds
+);
+
+@SecondaryButtonStyle = TextButtonStyle(
+  Default: (Background: #262626, LabelStyle: @ButtonLabel),
+  Hovered: (Background: #383838, LabelStyle: @ButtonLabel),
+  Pressed: (Background: #1f1f1f, LabelStyle: @ButtonLabel),
+  Disabled: (Background: #1f1f1f, LabelStyle: @ButtonLabelDisabled),
+  Sounds: $C.@ButtonSounds
+);
+
+@SelectedButtonStyle = TextButtonStyle(
+  Default: (Background: #352f1a, LabelStyle: @ButtonLabelAccent),
+  Hovered: (Background: #352f1a, LabelStyle: @ButtonLabelAccent),
+  Pressed: (Background: #352f1a, LabelStyle: @ButtonLabelAccent),
+  Disabled: (Background: #352f1a, LabelStyle: @ButtonLabelAccent),
+  Sounds: $C.@ButtonSounds
+);
+
+@TabButtonStyle = TextButtonStyle(
+  Default: (Background: #191919, LabelStyle: @ButtonLabelMuted),
+  Hovered: (Background: #262626, LabelStyle: @ButtonLabel),
+  Pressed: (Background: #1f1f1f, LabelStyle: @ButtonLabel),
+  Disabled: (Background: #191919, LabelStyle: @ButtonLabelDisabled),
+  Sounds: $C.@ButtonSounds
+);
+
+@LinkButtonStyle = TextButtonStyle(
+  Default: (Background: #1f1f1f, LabelStyle: @SmallLinkLabel),
+  Hovered: (Background: #262626, LabelStyle: @SmallLinkLabelHovered),
+  Pressed: (Background: #1f1f1f, LabelStyle: @SmallLinkLabelHovered),
+  Disabled: (Background: #1f1f1f, LabelStyle: @SmallLinkLabelDisabled),
+  Sounds: $C.@ButtonSounds
+);
+
+@Bar = ProgressBar {
+  @Anchor = ();
+  Anchor: (...@Anchor, Width: 284, Height: 6);
+  Background: "../Common/ProgressBar.png";
+  BarTexturePath: "../Hybox/BarFill.png";
+};
+
+@Logo = Group {
+  @Anchor = ();
+  Anchor: (...@Anchor, Width: 28, Height: 28);
+  Background: (TexturePath: "../Hybox/HyboxLogo.png");
+};

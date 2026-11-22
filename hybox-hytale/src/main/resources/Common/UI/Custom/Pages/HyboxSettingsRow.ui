@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 
 @TriggerRow = Group {
   LayoutMode: Left;
@@ -7,6 +8,7 @@ $C = "../Common.ui";
 
   $C.@CheckBox #CheckBox {
     Anchor: (Width: 22, Height: 22, Top: 9, Right: 12);
+    Background: $H.@FrameBackground;
   }
   Group {
     LayoutMode: Top;
@@ -14,12 +16,12 @@ $C = "../Common.ui";
     Label {
       Text: @Name;
       Anchor: (Height: 21);
-      Style: (FontSize: 13, TextColor: #d3e3ed, RenderBold: true);
+      Style: (FontSize: 13, TextColor: $H.@Text, RenderBold: true);
     }
     Label {
       Text: @Description;
       Anchor: (Height: 19);
-      Style: (FontSize: 11, TextColor: #96a9be);
+      Style: (FontSize: 11, TextColor: $H.@Text3);
     }
   }
   Group #Thresholds {
@@ -36,11 +38,12 @@ $C = "../Common.ui";
   Label {
     Text: @Label;
     Anchor: (Width: 126, Right: 4);
-    Style: (FontSize: 12, TextColor: #bfcdd5, VerticalAlignment: Center);
+    Style: (FontSize: 12, TextColor: $H.@Text2, VerticalAlignment: Center);
   }
   $C.@NumberField #Input {
     @Anchor = (Width: 78, Right: 12);
-    Style: (FontSize: 12);
+    Background: $H.@FrameBackground;
+    Style: (FontSize: 12, TextColor: $H.@Text);
     Format: (MaxDecimalPlaces: 0, Step: @Step);
   }
 };

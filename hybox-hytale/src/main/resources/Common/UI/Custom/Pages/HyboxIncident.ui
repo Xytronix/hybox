@@ -5,14 +5,28 @@ $C.@PageOverlay {}
 
 $C.@Container {
   Anchor: (Width: 1240, Height: 700);
-  #Title { $C.@Title { @Text = "Incident"; } }
+  #Title {
+    Background: $H.@TitleBackground;
+    Group {
+      LayoutMode: Center;
+      Anchor: (Full: 0);
+      $H.@Logo #HeaderLogo { @Anchor = (Top: 1); }
+      $C.@Title {
+        @Text = "Incident";
+        Padding: (Left: 10, Right: 19);
+        Style: (...$C.@TitleStyle, TextColor: $H.@Text, HorizontalAlignment: Center);
+      }
+    }
+    Group { Anchor: (Left: 0, Right: 0, Bottom: 0, Height: 1); Background: $H.@Border; }
+  }
   #Content {
     LayoutMode: Top;
     Padding: (Full: 14);
+    Background: $H.@PageBackground;
     Group #IncidentHeader {
       Anchor: (Height: 80, Bottom: 10);
       LayoutMode: Top;
-      Background: #ffffff(0.04);
+      Background: $H.@Panel;
       Padding: (Full: 10);
       Group {
         LayoutMode: Left;
@@ -20,13 +34,13 @@ $C.@Container {
         Label #Severity {
           Anchor: (Width: 112, Right: 10);
           Padding: (Horizontal: 8);
-          Background: #ffffff(0.06);
-          Style: (FontSize: 13, RenderBold: true, VerticalAlignment: Center, HorizontalAlignment: Center);
+          Background: $H.@NeutralPill;
+          Style: (FontSize: 13, RenderBold: true, TextColor: $H.@Text2, VerticalAlignment: Center, HorizontalAlignment: Center);
         }
-        Label #Headline { FlexWeight: 1; Style: (FontSize: 17, RenderBold: true, VerticalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 11); }
+        Label #Headline { FlexWeight: 1; Style: (FontSize: 17, RenderBold: true, TextColor: $H.@Text, VerticalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 12); }
       }
-      Label #IncidentMeta { Anchor: (Height: 18); Style: (FontSize: 12, TextColor: #bfcdd5, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9); }
-      Label #BlockedIn { Anchor: (Height: 18); Style: (FontSize: 11, TextColor: #96a9be, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9); TextTooltipStyle: $H.@TooltipStyle; }
+      Label #IncidentMeta { Anchor: (Height: 18); Style: (FontSize: 12, TextColor: $H.@Text2, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 10); }
+      Label #BlockedIn { Anchor: (Height: 18); Style: (FontSize: 11, TextColor: $H.@Text3, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 10); TextTooltipStyle: $H.@TooltipStyle; }
     }
     Group {
       LayoutMode: Left;
@@ -42,11 +56,11 @@ $C.@Container {
         Group {
           LayoutMode: Left;
           Anchor: (Height: 30, Bottom: 5);
-          Label #SectionTitle { FlexWeight: 1; Style: (FontSize: 19, RenderBold: true, VerticalAlignment: Center); }
-          Label #RecordingBadge { Anchor: (Width: 172); Style: (FontSize: 11, TextColor: #efbd62, HorizontalAlignment: End, VerticalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 8); }
+          Label #SectionTitle { FlexWeight: 1; Style: (FontSize: 19, RenderBold: true, TextColor: $H.@Text, VerticalAlignment: Center); }
+          Label #RecordingBadge { Anchor: (Width: 260); Style: (FontSize: 11, TextColor: $H.@Info, HorizontalAlignment: End, VerticalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 10); }
         }
         Group #RangeControls {
-          Anchor: (Height: 32, Bottom: 8);
+          Anchor: (Height: 33, Bottom: 8);
           LayoutMode: Left;
         }
         Group #SectionScroll {
@@ -59,18 +73,18 @@ $C.@Container {
         Group #Pagination {
           LayoutMode: Left;
           Anchor: (Height: 34, Top: 8);
-          $C.@SecondaryTextButton #PagePrev { @Text = "Prev page"; Anchor: (Width: 132, Height: 32, Right: 8); Padding: (Horizontal: 8); }
-          Label #PageStatus { FlexWeight: 1; Style: (FontSize: 12, TextColor: #96a9be, HorizontalAlignment: Center, VerticalAlignment: Center); }
-          $C.@SecondaryTextButton #PageNext { @Text = "Next page"; Anchor: (Width: 132, Height: 32); Padding: (Horizontal: 8); }
+          $C.@SecondaryTextButton #PagePrev { @Text = "Prev page"; Anchor: (Width: 132, Height: 32, Right: 8); Padding: (Horizontal: 8); Style: $H.@SecondaryButtonStyle; }
+          Label #PageStatus { FlexWeight: 1; Style: (FontSize: 12, TextColor: $H.@Text3, HorizontalAlignment: Center, VerticalAlignment: Center); }
+          $C.@SecondaryTextButton #PageNext { @Text = "Next page"; Anchor: (Width: 132, Height: 32); Padding: (Horizontal: 8); Style: $H.@SecondaryButtonStyle; }
         }
       }
     }
     Group {
       LayoutMode: Left;
       Anchor: (Height: 40, Top: 12);
-      $C.@SecondaryTextButton #BackButton { @Text = "Back to incidents"; Anchor: (Width: 208, Height: 38, Right: 12); Padding: (Horizontal: 10); }
+      $C.@SecondaryTextButton #BackButton { @Text = "Back to incidents"; Anchor: (Width: 208, Height: 38, Right: 12); Padding: (Horizontal: 10); Style: $H.@SecondaryButtonStyle; }
       Group { FlexWeight: 1; }
-      $C.@SecondaryTextButton #DismissButton { @Text = "Close"; Anchor: (Width: 130, Height: 38); Padding: (Horizontal: 10); }
+      $C.@SecondaryTextButton #DismissButton { @Text = "Close"; Anchor: (Width: 130, Height: 38); Padding: (Horizontal: 10); Style: $H.@SecondaryButtonStyle; }
     }
   }
 }

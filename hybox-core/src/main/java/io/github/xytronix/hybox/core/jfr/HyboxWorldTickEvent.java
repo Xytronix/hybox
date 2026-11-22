@@ -19,7 +19,7 @@ public final class HyboxWorldTickEvent extends Event {
     @Label("TPS")
     public double tps;
 
-    @Label("MSPT")
+    @Label("Tick time (ms)")
     public double mspt;
 
     @Label("Players")

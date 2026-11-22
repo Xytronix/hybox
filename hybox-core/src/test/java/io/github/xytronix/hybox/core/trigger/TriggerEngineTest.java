@@ -119,8 +119,13 @@ class TriggerEngineTest {
 
         clock.advance(Duration.ofSeconds(5));
         TriggerEvent stall = new TriggerEvent(TriggerKind.HEARTBEAT_STALL, "world", clock.instant(),
-            Map.of("stallMs", "300000"));
-        assertEquals(TriggerDecision.ACCEPT, engine.evaluate(stall).decision());
+            Map.of("stallMs", "259745"));
+        TriggerResult accepted = engine.evaluate(stall);
+        assertEquals(TriggerDecision.ACCEPT, accepted.decision());
+        assertEquals("World world stopped responding for 4 min 20 s", accepted.headline());
+
+        TriggerEvent again = new TriggerEvent(TriggerKind.GC_PRESSURE, "jvm", clock.instant(), Map.of("gcPct", "31"));
+        assertEquals("Capture skipped. Another capture ran less than 30 s ago.", engine.evaluate(again).headline());
     }
 
     @Test
@@ -150,7 +155,7 @@ class TriggerEngineTest {
         TriggerResult result = engine.evaluate(event);
         assertEquals(TriggerDecision.ACCEPT, result.decision());
         assertEquals(Severity.CRITICAL, result.severity());
-        assertEquals("World failed world: java.lang.IllegalStateException: boom", result.headline());
+        assertEquals("World world failed: java.lang.IllegalStateException: boom", result.headline());
     }
 
     @Test
@@ -164,7 +169,7 @@ class TriggerEngineTest {
         TriggerResult first = engine.evaluate(degraded);
         assertEquals(TriggerDecision.ACCEPT, first.decision());
         assertEquals(Severity.DEGRADED, first.severity());
-        assertEquals("Tick average degraded world (120ms)", first.headline());
+        assertEquals("World world is slow: 120 ms per tick", first.headline());
 
         clock.advance(Duration.ofSeconds(1));
         TriggerEvent critical = new TriggerEvent(TriggerKind.TICK_DEGRADED, "other", clock.instant(),
@@ -183,7 +188,7 @@ class TriggerEngineTest {
         TriggerResult deadlock = engine.evaluate(new TriggerEvent(
             TriggerKind.DEADLOCK, "jvm", clock.instant(), Map.of("threads", "2", "threadIds", "7,12")));
         assertEquals(Severity.CRITICAL, deadlock.severity());
-        assertEquals("Deadlock detected (2 threads)", deadlock.headline());
+        assertEquals("2 threads are deadlocked", deadlock.headline());
 
         TriggerResult heapDegraded = engine.evaluate(new TriggerEvent(
             TriggerKind.HEAP_PRESSURE, "jvm", clock.instant(), Map.of("usedPct", "92", "sustainedSec", "60")));
@@ -196,7 +201,7 @@ class TriggerEngineTest {
         TriggerResult gc = engine.evaluate(new TriggerEvent(
             TriggerKind.GC_PRESSURE, "jvm", clock.instant(), Map.of("gcPct", "31")));
         assertEquals(Severity.DEGRADED, gc.severity());
-        assertEquals("GC pressure (31% of wall time in GC)", gc.headline());
+        assertEquals("31% of the time spent in GC pauses", gc.headline());
 
         TriggerResult cpu = engine.evaluate(new TriggerEvent(
             TriggerKind.CPU_SATURATION, "jvm", clock.instant(), Map.of("cpuPct", "97", "sustainedSec", "60")));
@@ -205,11 +210,11 @@ class TriggerEngineTest {
         TriggerResult net = engine.evaluate(new TriggerEvent(
             TriggerKind.NET_SATURATION, "net", clock.instant(), Map.of("direction", "in", "mbps", "940")));
         assertEquals(Severity.DEGRADED, net.severity());
-        assertEquals("Network inbound traffic sustained 940 Mbit/s", net.headline());
+        assertEquals("Inbound traffic at 940 Mbit/s", net.headline());
 
         TriggerResult drop = engine.evaluate(new TriggerEvent(
             TriggerKind.PLAYER_DROP, "server", clock.instant(), Map.of("before", "20", "after", "4")));
         assertEquals(Severity.DEGRADED, drop.severity());
-        assertEquals("Player count dropped 20 to 4", drop.headline());
+        assertEquals("Players dropped from 20 to 4", drop.headline());
     }
 }

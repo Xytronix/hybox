@@ -11,7 +11,7 @@ Start with `/hybox status --verbose`. `<...>` marks a part that changes. Message
 | `Failed to write default Hybox config to <path>` | Make `mods/Xytronix_Hybox/` writable by the user that runs the server. |
 | `Skipping pack at Xytronix_Hybox: missing or invalid manifest.json` | Harmless. Hytale checks every folder under `mods/` for an asset pack, including Hybox's data folder. |
 | `Failed to load JFR configurations. Falling back to an unconfigured recording.` | Neither `Jfr.Configuration` nor `profile` loaded. Set `Jfr.Configuration` to `default` and restart. |
-| `JFR recording has no age or size cap (both unlimited); <...>` | Set `Jfr.MaxAge` or `Jfr.MaxSizeBytes` above 0 and restart. |
+| `JFR recording has no age or size cap (both unlimited). <...>` | Set `Jfr.MaxAge` or `Jfr.MaxSizeBytes` above 0 and restart. |
 | `Universe.get() failed; heartbeats disabled until restart.`, `Failed to subscribe to the server log; log-error captures disabled.`, `Failed to start the network sampler; net-saturation captures disabled.` | The named detectors stay off until the next start. Restart. If it repeats, report it with the stack trace. |
 | `Failed to start Prometheus metrics endpoint.` | The port is in use, or `Metrics.Prometheus.Bind` is not a local address. Change it and reload. |
 
@@ -32,13 +32,15 @@ Start with `/hybox status --verbose`. `<...>` marks a part that changes. Message
 | --- | --- |
 | `Capture skipped: cooldown active.` | Another trigger was accepted within `Trigger.Cooldown`. Manual captures count. Wait and retry. |
 | `Capture skipped: storage pressure.` | A storage budget is full. See the two rows below. |
-| `Combined staging byte budget reached at <directories>; <...>` | Recordings in `temp/` and `live/recover/` exceed `Retention.StagingMaxTotalBytes`. Inspect and delete old ones, or raise the limit. |
-| `Retained JFR repository age/byte budget reached; <...>` | JFR repositories of crashed runs exceed `Retention.RepositoryMaxTotalBytes` or `Retention.RepositoryMaxAge`. Their paths are in `live/jfr-session`. Inspect and delete them, or raise the limits. |
+| `Combined staging byte budget reached at <directories>. <...>` | Recordings in `temp/` and `live/recover/` exceed `Retention.StagingMaxTotalBytes`. Inspect and delete old ones, or raise the limit. |
+| `Retained JFR repository age or byte budget reached. <...>` | JFR repositories of crashed runs exceed `Retention.RepositoryMaxTotalBytes` or `Retention.RepositoryMaxAge`. Their paths are in `live/jfr-session`. Inspect and delete them, or raise the limits. |
 | `Capture failed; use /hybox status --verbose for details.` | The server log has `Capture pipeline failed.` with the cause. |
 | `Preserved recording <path> at <path> for recovery or inspection.` | A recording could not be bundled. Hybox keeps it in `temp/failed/` and retries at the next start. |
 | `Rolling snapshot writer disabled to preserve an unrecovered recording at <path>` | `live/rolling.jfr` from an earlier run could not be moved for recovery. Check permissions on `live/`, then restart. |
 | `Failed to write rolling JFR snapshot.` | Check disk space and permissions on `live/`. |
-| `Retention would remove newest incident; stopping deletions.` | The newest bundle alone is larger than `Retention.MaxTotalBytes`. Raise the limit, or lower `Jfr.MaxSizeBytes`. |
+| `Retention removed <file> (<size>): <rule>.` | Retention deleted that bundle after a capture. The rule is `age`, `count` or `size`, with the limit that applied. A summary line follows. Raise `Retention.MaxAge`, `MaxCount` or `MaxTotalBytes` to keep more. |
+| `Retention removed failed recording <file> (<size>): <rule>.` | An old recording in `temp/failed/` went over `Retention.FailedRecordingMaxCount`, `StagingMaxAge` or `StagingMaxTotalBytes`. |
+| `Retention would remove the newest incident. Stopping deletions.` | The newest bundle alone is larger than `Retention.MaxTotalBytes`. Raise the limit, or lower `Jfr.MaxSizeBytes`. |
 | `Failed to delete incident <path>` | Check permissions on `incidents/`. |
 | `Skipping duplicate bundle entry <path> from plugin '<owner>'; the first entry is kept.` | Two attachments share a path. Report it to that plugin's author. |
 

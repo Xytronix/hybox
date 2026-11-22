@@ -40,6 +40,9 @@ final class HytaleTelemetrySampler {
     private long lastGcWallMillis;
     private long lastAllocBytes = -1;
     private Instant lastAllocAt;
+    private volatile Status status;
+
+    record Status(double tps, double tickMs, double cpuPct, long heapUsed, long heapMax) {}
 
     HytaleTelemetrySampler(Clock clock, System.Logger logger, HytaleWorldStatsProvider worldStats,
                            MetricsLog metricsLog, HealthGauges healthGauges, HeartbeatRegistry heartbeatRegistry,
@@ -90,8 +93,11 @@ final class HytaleTelemetrySampler {
             event.avgPingMs = world.avgPingMs();
             event.commit();
         }
+        java.lang.management.MemoryUsage heap = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage();
+        double cpuLoad = JvmProbes.processCpuLoad();
+        status = new Status(worstTps, worstMspt, cpuLoad < 0 ? -1 : cpuLoad * 100, heap.getUsed(), heap.getMax());
         recordHealthMetrics(worstMspt, worstTps, playersKnown ? totalPlayers : -1, worldGauges,
-            HyboxApi.sampleSupplierGauges());
+            HyboxApi.sampleSupplierGauges(), cpuLoad, heap.getUsed());
         sampleDisk();
         sampleHostCpu();
         PlayerDropDetector drop = playerDrop.get();
@@ -114,8 +120,12 @@ final class HytaleTelemetrySampler {
         healthGauges.setCollectorTimeMs((System.nanoTime() - startNanos) / 1_000_000.0);
     }
 
-    private void recordHealthMetrics(double tickAvgMs, double tps, int players,
-                                     List<HealthGauges.World> worlds, Map<String, Double> supplierGauges) {
+    Status status() {
+        return status;
+    }
+
+    private void recordHealthMetrics(double tickAvgMs, double tps, int players, List<HealthGauges.World> worlds,
+                                     Map<String, Double> supplierGauges, double cpuLoad, long heapUsed) {
         HyboxConfig cfg = config.get();
         boolean csv = cfg.metricsEnabled();
         boolean live = cfg.prometheusEnabled();
@@ -124,10 +134,9 @@ final class HytaleTelemetrySampler {
         }
         try {
             Instant now = clock.instant();
-            long heapUsed = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed();
             long rss = readRssBytes();
             double gcPct = gcFractionPercent();
-            double cpu = cfg.metricsCpu() ? JvmProbes.processCpuLoad() : -1;
+            double cpu = cfg.metricsCpu() ? cpuLoad : -1;
             double cpuPct = cpu < 0 ? -1 : cpu * 100;
             double alloc = cfg.metricsAllocation() ? allocRateMbPerSec(now) : Double.NaN;
             long queued = sampleQueuedPackets();

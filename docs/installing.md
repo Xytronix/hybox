@@ -11,7 +11,7 @@
 
 1. Run `./gradlew clean build`.
 2. Stop the server.
-3. Copy `hybox-hytale/build/libs/Hybox-<version>.jar`, for example `Hybox-1.0.0.jar`, into the server's `mods/` folder.
+3. Copy `hybox-hytale/build/libs/Hybox-<version>.jar`, for example `Hybox-1.1.0.jar`, into the server's `mods/` folder.
 4. Start the server. Hybox logs `Hybox started.` and `Config: <path>`.
 
 To remove Hybox, stop the server and delete the JAR. The data folder stays until you delete it.

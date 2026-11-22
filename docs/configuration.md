@@ -58,6 +58,8 @@ An invalid value logs a [warning](troubleshooting.md#configuration) and uses the
 
 All keys apply on reload. Retention never deletes the newest bundle. For byte and count limits, `0` means no limit. Hitting a staging or repository limit makes Hybox refuse new captures.
 
+Old bundles are deleted only right after a new bundle is saved, never at startup. Each deleted bundle gets a server log line with its file name and the rule that removed it, and the capture message tells the player, for example "Removed 15 bundles older than 7 days". `/hybox status`, the Settings page and the Storage tile show how much is in use next to these limits.
+
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `MaxCount` | integer ≥ 0 | `25` | Most bundles kept. |

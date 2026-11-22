@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 record HyboxTrendModel(boolean metricsEnabled, int days, Instant generatedAt, int samples,
                        long firstSample, long lastSample, List<Metric> metrics, List<String> unavailable,
@@ -33,14 +34,14 @@ record HyboxTrendModel(boolean metricsEnabled, int days, Instant generatedAt, in
         List<Metric> metrics = new ArrayList<>(9);
         List<String> unavailable = new ArrayList<>();
         if (enabled && samples > 0) {
-            add(metrics, unavailable, "Tick time (ms)", "ms", 1, trend.tickAvgMs(), trend.timestamps(), from, to, points);
-            add(metrics, unavailable, "Ticks per second", "TPS", 1, trend.tps(), trend.timestamps(), from, to, points);
+            add(metrics, unavailable, "Tick time", "ms", 1, trend.tickAvgMs(), trend.timestamps(), from, to, points);
+            add(metrics, unavailable, "TPS", "TPS", 1, trend.tps(), trend.timestamps(), from, to, points);
             add(metrics, unavailable, "Players online", "players", 0, trend.players(), trend.timestamps(), from, to, points);
-            add(metrics, unavailable, "Heap memory", "GiB", 2, trend.heapBytes(), trend.timestamps(), from, to, points);
+            add(metrics, unavailable, "Heap", "GiB", 2, trend.heapBytes(), trend.timestamps(), from, to, points);
             add(metrics, unavailable, "Process RSS", "GiB", 2, trend.rssBytes(), trend.timestamps(), from, to, points);
-            add(metrics, unavailable, "CPU (Metrics.Cpu)", "%", 1, trend.cpuPct(), trend.timestamps(), from, to, points);
+            add(metrics, unavailable, "CPU use", "%", 1, trend.cpuPct(), trend.timestamps(), from, to, points);
             add(metrics, unavailable, "GC time", "%", 1, trend.gcPct(), trend.timestamps(), from, to, points);
-            add(metrics, unavailable, "Allocation (Metrics.Allocation)", "MB/s", 1, trend.allocMbPerSec(), trend.timestamps(), from, to, points);
+            add(metrics, unavailable, "Allocation rate", "MB/s", 1, trend.allocMbPerSec(), trend.timestamps(), from, to, points);
             add(metrics, unavailable, "Queued packets", "packets", 0, trend.queuedPackets(), trend.timestamps(), from, to, points);
         }
         double[] markers = Arrays.stream(incidents).filter(time -> time >= from && time <= to)
@@ -75,7 +76,7 @@ record HyboxTrendModel(boolean metricsEnabled, int days, Instant generatedAt, in
             return;
         }
         for (int i = 0; i < points; i++) values[i] = counts[i] == 0 ? Double.NaN : values[i] / counts[i];
-        String chartTitle = title.startsWith("CPU") ? "CPU (%)" : title.startsWith("Allocation") ? "Allocation (MB/s)" : title;
+        String chartTitle = Set.of("TPS", "players", "packets").contains(unit) ? title : title + " (" + unit + ")";
         metrics.add(new Metric(chartTitle, unit, precision, min, sum / count, max, now, values));
     }
 }

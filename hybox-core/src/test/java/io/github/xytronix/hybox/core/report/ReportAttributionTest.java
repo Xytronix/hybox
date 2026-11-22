@@ -41,10 +41,7 @@ class ReportAttributionTest {
         StringBuilder output = new StringBuilder();
         JsonWriter json = new JsonWriter(output);
         json.beginObject();
-        ReportActivityWriter.writeModCpu(json, null,
-            Map.of("cc.irori.refixes", "585 samples · cc.irori.refixes.Tick.run",
-                "IroriPowered:Refixes", "42 samples · cc.irori.refixes.Other.run",
-                "com.sun.management", "11 samples · com.sun.management.GcInfo.get"), attribution);
+        ReportActivityWriter.writeModCpu(json, mods, attribution);
         json.endObject();
         assertTrue(output.toString().contains("\"modCpu\":[[\"IroriPowered:Refixes\",627,"));
         assertFalse(output.toString().contains("[\"cc.irori.refixes\","));

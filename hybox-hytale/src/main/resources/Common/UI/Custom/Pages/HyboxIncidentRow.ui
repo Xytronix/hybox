@@ -8,15 +8,15 @@ Group {
     LayoutMode: Left;
     Label #Key {
       Anchor: (Width: 220, Right: 12);
-      Style: (FontSize: 12, TextColor: #96a9be, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9);
+      Style: (FontSize: 12, TextColor: $H.@Text3, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 10);
     }
     Label #Value {
       FlexWeight: 1;
-      Style: (FontSize: 13, TextColor: #ffffff(0.92), Wrap: true);
+      Style: (FontSize: 13, TextColor: $H.@Text, Wrap: true);
       TextTooltipStyle: $H.@TooltipStyle;
     }
   }
-  $C.@ProgressBar #Share {
+  $H.@Bar #Share {
     Anchor: (Left: 232, Height: 6, Top: 4);
     Visible: false;
   }
