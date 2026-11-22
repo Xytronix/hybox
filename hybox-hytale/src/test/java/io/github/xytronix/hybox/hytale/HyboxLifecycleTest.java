@@ -98,7 +98,7 @@ class HyboxLifecycleTest {
             assertEquals(1, eventCleanup.get());
             assertEquals(CaptureResult.Status.STOPPED, runtime.captureManual().join().status());
             assertTrue(runtime.reload().contains("not running"));
-            assertNotNull(runtime.startProfileSession(1, false));
+            assertNotNull(runtime.startProfileSession(1, false).join());
             assertDoesNotThrow(runtime::close);
             assertEquals(1, eventCleanup.get());
         } finally {
@@ -252,13 +252,14 @@ class HyboxLifecycleTest {
     void captureBurstAdmitsOneAndHealthDoesNotWaitForWorkerOrRecorder() throws Exception {
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
         ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        ThreadPoolExecutor capture = (ThreadPoolExecutor) HyboxRuntime.newCaptureExecutor();
         JfrController recorder = new JfrController(Duration.ofMinutes(1), 1024 * 1024, "hybox-admission-test");
         recorder.start();
-        HyboxRuntime runtime = runtime(scheduler, worker, recorder);
+        HyboxRuntime runtime = runtime(scheduler, worker, capture, recorder);
         CountDownLatch blocked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         try {
-            worker.execute(() -> {
+            capture.execute(() -> {
                 synchronized (recorder) {
                     blocked.countDown();
                     await(release);
@@ -270,7 +271,11 @@ class HyboxLifecycleTest {
                 assertEquals(CaptureResult.Status.BUSY, runtime.captureManual().get(1, TimeUnit.SECONDS).status());
                 runtime.scheduleCapture(new TriggerEvent(TriggerKind.MANUAL, "burst", Clock.systemUTC().instant(), Map.of()));
             }
-            assertEquals(1, worker.getQueue().size());
+            assertEquals(1, capture.getQueue().size());
+            AtomicBoolean ran = new AtomicBoolean();
+            runtime.submitWorker(() -> ran.set(true), () -> {});
+            worker.submit(() -> {}).get(1, TimeUnit.SECONDS);
+            assertTrue(ran.get());
             var health = CompletableFuture.supplyAsync(runtime::health).get(1, TimeUnit.SECONDS);
             assertTrue(health.running());
             assertTrue(health.captureBusy());
@@ -278,7 +283,7 @@ class HyboxLifecycleTest {
             assertEquals(200, health.dropped());
             assertEquals(CaptureResult.Status.BUSY, health.lastOutcome().status());
             assertTrue(runtime.reload().contains("busy"));
-            assertNotNull(runtime.startProfileSession(1, false));
+            assertNotNull(runtime.startProfileSession(1, false).get(1, TimeUnit.SECONDS));
             release.countDown();
             assertEquals(CaptureResult.Status.DISABLED, admitted.get(5, TimeUnit.SECONDS).status());
             assertFalse(runtime.health().captureBusy());
@@ -316,11 +321,11 @@ class HyboxLifecycleTest {
             for (int i = 0; i < 16; i++) {
                 worker.execute(drained::countDown);
             }
-            assertEquals(CaptureResult.Status.BUSY, runtime.captureManual().join().status());
+            assertEquals(CaptureResult.Status.DISABLED, runtime.captureManual().get(5, TimeUnit.SECONDS).status());
             assertFalse(runtime.health().captureBusy());
             snapshot.invoke(health);
             snapshot.invoke(health);
-            assertEquals(3, runtime.health().rejected());
+            assertEquals(2, runtime.health().rejected());
             assertEquals(16, worker.getQueue().size());
             release.countDown();
             assertTrue(drained.await(5, TimeUnit.SECONDS));
@@ -340,26 +345,25 @@ class HyboxLifecycleTest {
     void profileDeadlineRestoresPresetEvenWhenFinalCaptureCannotRun(boolean fullQueue) throws Exception {
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
         ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        ThreadPoolExecutor capture = (ThreadPoolExecutor) HyboxRuntime.newCaptureExecutor();
         String recordingName = "hybox-profile-bound-" + dir.getFileName();
         JfrController recorder = new JfrController(Duration.ofMinutes(1), 1024 * 1024, recordingName);
         recorder.start();
         var original = FlightRecorder.getFlightRecorder().getRecordings().stream()
             .filter(recording -> recordingName.equals(recording.getName())).findFirst().orElseThrow();
         var settings = original.getSettings();
-        HyboxRuntime runtime = runtime(scheduler, worker, recorder);
+        HyboxRuntime runtime = runtime(scheduler, worker, capture, recorder);
         CountDownLatch blocked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         try {
-            assertNull(runtime.startProfileSession(1, true));
-            worker.execute(() -> {
+            assertNull(runtime.startProfileSession(1, true).get(5, TimeUnit.SECONDS));
+            capture.execute(() -> {
                 blocked.countDown();
                 await(release);
             });
             assertTrue(blocked.await(5, TimeUnit.SECONDS));
             if (fullQueue) {
-                for (int i = 0; i < 16; i++) {
-                    worker.execute(() -> {});
-                }
+                capture.execute(() -> {});
             }
             Field field = HyboxRuntime.class.getDeclaredField("profileSessions");
             field.setAccessible(true);
@@ -374,9 +378,9 @@ class HyboxLifecycleTest {
                 assertEquals(1, runtime.health().rejected());
                 assertFalse(runtime.health().captureBusy());
             } else {
-                assertEquals(1, worker.getQueue().size());
+                assertEquals(1, capture.getQueue().size());
                 assertTrue(runtime.health().captureBusy());
-                assertNotNull(runtime.startProfileSession(1, false));
+                assertNotNull(runtime.startProfileSession(1, false).get(1, TimeUnit.SECONDS));
                 assertEquals(settings, original.getSettings());
             }
             release.countDown();
@@ -417,15 +421,158 @@ class HyboxLifecycleTest {
         finish.invoke(profiles, generation.getLong(profiles));
     }
 
+    @Test
+    void profileCompletionWaitsForBusyCaptureAndHoldsOnePending() throws Exception {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        ThreadPoolExecutor capture = (ThreadPoolExecutor) HyboxRuntime.newCaptureExecutor();
+        JfrController recorder = new JfrController(Duration.ofMinutes(1), 1024 * 1024, "hybox-profile-pending");
+        recorder.start();
+        HyboxRuntime runtime = runtime(scheduler, worker, capture, recorder);
+        CountDownLatch blocked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            capture.execute(() -> {
+                blocked.countDown();
+                await(release);
+            });
+            assertTrue(blocked.await(5, TimeUnit.SECONDS));
+            CompletableFuture<CaptureResult> manual = runtime.captureManual();
+            CompletableFuture<CaptureResult> profile = profileCapture(runtime);
+            assertEquals(CaptureResult.Status.BUSY, profileCapture(runtime).get(1, TimeUnit.SECONDS).status());
+            assertFalse(profile.isDone());
+            assertTrue(runtime.startProfileSession(1, true).get(1, TimeUnit.SECONDS).contains("busy"));
+            assertTrue(runtime.reload().contains("busy"));
+            release.countDown();
+            assertEquals(CaptureResult.Status.DISABLED, manual.get(5, TimeUnit.SECONDS).status());
+            assertEquals(CaptureResult.Status.DISABLED, profile.get(5, TimeUnit.SECONDS).status());
+            capture.submit(() -> {}).get(5, TimeUnit.SECONDS);
+            assertFalse(runtime.health().captureBusy());
+            assertNull(runtime.startProfileSession(1, true).get(5, TimeUnit.SECONDS));
+        } finally {
+            release.countDown();
+            runtime.close();
+        }
+    }
+
+    @Test
+    void shutdownStopsBlockedCaptureAndResolvesQueuedFuturesBeforeClosingRecorder() throws Exception {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        ThreadPoolExecutor capture = (ThreadPoolExecutor) HyboxRuntime.newCaptureExecutor();
+        JfrController recorder = new JfrController(Duration.ofMinutes(1), 1024 * 1024, "hybox-capture-shutdown");
+        recorder.start();
+        HyboxRuntime runtime = runtime(scheduler, worker, capture, recorder);
+        CountDownLatch blocked = new CountDownLatch(1);
+        AtomicBoolean recorderOpenOnInterrupt = new AtomicBoolean();
+        capture.execute(() -> {
+            blocked.countDown();
+            try {
+                new CountDownLatch(1).await();
+            } catch (InterruptedException interrupted) {
+                recorderOpenOnInterrupt.set(recorder.isRunning());
+            }
+        });
+        assertTrue(blocked.await(5, TimeUnit.SECONDS));
+        CompletableFuture<CaptureResult> manual = runtime.captureManual();
+        CompletableFuture<CaptureResult> profile = profileCapture(runtime);
+        runtime.close();
+        assertTrue(capture.isTerminated());
+        assertTrue(recorderOpenOnInterrupt.get());
+        assertFalse(recorder.isRunning());
+        assertEquals(CaptureResult.Status.STOPPED, manual.get(1, TimeUnit.SECONDS).status());
+        assertEquals(CaptureResult.Status.STOPPED, profile.get(1, TimeUnit.SECONDS).status());
+        assertFalse(runtime.health().captureBusy());
+    }
+
+    @Test
+    void orphanRecoveryHoldsAdmissionSoReloadAndCapturesWait() throws Exception {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        ThreadPoolExecutor capture = (ThreadPoolExecutor) HyboxRuntime.newCaptureExecutor();
+        JfrController recorder = new JfrController(Duration.ofMinutes(1), 1024 * 1024, "hybox-recovery-admission");
+        recorder.start();
+        HyboxRuntime runtime = runtime(scheduler, worker, capture, recorder);
+        CountDownLatch blocked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            capture.execute(() -> {
+                blocked.countDown();
+                await(release);
+            });
+            assertTrue(blocked.await(5, TimeUnit.SECONDS));
+            var recover = HyboxRuntime.class.getDeclaredMethod("recoverOrphanedRecordings");
+            recover.setAccessible(true);
+            CompletableFuture<?> recovery = (CompletableFuture<?>) recover.invoke(runtime);
+            assertTrue(runtime.health().captureBusy());
+            assertTrue(runtime.reload().contains("busy"));
+            assertEquals(CaptureResult.Status.BUSY, runtime.captureManual().get(1, TimeUnit.SECONDS).status());
+            release.countDown();
+            recovery.get(5, TimeUnit.SECONDS);
+            assertFalse(runtime.health().captureBusy());
+            assertTrue(runtime.reload().startsWith("Reloaded."));
+            assertFalse(runtime.health().captureBusy());
+            assertEquals(CaptureResult.Status.DISABLED, runtime.captureManual().get(5, TimeUnit.SECONDS).status());
+        } finally {
+            release.countDown();
+            runtime.close();
+        }
+    }
+
+    @Test
+    void shutdownInterruptsBlockedProfileLeadUpBeforeClosingRecorder() throws Exception {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        ThreadPoolExecutor worker = (ThreadPoolExecutor) HyboxRuntime.newWorker();
+        ThreadPoolExecutor capture = (ThreadPoolExecutor) HyboxRuntime.newCaptureExecutor();
+        JfrController recorder = new JfrController(Duration.ofMinutes(1), 1024 * 1024, "hybox-leadup-shutdown");
+        recorder.start();
+        HyboxRuntime runtime = runtime(scheduler, worker, capture, recorder);
+        CountDownLatch entered = new CountDownLatch(1);
+        AtomicBoolean recorderOpenOnInterrupt = new AtomicBoolean();
+        set(HyboxRuntime.class, runtime, "profileSessions", new ProfileSessionController(Clock.systemUTC(),
+            System.getLogger("lifecycle-test"), scheduler, recorder, event -> {
+                entered.countDown();
+                try {
+                    new CountDownLatch(1).await();
+                } catch (InterruptedException interrupted) {
+                    recorderOpenOnInterrupt.set(recorder.isRunning());
+                    Thread.currentThread().interrupt();
+                }
+                return CaptureResult.of(CaptureResult.Status.CANCELLED);
+            }, event -> new CompletableFuture<>(), result -> {}));
+        CompletableFuture<String> started = runtime.startProfileSession(1, false);
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+        CompletableFuture.runAsync(runtime::close).get(15, TimeUnit.SECONDS);
+        assertTrue(capture.isTerminated());
+        assertTrue(recorderOpenOnInterrupt.get());
+        assertFalse(recorder.isRunning());
+        assertTrue(started.get(1, TimeUnit.SECONDS).contains("CANCELLED"));
+        assertFalse(runtime.profileActive());
+        assertFalse(runtime.health().captureBusy());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static CompletableFuture<CaptureResult> profileCapture(HyboxRuntime runtime) throws Exception {
+        var method = HyboxRuntime.class.getDeclaredMethod("enqueueProfileCapture", TriggerEvent.class);
+        method.setAccessible(true);
+        return (CompletableFuture<CaptureResult>) method.invoke(runtime, new TriggerEvent(TriggerKind.MANUAL,
+            "server", Clock.systemUTC().instant(), Map.of("reason", "profile session", "profileStartMs", "0")));
+    }
+
     private HyboxRuntime runtime(ScheduledExecutorService scheduler, ExecutorService worker,
                                  JfrController recorder) throws Exception {
+        return runtime(scheduler, worker, HyboxRuntime.newCaptureExecutor(), recorder);
+    }
+
+    private HyboxRuntime runtime(ScheduledExecutorService scheduler, ExecutorService worker,
+                                 ExecutorService capture, JfrController recorder) throws Exception {
         Files.writeString(dir.resolve("hybox.json"), "{\"Version\":1,\"Capture\":{\"Enabled\":false}}");
         var constructor = HyboxRuntime.class.getDeclaredConstructor(HyboxPlugin.class, Clock.class,
             System.Logger.class, Path.class, ScheduledExecutorService.class, ExecutorService.class,
-            JfrController.class);
+            ExecutorService.class, JfrController.class);
         constructor.setAccessible(true);
         HyboxRuntime runtime = (HyboxRuntime) constructor.newInstance(plugin(), Clock.systemUTC(),
-            System.getLogger("lifecycle-test"), dir, scheduler, worker, recorder);
+            System.getLogger("lifecycle-test"), dir, scheduler, worker, capture, recorder);
         var build = HyboxRuntime.class.getDeclaredMethod("buildEngine", HyboxConfig.class);
         build.setAccessible(true);
         set(HyboxRuntime.class, runtime, "engine",

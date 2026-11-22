@@ -17,6 +17,7 @@ import jdk.jfr.consumer.RecordedClass;
 import jdk.jfr.consumer.RecordedClassLoader;
 import jdk.jfr.consumer.RecordedEvent;
 import jdk.jfr.consumer.RecordedFrame;
+import jdk.jfr.consumer.RecordedMethod;
 import jdk.jfr.consumer.RecordedObject;
 import jdk.jfr.consumer.RecordedStackTrace;
 import jdk.jfr.consumer.RecordedThread;
@@ -86,6 +87,9 @@ final class JfrTimelineParser {
     }
 
     private record Pt(long t, double v) {}
+
+    private record StackInfo(String leaf, String[] flameFrames, int[] flameOwners, String cpuModId,
+                             String cpuModMethod, String chain, String subsystem, String allocMod) {}
 
     private static final String[][] SUBSYSTEM_PATTERNS = {
         {"Collision", ".modules.collision."},
@@ -191,6 +195,7 @@ final class JfrTimelineParser {
         Map<String, long[]> cpuModSamples = new LinkedHashMap<>();
         Map<String, Map<String, long[]>> cpuModMethods = new HashMap<>();
         Map<String, Map<String, long[]>> cpuModThreads = new HashMap<>();
+        JfrStackCache<RecordedStackTrace, StackInfo> stacks = new JfrStackCache<>(JfrTimelineParser::stackInfo);
 
         long minT = Long.MAX_VALUE;
         long maxT = Long.MIN_VALUE;
@@ -224,7 +229,7 @@ final class JfrTimelineParser {
                                 }
                             }
                         }
-                        recordStack(e.getStackTrace(), samplesByMethod, chainsByMethod, subsystems,
+                        recordStack(e.getStackTrace(), stacks, samplesByMethod, chainsByMethod, subsystems,
                             subsystemsByWorld, flameRoot, cpuModSamples, cpuModMethods, cpuModThreads, threadName);
                     }
                     case "jdk.CPULoad" -> {
@@ -315,13 +320,13 @@ final class JfrTimelineParser {
                     }
                     case "jdk.ExceptionStatistics" -> exceptionsCum.add(new Pt(t, getL(e, "throwables")));
                     case "jdk.ObjectAllocationSample" ->
-                        allocTotal += recordAlloc(e, getL(e, "weight"), allocSubsystem, allocThread,
+                        allocTotal += recordAlloc(e, getL(e, "weight"), stacks, allocSubsystem, allocThread,
                             allocClass, allocMod, allocSubByWorld, allocModByWorld);
                     case "jdk.ObjectAllocationInNewTLAB" ->
-                        allocTotal += recordAlloc(e, getL(e, "tlabSize"), allocSubsystem, allocThread,
+                        allocTotal += recordAlloc(e, getL(e, "tlabSize"), stacks, allocSubsystem, allocThread,
                             allocClass, allocMod, allocSubByWorld, allocModByWorld);
                     case "jdk.ObjectAllocationOutsideTLAB" ->
-                        allocTotal += recordAlloc(e, getL(e, "allocationSize"), allocSubsystem, allocThread,
+                        allocTotal += recordAlloc(e, getL(e, "allocationSize"), stacks, allocSubsystem, allocThread,
                             allocClass, allocMod, allocSubByWorld, allocModByWorld);
                     case "jdk.ContainerConfiguration" -> {
                         long quota = getL(e, "cpuQuota");
@@ -923,7 +928,8 @@ final class JfrTimelineParser {
         return out;
     }
 
-    private static long recordAlloc(RecordedEvent e, long weight, Map<String, long[]> bySubsystem,
+    private static long recordAlloc(RecordedEvent e, long weight, JfrStackCache<RecordedStackTrace, StackInfo> stacks,
+                                    Map<String, long[]> bySubsystem,
                                     Map<String, long[]> byThread, Map<String, long[]> byClass,
                                     Map<String, long[]> byMod,
                                     Map<String, Map<String, long[]>> allocSubByWorld,
@@ -936,11 +942,12 @@ final class JfrTimelineParser {
         String world = worldOf(threadName);
         RecordedStackTrace stack = e.getStackTrace();
         if (stack != null) {
-            String sub = classify(stack.getFrames());
+            StackInfo info = stacks.get(stack);
+            String sub = info.subsystem();
             bySubsystem.computeIfAbsent(sub, k -> new long[1])[0] += weight;
             allocSubByWorld.computeIfAbsent(world, k -> new HashMap<>())
                 .computeIfAbsent(sub, k -> new long[1])[0] += weight;
-            String mod = allocMod(stack);
+            String mod = info.allocMod();
             if (mod != null) {
                 byMod.computeIfAbsent(mod, k -> new long[1])[0] += weight;
                 allocModByWorld.computeIfAbsent(world, k -> new HashMap<>())
@@ -957,13 +964,9 @@ final class JfrTimelineParser {
         return weight;
     }
 
-    private static String allocMod(RecordedStackTrace stack) {
-        for (RecordedFrame frame : stack.getFrames()) {
-            if (!frame.isJavaFrame() || frame.getMethod() == null) {
-                continue;
-            }
-            String type = frame.getMethod().getType().getName();
-            if (!JfrHotThreads.isEngine(type)) {
+    private static String allocMod(String[] types) {
+        for (String type : types) {
+            if (type != null && !JfrHotThreads.isEngine(type)) {
                 return JfrHotThreads.modId(type);
             }
         }
@@ -1006,7 +1009,8 @@ final class JfrTimelineParser {
         return name;
     }
 
-    private static void recordStack(RecordedStackTrace stack, Map<String, long[]> samplesByMethod,
+    private static void recordStack(RecordedStackTrace stack, JfrStackCache<RecordedStackTrace, StackInfo> stacks,
+                                    Map<String, long[]> samplesByMethod,
                                     Map<String, Map<String, long[]>> chainsByMethod,
                                     Map<String, long[]> subsystems,
                                     Map<String, Map<String, long[]>> subsystemsByWorld, FlameNode flameRoot,
@@ -1017,31 +1021,79 @@ final class JfrTimelineParser {
         if (stack == null) {
             return;
         }
-        List<RecordedFrame> frames = stack.getFrames();
-        String leaf = null;
-        int leafIndex = -1;
-        for (int i = 0; i < frames.size(); i++) {
-            RecordedFrame frame = frames.get(i);
-            if (frame.isJavaFrame() && frame.getMethod() != null) {
-                leaf = cleanType(frame.getMethod().getType().getName()) + "." + frame.getMethod().getName();
-                leafIndex = i;
-                break;
-            }
-        }
+        StackInfo info = stacks.get(stack);
+        String leaf = info.leaf();
         if (leaf == null) {
             return;
         }
         samplesByMethod.computeIfAbsent(leaf, k -> new long[1])[0]++;
 
-        List<String> path = new ArrayList<>(Math.min(frames.size() + 1, FLAME_DEPTH_LIMIT));
-        List<Integer> owners = new ArrayList<>(path.size());
-        path.add(threadName == null || threadName.isBlank() ? "(unknown thread)" : normalizeThreadName(threadName));
-        owners.add(FLAME_OWNER_THREAD);
-        for (int i = frames.size() - 1; i >= 0 && path.size() < FLAME_DEPTH_LIMIT; i--) {
+        flameInsert(flameRoot,
+            threadName == null || threadName.isBlank() ? "(unknown thread)" : normalizeThreadName(threadName),
+            info.flameFrames(), info.flameOwners());
+
+        String id = info.cpuModId();
+        if (id != null) {
+            cpuModSamples.computeIfAbsent(id, k -> new long[1])[0]++;
+            cpuModMethods.computeIfAbsent(id, k -> new HashMap<>())
+                .computeIfAbsent(info.cpuModMethod(), k -> new long[1])[0]++;
+            if (threadName != null) {
+                String normalized = normalizeThreadName(threadName);
+                cpuModThreads.computeIfAbsent(id, k -> new HashMap<>())
+                    .computeIfAbsent(normalized, k -> new long[1])[0]++;
+            }
+        }
+
+        String chain = info.chain();
+        if (chain != null) {
+            Map<String, long[]> chains = chainsByMethod.computeIfAbsent(leaf, k -> new HashMap<>());
+            long[] counter = chains.get(chain);
+            if (counter != null) {
+                counter[0]++;
+            } else if (chains.size() < CHAINS_PER_METHOD_CAP) {
+                chains.put(chain, new long[] {1});
+            }
+        }
+
+        String sub = info.subsystem();
+        subsystems.computeIfAbsent(sub, k -> new long[1])[0]++;
+        subsystemsByWorld.computeIfAbsent(worldOf(threadName), k -> new HashMap<>())
+            .computeIfAbsent(sub, k -> new long[1])[0]++;
+    }
+
+    private static StackInfo stackInfo(RecordedStackTrace stack) {
+        List<RecordedFrame> frames = stack.getFrames();
+        int size = frames.size();
+        String[] types = new String[size];
+        String[] names = new String[size];
+        for (int i = 0; i < size; i++) {
             RecordedFrame frame = frames.get(i);
-            if (frame.isJavaFrame() && frame.getMethod() != null) {
-                String type = cleanType(frame.getMethod().getType().getName());
-                path.add(shortName(type) + "." + frame.getMethod().getName());
+            RecordedMethod method = frame.isJavaFrame() ? frame.getMethod() : null;
+            if (method != null) {
+                types[i] = method.getType().getName();
+                names[i] = method.getName();
+            }
+        }
+        String subsystem = classify(types);
+        String allocMod = allocMod(types);
+        int leafIndex = -1;
+        for (int i = 0; i < size; i++) {
+            if (types[i] != null) {
+                leafIndex = i;
+                break;
+            }
+        }
+        if (leafIndex < 0) {
+            return new StackInfo(null, null, null, null, null, null, subsystem, allocMod);
+        }
+        String leaf = cleanType(types[leafIndex]) + "." + names[leafIndex];
+
+        List<String> path = new ArrayList<>(Math.min(size, FLAME_DEPTH_LIMIT - 1));
+        List<Integer> owners = new ArrayList<>(path.size());
+        for (int i = size - 1; i >= 0 && path.size() < FLAME_DEPTH_LIMIT - 1; i--) {
+            if (types[i] != null) {
+                String type = cleanType(types[i]);
+                path.add(shortName(type) + "." + names[i]);
                 owners.add(frameOwner(type));
             }
         }
@@ -1049,68 +1101,43 @@ final class JfrTimelineParser {
         for (int i = 0; i < ownerArr.length; i++) {
             ownerArr[i] = owners.get(i);
         }
-        flameInsert(flameRoot, path, ownerArr);
 
-        for (RecordedFrame frame : frames) {
-            if (!frame.isJavaFrame() || frame.getMethod() == null) {
+        String cpuModId = null;
+        String cpuModMethod = null;
+        for (int i = 0; i < size; i++) {
+            if (types[i] == null || JfrHotThreads.isEngine(types[i])) {
                 continue;
             }
-            String type = frame.getMethod().getType().getName();
-            if (JfrHotThreads.isEngine(type)) {
-                continue;
+            cpuModId = pluginLoaderId(frames.get(i));
+            if (cpuModId == null) {
+                cpuModId = JfrHotThreads.modId(types[i]);
             }
-            String id = pluginLoaderId(frame);
-            if (id == null) {
-                id = JfrHotThreads.modId(type);
-            }
-            cpuModSamples.computeIfAbsent(id, k -> new long[1])[0]++;
-            cpuModMethods.computeIfAbsent(id, k -> new HashMap<>())
-                .computeIfAbsent(type + "." + frame.getMethod().getName(), k -> new long[1])[0]++;
-            if (threadName != null) {
-                String normalized = normalizeThreadName(threadName);
-                cpuModThreads.computeIfAbsent(id, k -> new HashMap<>())
-                    .computeIfAbsent(normalized, k -> new long[1])[0]++;
-            }
+            cpuModMethod = types[i] + "." + names[i];
             break;
         }
 
         StringBuilder chain = new StringBuilder(96);
         int added = 0;
-        for (int i = leafIndex + 1; i < frames.size() && added < CALLER_CHAIN_FRAMES; i++) {
-            RecordedFrame frame = frames.get(i);
-            if (!frame.isJavaFrame() || frame.getMethod() == null) {
+        for (int i = leafIndex + 1; i < size && added < CALLER_CHAIN_FRAMES; i++) {
+            if (types[i] == null) {
                 continue;
             }
             if (added > 0) {
                 chain.append(' ');
             }
-            chain.append(shortName(cleanType(frame.getMethod().getType().getName())))
-                .append('.').append(frame.getMethod().getName());
+            chain.append(shortName(cleanType(types[i]))).append('.').append(names[i]);
             added++;
         }
-        if (added > 0) {
-            Map<String, long[]> chains = chainsByMethod.computeIfAbsent(leaf, k -> new HashMap<>());
-            long[] counter = chains.get(chain.toString());
-            if (counter != null) {
-                counter[0]++;
-            } else if (chains.size() < CHAINS_PER_METHOD_CAP) {
-                chains.put(chain.toString(), new long[] {1});
-            }
-        }
-
-        String sub = classify(frames);
-        subsystems.computeIfAbsent(sub, k -> new long[1])[0]++;
-        subsystemsByWorld.computeIfAbsent(worldOf(threadName), k -> new HashMap<>())
-            .computeIfAbsent(sub, k -> new long[1])[0]++;
+        return new StackInfo(leaf, path.toArray(new String[0]), ownerArr, cpuModId, cpuModMethod,
+            added > 0 ? chain.toString() : null, subsystem, allocMod);
     }
 
-    private static String classify(List<RecordedFrame> frames) {
+    private static String classify(String[] types) {
         String deepestEngine = null;
-        for (RecordedFrame frame : frames) {
-            if (!frame.isJavaFrame() || frame.getMethod() == null) {
+        for (String type : types) {
+            if (type == null) {
                 continue;
             }
-            String type = frame.getMethod().getType().getName();
             for (String[] pattern : SUBSYSTEM_PATTERNS) {
                 for (int i = 1; i < pattern.length; i++) {
                     if (type.contains(pattern[i])) {
@@ -1258,6 +1285,22 @@ final class JfrTimelineParser {
             node = node.children.computeIfAbsent(path.get(i), FlameNode::new);
             node.samples++;
             if (owners != null && i < owners.length && node.owner == 0) {
+                node.owner = owners[i];
+            }
+        }
+    }
+
+    private static void flameInsert(FlameNode root, String thread, String[] frames, int[] owners) {
+        root.samples++;
+        FlameNode node = root.children.computeIfAbsent(thread, FlameNode::new);
+        node.samples++;
+        if (node.owner == 0) {
+            node.owner = FLAME_OWNER_THREAD;
+        }
+        for (int i = 0; i < frames.length; i++) {
+            node = node.children.computeIfAbsent(frames[i], FlameNode::new);
+            node.samples++;
+            if (node.owner == 0) {
                 node.owner = owners[i];
             }
         }
