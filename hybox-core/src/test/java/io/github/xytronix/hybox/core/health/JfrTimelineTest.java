@@ -77,6 +77,64 @@ class JfrTimelineTest {
     }
 
     @Test
+    void playerTotalsDoNotCountAWorldAfterItStopsReporting(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("recording.jfr");
+        try (Recording recording = new Recording()) {
+            recording.enable(HyboxWorldTickEvent.class).withoutStackTrace();
+            recording.start();
+            for (int i = 0; i < 12; i++) {
+                boolean inInstance = i >= 4 && i < 8;
+                worldTick("default", inInstance ? 0 : 1, 100);
+                if (inInstance) {
+                    worldTick("instance-forgotten-temple", 1, 40);
+                }
+                Thread.sleep(300);
+            }
+            recording.dump(target);
+        }
+
+        JfrTimeline timeline = JfrTimeline.parse(target);
+
+        assertNotNull(timeline);
+        for (double players : timeline.playersSeries()) {
+            assertEquals(1.0, players, 0.001);
+        }
+        double[] entities = timeline.entitiesSeries();
+        assertEquals(100.0, entities[0], 0.001);
+        assertEquals(100.0, entities[entities.length - 1], 0.001);
+        assertEquals(140.0, java.util.Arrays.stream(entities).max().orElseThrow(), 0.001);
+    }
+
+    @Test
+    void slowIoLimitIsTheLowestFileThresholdInTheRecording(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("recording.jfr");
+        try (Recording recording = new Recording()) {
+            recording.enable(HyboxWorldTickEvent.class).withoutStackTrace();
+            recording.enable("jdk.ActiveSetting");
+            recording.enable("jdk.FileRead").withThreshold(java.time.Duration.ofMillis(10));
+            recording.enable("jdk.FileWrite").withThreshold(java.time.Duration.ofMillis(20));
+            recording.start();
+            for (int i = 0; i < 3; i++) {
+                worldTick("default", 1, 100);
+                Thread.sleep(100);
+            }
+            recording.dump(target);
+        }
+
+        assertEquals(10, JfrTimeline.parse(target).slowIoThresholdMs());
+    }
+
+    private static void worldTick(String world, int players, int entities) {
+        HyboxWorldTickEvent event = new HyboxWorldTickEvent();
+        event.world = world;
+        event.tps = 30;
+        event.mspt = 5;
+        event.players = players;
+        event.entities = entities;
+        event.commit();
+    }
+
+    @Test
     void parsesPingSeriesAndPluginEvents(@TempDir Path tempDir) throws Exception {
         Path target = tempDir.resolve("recording.jfr");
         try (Recording recording = new Recording()) {

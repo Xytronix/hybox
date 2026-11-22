@@ -1,8 +1,9 @@
+$H = "HyboxTones.ui";
 Group {
   Anchor: (Width: 940, Height: 18, Bottom: 4);
-  Label #X0 { Anchor: (Left: 0, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: #96a9be); }
-  Label #X1 { Anchor: (Left: 175, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: #96a9be, HorizontalAlignment: Center); }
-  Label #X2 { Anchor: (Left: 410, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: #96a9be, HorizontalAlignment: Center); }
-  Label #X3 { Anchor: (Left: 645, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: #96a9be, HorizontalAlignment: Center); }
-  Label #X4 { Anchor: (Left: 820, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: #96a9be, HorizontalAlignment: End); }
+  Label #X0 { Anchor: (Left: 0, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: $H.@Text3); }
+  Label #X1 { Anchor: (Left: 175, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: $H.@Text3, HorizontalAlignment: Center); }
+  Label #X2 { Anchor: (Left: 410, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: $H.@Text3, HorizontalAlignment: Center); }
+  Label #X3 { Anchor: (Left: 645, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: $H.@Text3, HorizontalAlignment: Center); }
+  Label #X4 { Anchor: (Left: 820, Width: 120, Height: 16); Style: (FontSize: 10, TextColor: $H.@Text3, HorizontalAlignment: End); }
 }

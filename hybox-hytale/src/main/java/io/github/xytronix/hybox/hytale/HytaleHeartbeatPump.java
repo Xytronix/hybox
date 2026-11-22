@@ -152,12 +152,12 @@ final class HytaleHeartbeatPump {
                 Instant last = registry.lastBeat(scope);
                 if (last != null && last.isAfter(triggerAt)) {
                     logger.log(System.Logger.Level.INFO,
-                        "Heartbeat for '" + scope + "' resumed; dumping recording with post-incident recovery.");
+                        "Heartbeat for '" + scope + "' resumed. Saving the recording with the recovery.");
                     return dumps;
                 }
             } else if (recovered != null && recovered.getAsBoolean()) {
                 logger.log(System.Logger.Level.INFO,
-                    event.kind() + " for '" + scope + "' recovered; dumping recording with post-incident recovery.");
+                    event.kind() + " for '" + scope + "' recovered. Saving the recording with the recovery.");
                 return dumps;
             }
             if (nextDump != null && dumps.size() < maxDumps && !clock.instant().isBefore(nextDump)) {
@@ -174,11 +174,11 @@ final class HytaleHeartbeatPump {
         if (heartbeat) {
             logger.log(System.Logger.Level.INFO,
                 "Heartbeat for '" + scope + "' did not resume within " + maxWait.toSeconds()
-                + "s; dumping the recording now.");
+                + "s. Saving the recording now.");
         } else {
             logger.log(System.Logger.Level.INFO,
                 "Recorded a " + maxWait.toSeconds() + "s post-incident tail for " + event.kind()
-                + "; dumping the recording.");
+                + ". Saving the recording.");
         }
         return dumps;
     }

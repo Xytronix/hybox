@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import io.github.xytronix.hybox.core.health.FrameLabels;
 import io.github.xytronix.hybox.core.health.HealthSnapshot;
 import io.github.xytronix.hybox.core.health.JfrTimeline;
 import io.github.xytronix.hybox.core.incident.IncidentMetadata;
@@ -200,32 +201,9 @@ final class ReportActivityWriter {
         json.endArray();
     }
 
-    static void writeModCpu(JsonWriter json, JfrTimeline timeline, Map<String, String> modCpu,
-                            ReportAttribution attribution) throws IOException {
-        boolean detailed = timeline != null && !timeline.cpuByMod().isEmpty();
-        List<JfrTimeline.ModCpu> rows;
-        if (detailed) {
-            rows = timeline.cpuByMod();
-        } else {
-            rows = new ArrayList<>();
-            for (Map.Entry<String, String> entry : modCpu == null ? Map.<String, String>of().entrySet()
-                : modCpu.entrySet()) {
-                String value = entry.getValue();
-                long samples = 0;
-                String method = value;
-                int idx = value.indexOf(" samples · ");
-                if (idx > 0) {
-                    try {
-                        samples = Long.parseLong(value.substring(0, idx).trim());
-                        method = value.substring(idx + " samples · ".length()).trim();
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                rows.add(new JfrTimeline.ModCpu(entry.getKey(), samples, method, List.of()));
-            }
-            attribution = new ReportAttribution(rows);
-        }
-        rows = attribution.cpu(rows);
+    static void writeModCpu(JsonWriter json, List<JfrTimeline.ModCpu> recorded, ReportAttribution attribution)
+        throws IOException {
+        List<JfrTimeline.ModCpu> rows = attribution.cpu(recorded);
         if (rows.isEmpty()) {
             json.name("modCpu").nullValue();
             return;
@@ -236,16 +214,14 @@ final class ReportActivityWriter {
             json.value(row.id());
             json.value(row.samples());
             json.value(row.method());
-            if (detailed) {
+            json.beginArray();
+            for (JfrTimeline.ThreadShare thread : row.threads()) {
                 json.beginArray();
-                for (JfrTimeline.ThreadShare thread : row.threads()) {
-                    json.beginArray();
-                    json.value(thread.thread());
-                    json.value(thread.samples());
-                    json.endArray();
-                }
+                json.value(thread.thread());
+                json.value(thread.samples());
                 json.endArray();
             }
+            json.endArray();
             json.endArray();
         }
         json.endArray();
@@ -271,6 +247,9 @@ final class ReportActivityWriter {
         }
         json.endArray();
         json.value(node.owner());
+        if (node.label() != null) {
+            json.value(node.label());
+        }
         json.endArray();
     }
 
@@ -360,9 +339,17 @@ final class ReportActivityWriter {
                     json.beginArray();
                     json.value(m.method());
                     json.value(m.samples());
+                    String label = FrameLabels.labelOf(m.method());
+                    if (label != null) {
+                        json.value(label);
+                    }
                     json.endArray();
                 }
                 json.endArray();
+                String topLabel = FrameLabels.labelOf(hot.topMethod());
+                if (topLabel != null) {
+                    json.value(topLabel);
+                }
                 json.endArray();
             }
         }
@@ -381,6 +368,17 @@ final class ReportActivityWriter {
                     json.value(caller);
                 }
                 json.endArray();
+                String label = FrameLabels.labelOf(hm.method());
+                if (label != null || !hm.callerLabels().isEmpty()) {
+                    json.value(label);
+                }
+                if (!hm.callerLabels().isEmpty()) {
+                    json.beginArray();
+                    for (String callerLabel : hm.callerLabels()) {
+                        json.value(callerLabel);
+                    }
+                    json.endArray();
+                }
                 json.endArray();
             }
         }

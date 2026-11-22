@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import io.github.xytronix.hybox.core.env.PrivateArguments;
 import io.github.xytronix.hybox.core.health.HealthSnapshot;
 import io.github.xytronix.hybox.core.health.HostCpuStats;
 import io.github.xytronix.hybox.core.health.JfrTimeline;
@@ -18,6 +19,7 @@ final class ReportSystemWriter {
     private static final Pattern INSTALLED_VERSION = Pattern.compile("installed \\((.+)\\)");
     private static final Pattern PLAYER_UUID = Pattern.compile(
         "(?<=players[/\\\\])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+    private static final Pattern TRAILING_PARENS = Pattern.compile("\\s*\\([^)]*\\)\\s*$");
 
     private ReportSystemWriter() {
     }
@@ -39,9 +41,8 @@ final class ReportSystemWriter {
         }
         json.name("sys").beginObject();
         String distro = osName != null ? osName : (sys == null ? null : sys.os());
-        String kernel = System.getProperty("os.version");
-        json.name("os").value(distro != null && kernel != null && !distro.contains(kernel)
-            ? distro + " · kernel " + kernel : distro);
+        json.name("os").value(distro);
+        json.name("osShort").value(osShort(distro, props));
         json.name("arch").value(prop(props, "os.arch"));
         writeRuntimeOsMetrics(json);
         JfrTimeline.HostCpu hostCpu = timeline == null ? null : timeline.hostCpu();
@@ -73,7 +74,7 @@ final class ReportSystemWriter {
         }
         ReportJson.writeNullable(json, "cpuCores", cpuCores);
         ReportJson.writeNullable(json, "hwThreads", cpuInfo != null && cpuInfo.hwThreads() > 0 ? cpuInfo.hwThreads() : null);
-        ReportJson.writeNullable(json, "sockets", cpuInfo != null && cpuInfo.sockets() > 0 ? cpuInfo.sockets() : null);
+        ReportJson.writeNullable(json, "sockets", plausibleSockets(cpuInfo, cpuCores));
         ReportJson.writeNullable(json, "ramTotal", sys != null && sys.totalRamBytes() > 0 ? sys.totalRamBytes() : null);
         ReportJson.writeNullable(json, "uptimeMs", sys != null && sys.uptimeMs() > 0 ? sys.uptimeMs() : null);
         HealthSnapshot.Memory memory = snapshot == null ? null : snapshot.memory();
@@ -169,6 +170,36 @@ final class ReportSystemWriter {
         return value != null ? value : System.getProperty(key);
     }
 
+    static String osShort(String distro, Map<String, String> props) {
+        String name = props.get("os.name");
+        String version = props.get("os.version");
+        String arch = props.get("os.arch");
+        String shown;
+        if (name != null && name.startsWith("Mac")) {
+            shown = version == null ? "macOS" : "macOS " + version;
+        } else if (name != null && name.startsWith("Windows")) {
+            shown = name;
+        } else if (distro != null && distro.startsWith("uname:")) {
+            String[] parts = distro.substring("uname:".length()).trim().split("\\s+");
+            shown = "Darwin".equals(parts[0]) ? "macOS" : parts.length > 1 ? parts[0] + " " + parts[1] : parts[0];
+        } else if (distro != null) {
+            shown = TRAILING_PARENS.matcher(distro).replaceFirst("");
+        } else {
+            shown = name;
+        }
+        if (shown == null || shown.isBlank()) {
+            return null;
+        }
+        return arch == null ? shown : shown + " (" + arch + ")";
+    }
+
+    private static Long plausibleSockets(JfrTimeline.CpuInfo cpuInfo, Long cores) {
+        if (cpuInfo == null || cpuInfo.sockets() <= 0) {
+            return null;
+        }
+        return cores != null && cores > 1 && cpuInfo.sockets() >= cores ? null : cpuInfo.sockets();
+    }
+
     static boolean isLoaderEntry(String value) {
         return value != null
             && (value.equals("installed") || INSTALLED_VERSION.matcher(value).matches());
@@ -194,10 +225,10 @@ final class ReportSystemWriter {
         if (timeline == null || (timeline.jvmArgs() == null && timeline.javaArgs() == null)) {
             return null;
         }
-        return ("java "
+        return PrivateArguments.mask(("java "
             + (timeline.jvmArgs() == null ? "" : timeline.jvmArgs()) + " "
             + (timeline.javaArgs() == null ? "" : timeline.javaArgs()))
-            .replaceAll("\\s+", " ").trim();
+            .replaceAll("\\s+", " ").trim());
     }
 
     private static void writeDisk(JsonWriter json, HealthSnapshot snapshot, JfrTimeline timeline)
@@ -412,7 +443,7 @@ final class ReportSystemWriter {
 
     private static String friendlyGcCaller(String caller) {
         if (caller != null && caller.startsWith("sun.rmi.")) {
-            return caller + " (JVM RMI DGC, Java standard, not the game)";
+            return caller + " (Java itself, not a mod)";
         }
         return caller;
     }
@@ -516,6 +547,8 @@ final class ReportSystemWriter {
             json.endArray();
         }
         json.endArray();
+        ReportJson.writeNullable(json, "slowIoThresholdMs",
+            timeline.slowIoThresholdMs() >= 0 ? timeline.slowIoThresholdMs() : null);
     }
 
     private static String maskPlayers(String path, Map<String, String> players) {

@@ -5,6 +5,7 @@ import com.hypixel.hytale.server.core.universe.world.events.RemoveWorldEvent;
 import java.time.Clock;
 import java.util.Map;
 import java.util.Objects;
+import io.github.xytronix.hybox.core.health.FrameLabels;
 import io.github.xytronix.hybox.core.trigger.TriggerEvent;
 import io.github.xytronix.hybox.core.trigger.TriggerKind;
 
@@ -65,7 +66,7 @@ final class HytaleWorldFailureListener {
             if (i > 0) {
                 stack.append('\n');
             }
-            stack.append("at ").append(frames[i]);
+            stack.append("at ").append(frames[i]).append(FrameLabels.suffix(frames[i]));
         }
         if (stack.isEmpty()) {
             return Map.of("error", error);

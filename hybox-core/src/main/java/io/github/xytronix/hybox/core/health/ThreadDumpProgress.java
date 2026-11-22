@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import io.github.xytronix.hybox.core.incident.DiagnosticSection;
+import io.github.xytronix.hybox.core.text.Units;
 
 public final class ThreadDumpProgress {
     private static final int MAX_LISTED = 20;
@@ -59,14 +60,14 @@ public final class ThreadDumpProgress {
         Map<String, String> entries = new LinkedHashMap<>();
         entries.put("Dumps compared", Integer.toString(dumps.size()));
         if (stuckCount == 0) {
-            entries.put("Verdict", "All threads advanced across the dumps; no hard hang detected.");
+            entries.put("Verdict", "Every thread moved between the dumps. Nothing is stuck.");
             return new DiagnosticSection("Thread progress", entries);
         }
-        entries.put("Verdict", stuckCount + " thread(s) showed no progress (same state and top frame) across all "
-            + dumps.size() + " dumps — likely hung or in a tight loop.");
+        entries.put("Verdict", Units.count(stuckCount, "thread") + " did not move between the " + dumps.size()
+            + " dumps. " + (stuckCount == 1 ? "It is" : "They are") + " stuck or in a loop.");
         entries.putAll(stuck);
         if (stuckCount > stuck.size()) {
-            entries.put("(and more)", (stuckCount - stuck.size()) + " additional thread(s) not listed");
+            entries.put("(and more)", Units.count(stuckCount - stuck.size(), "more thread") + " not listed");
         }
         return new DiagnosticSection("Thread progress", entries);
     }

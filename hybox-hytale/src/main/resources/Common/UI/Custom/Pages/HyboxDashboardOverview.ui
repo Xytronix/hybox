@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 
 Group {
   FlexWeight: 1;
@@ -8,16 +9,16 @@ Group {
   Group #Warnings {
     LayoutMode: Left;
     Padding: (Horizontal: 14, Vertical: 10);
-    Background: #efbd62(0.10);
+    Background: $H.@WarnBanner;
     Anchor: (Bottom: 10);
-    Label {
-      Text: "ATTENTION";
+    Label #WarningTitle {
+      Text: "Attention";
       Anchor: (Width: 105);
-      Style: (FontSize: 12, TextColor: #efbd62, RenderBold: true, VerticalAlignment: Center);
+      Style: (FontSize: 12, TextColor: $H.@Warn, RenderBold: true, VerticalAlignment: Center);
     }
     Label #WarningText {
       FlexWeight: 1;
-      Style: (FontSize: 12, TextColor: #efbd62, Wrap: true, WrapMaxLines: 3);
+      Style: (FontSize: 12, TextColor: $H.@Warn, Wrap: true, WrapMaxLines: 3);
     }
   }
 
@@ -29,25 +30,25 @@ Group {
   Label {
     Text: "Running now";
     Anchor: (Height: 26, Bottom: 4);
-    Style: (RenderBold: true, FontSize: 17, TextColor: #d3e3ed);
+    Style: (RenderBold: true, FontSize: 17, TextColor: $H.@Text);
   }
 
   Group #ProfileRunning {
     LayoutMode: Top;
     Padding: (Horizontal: 15, Vertical: 12);
-    Background: #7a9cc6(0.10);
+    Background: $H.@Panel;
     Anchor: (Bottom: 8);
     Group {
       LayoutMode: Left;
       Anchor: (Height: 36, Bottom: 10);
       Label {
-        Text: "High-fidelity profile";
+        Text: "Detailed profile";
         FlexWeight: 1;
-        Style: (RenderBold: true, FontSize: 14, TextColor: #d3e3ed);
+        Style: (RenderBold: true, FontSize: 14, TextColor: $H.@Text);
       }
       Group #ProfileTimerHost { Anchor: (Width: 150, Height: 36); }
     }
-    $C.@ProgressBar #ProfileProgress {
+    $H.@Bar #ProfileProgress {
       @Anchor = (Bottom: 10);
       Value: 0;
     }
@@ -56,20 +57,22 @@ Group {
       Anchor: (Height: 32);
       Label #ProfileCaptureAt {
         FlexWeight: 1;
-        Style: (FontSize: 12, TextColor: #96a9be, VerticalAlignment: Center);
+        Style: (FontSize: 12, TextColor: $H.@Text3, VerticalAlignment: Center);
       }
       Label #ProfileStopNote {
         Anchor: (Width: 330);
-        Style: (FontSize: 11, TextColor: #96a9be, HorizontalAlignment: End, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 2);
+        Style: (FontSize: 11, TextColor: $H.@Text3, HorizontalAlignment: End, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 2);
         Visible: false;
       }
       $C.@SecondaryTextButton #ProfileSaveNow {
         @Text = "Save now";
         @Anchor = Anchor(Width: 140, Right: 8);
+        Style: $H.@SecondaryButtonStyle;
       }
       $C.@SecondaryTextButton #ProfileCancel {
         @Text = "Cancel";
         @Anchor = Anchor(Width: 120);
+        Style: $H.@SecondaryButtonStyle;
       }
     }
   }
@@ -78,14 +81,14 @@ Group {
     LayoutMode: Left;
     Padding: (Horizontal: 15, Vertical: 12);
     Anchor: (Height: 60, Bottom: 8);
-    Background: #7a9cc6(0.10);
+    Background: $H.@Panel;
     Visible: false;
     $C.@DefaultSpinner {}
     Label {
       Text: "Saving the profile bundle…";
       Anchor: (Left: 14);
       FlexWeight: 1;
-      Style: (RenderBold: true, FontSize: 14, TextColor: #d3e3ed, VerticalAlignment: Center);
+      Style: (RenderBold: true, FontSize: 14, TextColor: $H.@Text, VerticalAlignment: Center);
     }
   }
 
@@ -93,7 +96,7 @@ Group {
     LayoutMode: Left;
     Padding: (Horizontal: 15, Vertical: 12);
     Anchor: (Height: 84, Bottom: 8);
-    Background: #7a9cc6(0.10);
+    Background: $H.@Panel;
     $C.@DefaultSpinner #CaptureSpinner {}
     Group {
       LayoutMode: Top;
@@ -102,7 +105,7 @@ Group {
       Label {
         Text: "Capturing incident";
         Anchor: (Height: 20);
-        Style: (RenderBold: true, FontSize: 14, TextColor: #d3e3ed);
+        Style: (RenderBold: true, FontSize: 14, TextColor: $H.@Text);
       }
       Group {
         LayoutMode: Left;
@@ -110,39 +113,40 @@ Group {
         Label #CaptureStage0 {
           Text: "1 Queued";
           Anchor: (Width: 96, Right: 8);
-          Style: (FontSize: 12, TextColor: #96a9be);
+          Style: (FontSize: 12, TextColor: $H.@Text3);
         }
         Label #CaptureStage1 {
           Text: "2 Collecting evidence";
           Anchor: (Width: 158, Right: 8);
-          Style: (FontSize: 12, TextColor: #96a9be);
+          Style: (FontSize: 12, TextColor: $H.@Text3);
         }
         Label #CaptureStage2 {
-          Text: "3 Waiting for post-incident evidence";
+          Text: "3 Waiting for the server to recover";
           FlexWeight: 1;
           Anchor: (Right: 8);
-          Style: (FontSize: 12, TextColor: #96a9be);
+          Style: (FontSize: 12, TextColor: $H.@Text3);
         }
         Label #CaptureStage3 {
-          Text: "4 Dumping recording";
-          Anchor: (Width: 152, Right: 8);
-          Style: (FontSize: 12, TextColor: #96a9be);
+          Text: "4 Saving the recording";
+          Anchor: (Width: 160, Right: 8);
+          Style: (FontSize: 12, TextColor: $H.@Text3);
         }
         Label #CaptureStage4 {
           Text: "5 Building bundle";
           Anchor: (Width: 134);
-          Style: (FontSize: 12, TextColor: #96a9be);
+          Style: (FontSize: 12, TextColor: $H.@Text3);
         }
       }
       Label #CaptureStep {
         Anchor: (Height: 20);
-        Style: (FontSize: 12, TextColor: #96a9be);
+        Style: (FontSize: 12, TextColor: $H.@Text3);
         Visible: false;
       }
     }
     $C.@SecondaryTextButton #SkipWait {
       @Text = "Skip wait";
       @Anchor = Anchor(Width: 140, Left: 12);
+      Style: $H.@SecondaryButtonStyle;
       Visible: false;
     }
   }
@@ -150,22 +154,22 @@ Group {
   Label #NothingRunning {
     Text: "No capture or profile session is running.";
     Anchor: (Height: 30);
-    Style: (FontSize: 13, TextColor: #96a9be, VerticalAlignment: Center);
+    Style: (FontSize: 13, TextColor: $H.@Text3, VerticalAlignment: Center);
   }
 
   Group #ProfileStartPanel {
     LayoutMode: Top;
     Padding: (Horizontal: 15, Vertical: 12);
-    Background: #7a9cc6(0.10);
+    Background: $H.@Panel;
     Anchor: (Bottom: 8);
     Label {
-      Text: "Start a high-fidelity profile";
+      Text: "Start a detailed profile";
       Anchor: (Height: 22);
-      Style: (RenderBold: true, FontSize: 14, TextColor: #d3e3ed);
+      Style: (RenderBold: true, FontSize: 14, TextColor: $H.@Text);
     }
     Label #ProfileStartNote {
       Anchor: (Height: 20, Bottom: 8);
-      Style: (FontSize: 12, TextColor: #96a9be, VerticalAlignment: Center);
+      Style: (FontSize: 12, TextColor: $H.@Text3, VerticalAlignment: Center);
     }
     Group {
       LayoutMode: Left;
@@ -173,24 +177,46 @@ Group {
       Label {
         Text: "Duration";
         Anchor: (Width: 82);
-        Style: (FontSize: 12, TextColor: #bfcdd5, VerticalAlignment: Center);
+        Style: (FontSize: 12, TextColor: $H.@Text2, VerticalAlignment: Center);
       }
-      $C.@SecondaryTextButton #ProfileMinutes1 { @Text = "1 min"; Anchor: (Width: 92, Height: 38, Top: 3, Right: 6); Padding: (Horizontal: 8); }
-      $C.@SecondaryTextButton #ProfileMinutes5 { @Text = "5 min"; Anchor: (Width: 92, Height: 38, Top: 3, Right: 6); Padding: (Horizontal: 8); }
-      $C.@SecondaryTextButton #ProfileMinutes15 { @Text = "15 min"; Anchor: (Width: 92, Height: 38, Top: 3, Right: 6); Padding: (Horizontal: 8); }
-      $C.@SecondaryTextButton #ProfileMinutes30 { @Text = "30 min"; Anchor: (Width: 92, Height: 38, Top: 3, Right: 22); Padding: (Horizontal: 8); }
+      Group {
+        LayoutMode: Top;
+        Anchor: (Width: 92, Right: 6);
+        $C.@SecondaryTextButton #ProfileMinutes1 { @Text = "1 min"; Anchor: (Height: 38, Top: 3); Padding: (Horizontal: 8); Style: $H.@SecondaryButtonStyle; }
+        Group #ProfileMinutes1Marker { Anchor: (Height: 3); Background: $H.@Accent; Visible: false; }
+      }
+      Group {
+        LayoutMode: Top;
+        Anchor: (Width: 92, Right: 6);
+        $C.@SecondaryTextButton #ProfileMinutes5 { @Text = "5 min"; Anchor: (Height: 38, Top: 3); Padding: (Horizontal: 8); Style: $H.@SecondaryButtonStyle; }
+        Group #ProfileMinutes5Marker { Anchor: (Height: 3); Background: $H.@Accent; Visible: false; }
+      }
+      Group {
+        LayoutMode: Top;
+        Anchor: (Width: 92, Right: 6);
+        $C.@SecondaryTextButton #ProfileMinutes15 { @Text = "15 min"; Anchor: (Height: 38, Top: 3); Padding: (Horizontal: 8); Style: $H.@SecondaryButtonStyle; }
+        Group #ProfileMinutes15Marker { Anchor: (Height: 3); Background: $H.@Accent; Visible: false; }
+      }
+      Group {
+        LayoutMode: Top;
+        Anchor: (Width: 92, Right: 22);
+        $C.@SecondaryTextButton #ProfileMinutes30 { @Text = "30 min"; Anchor: (Height: 38, Top: 3); Padding: (Horizontal: 8); Style: $H.@SecondaryButtonStyle; }
+        Group #ProfileMinutes30Marker { Anchor: (Height: 3); Background: $H.@Accent; Visible: false; }
+      }
       $C.@CheckBox #ProfileKeepBuffer {
         Anchor: (Width: 22, Height: 22, Top: 11, Right: 10);
+        Background: $H.@FrameBackground;
         Value: true;
       }
       Label {
         Text: "Include the recording from before the start";
         FlexWeight: 1;
-        Style: (FontSize: 12, TextColor: #bfcdd5, VerticalAlignment: Center);
+        Style: (FontSize: 12, TextColor: $H.@Text2, VerticalAlignment: Center);
       }
       $C.@TextButton #ProfileStartButton {
         @Text = "Start profile";
         @Anchor = Anchor(Width: 210);
+        Style: $H.@PrimaryButtonStyle;
       }
     }
   }

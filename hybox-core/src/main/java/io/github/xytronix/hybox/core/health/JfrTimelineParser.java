@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
+import jdk.jfr.EventType;
 import jdk.jfr.consumer.RecordedClass;
 import jdk.jfr.consumer.RecordedClassLoader;
 import jdk.jfr.consumer.RecordedEvent;
@@ -72,6 +73,7 @@ final class JfrTimelineParser {
     private static final int FLAME_NODE_CAP = 6000;
     private static final int FLAME_MIN_DIVISOR = 2000;
     private static final int THREAD_LANE_LIMIT = 25;
+    private static final long SAMPLE_PASS_GAP_MS = 250;
     private static final int MOD_CPU_LIMIT = 20;
     private static final int NET_OTHERS_LIMIT = 5;
     private static final String WORLD_THREAD_PREFIX = "WorldThread - ";
@@ -81,6 +83,7 @@ final class JfrTimelineParser {
         final String name;
         long samples;
         int owner;
+        String label;
         final Map<String, FlameNode> children = new LinkedHashMap<>();
 
         FlameNode(String name) {
@@ -90,8 +93,9 @@ final class JfrTimelineParser {
 
     record Pt(long t, double v) {}
 
-    private record StackInfo(String leaf, String[] flameFrames, int[] flameOwners, String cpuModId,
-                             String cpuModMethod, String chain, String subsystem, String allocMod) {}
+    private record StackInfo(String leaf, String[] flameFrames, int[] flameOwners, String[] flameLabels,
+                             String cpuModId, String cpuModMethod, String chain, String[] chainLabels,
+                             String subsystem, String allocMod) {}
 
     private static final String[][] SUBSYSTEM_PATTERNS = {
         {"Collision", ".modules.collision."},
@@ -118,7 +122,7 @@ final class JfrTimelineParser {
     private static final String SUBSYSTEM_OTHER = "Other";
 
     private static final Set<String> WANTED_PROPS = Set.of(
-        "java.vendor", "java.vm.vendor", "java.home", "java.runtime.version", "os.arch");
+        "java.vendor", "java.vm.vendor", "java.home", "java.runtime.version", "os.arch", "os.name", "os.version");
 
     private JfrTimelineParser() {
     }
@@ -150,6 +154,7 @@ final class JfrTimelineParser {
         long totalSamples = 0;
         Map<String, long[]> samplesByMethod = new HashMap<>();
         Map<String, Map<String, long[]>> chainsByMethod = new HashMap<>();
+        Map<String, String[]> chainLabels = new HashMap<>();
         Map<String, long[]> worldSamples = new HashMap<>();
         Map<String, long[]> subsystems = new HashMap<>();
         Map<String, Map<String, long[]>> subsystemsByWorld = new HashMap<>();
@@ -204,7 +209,12 @@ final class JfrTimelineParser {
         long maxT = Long.MIN_VALUE;
         boolean any = false;
 
+        long slowIoThreshold = Long.MAX_VALUE;
         try (RecordingFile file = new RecordingFile(recording)) {
+            Map<Long, String> typeNames = new HashMap<>();
+            for (EventType type : file.readEventTypes()) {
+                typeNames.put(type.getId(), type.getName());
+            }
             while (file.hasMoreEvents()) {
                 RecordedEvent e = file.readEvent();
                 long t = e.getEndTime() != null ? e.getEndTime().toEpochMilli() : -1;
@@ -232,7 +242,7 @@ final class JfrTimelineParser {
                                 }
                             }
                         }
-                        recordStack(e.getStackTrace(), stacks, samplesByMethod, chainsByMethod, subsystems,
+                        recordStack(e.getStackTrace(), stacks, samplesByMethod, chainsByMethod, chainLabels, subsystems,
                             subsystemsByWorld, flameRoot, cpuModSamples, cpuModMethods, cpuModThreads, threadName);
                     }
                     case "jdk.CPULoad" -> {
@@ -454,6 +464,16 @@ final class JfrTimelineParser {
                                 durationMs(e, "duration"), bytes, "read"));
                         }
                     }
+                    case "jdk.ActiveSetting" -> {
+                        String type = typeNames.get(getL(e, "id"));
+                        if ("threshold".equals(getS(e, "name"))
+                            && ("jdk.FileRead".equals(type) || "jdk.FileWrite".equals(type))) {
+                            long thresholdMs = settingMillis(getS(e, "value"));
+                            if (thresholdMs >= 0) {
+                                slowIoThreshold = Math.min(slowIoThreshold, thresholdMs);
+                            }
+                        }
+                    }
                     case "jdk.FileWrite" -> {
                         String path = getS(e, "path");
                         long bytes = getL(e, "bytesWritten");
@@ -540,7 +560,7 @@ final class JfrTimelineParser {
         List<ExplicitGc> explicit = new ArrayList<>();
         explicitGc.forEach((caller, count) -> explicit.add(new ExplicitGc(caller, count[0])));
 
-        List<HotMethod> hot = topMethods(samplesByMethod, chainsByMethod);
+        List<HotMethod> hot = topMethods(samplesByMethod, chainsByMethod, chainLabels);
 
         Map<String, Long> worlds = new LinkedHashMap<>();
         worldSamples.entrySet().stream()
@@ -558,12 +578,9 @@ final class JfrTimelineParser {
                 ticks.put(en.getKey(), new WorldTicks(tps, mspt));
             }
         }
-        double[] players = sumSeries(playersByWorld.values().stream()
-            .map(pts -> bucketLast(pts, lo, hi, buckets)).toList());
-        double[] entities = sumSeries(entitiesByWorld.values().stream()
-            .map(pts -> bucketLast(pts, lo, hi, buckets)).toList());
-        double[] chunks = sumSeries(chunksByWorld.values().stream()
-            .map(pts -> bucketLast(pts, lo, hi, buckets)).toList());
+        double[] players = bucketLast(totalsPerPass(playersByWorld), lo, hi, buckets);
+        double[] entities = bucketLast(totalsPerPass(entitiesByWorld), lo, hi, buckets);
+        double[] chunks = bucketLast(totalsPerPass(chunksByWorld), lo, hi, buckets);
         Map<String, long[]> chunkChurnByWorld = chunkChurnDeltas(chunksGenByWorld, chunksLoadByWorld);
         double[] chunksGenerated = toDeltas(sumSeries(chunksGenByWorld.values().stream()
             .map(pts -> bucketLast(pts, lo, hi, buckets)).toList()));
@@ -715,7 +732,7 @@ final class JfrTimelineParser {
         }
 
         return new JfrTimeline(
-            buckets, start, end, totalSamples, cpuStats,
+            start, end, totalSamples, cpuStats,
             cpuMachSeries, cpuJvmSeries,
             toLongs(bucketLast(heap, minT, maxT, buckets)),
             toLongs(bucketLast(rss, minT, maxT, buckets)),
@@ -740,6 +757,7 @@ final class JfrTimelineParser {
             toRateMBps(bucketLast(diskRead, lo, hi, buckets), lo, hi, buckets),
             toRateMBps(bucketLast(diskWrite, lo, hi, buckets), lo, hi, buckets),
             topSlowIo(slowIo),
+            slowIoThreshold == Long.MAX_VALUE ? -1 : slowIoThreshold,
             entities,
             chunks,
             chunkChurnByWorld,
@@ -1008,6 +1026,7 @@ final class JfrTimelineParser {
     private static void recordStack(RecordedStackTrace stack, JfrStackCache<RecordedStackTrace, StackInfo> stacks,
                                     Map<String, long[]> samplesByMethod,
                                     Map<String, Map<String, long[]>> chainsByMethod,
+                                    Map<String, String[]> chainLabels,
                                     Map<String, long[]> subsystems,
                                     Map<String, Map<String, long[]>> subsystemsByWorld, FlameNode flameRoot,
                                     Map<String, long[]> cpuModSamples,
@@ -1026,7 +1045,7 @@ final class JfrTimelineParser {
 
         flameInsert(flameRoot,
             threadName == null || threadName.isBlank() ? "(unknown thread)" : normalizeThreadName(threadName),
-            info.flameFrames(), info.flameOwners());
+            info.flameFrames(), info.flameOwners(), info.flameLabels());
 
         String id = info.cpuModId();
         if (id != null) {
@@ -1048,6 +1067,9 @@ final class JfrTimelineParser {
                 counter[0]++;
             } else if (chains.size() < CHAINS_PER_METHOD_CAP) {
                 chains.put(chain, new long[] {1});
+                if (info.chainLabels() != null) {
+                    chainLabels.putIfAbsent(chain, info.chainLabels());
+                }
             }
         }
 
@@ -1080,17 +1102,29 @@ final class JfrTimelineParser {
             }
         }
         if (leafIndex < 0) {
-            return new StackInfo(null, null, null, null, null, null, subsystem, allocMod);
+            return new StackInfo(null, null, null, null, null, null, null, null, subsystem, allocMod);
         }
         String leaf = cleanType(types[leafIndex]) + "." + names[leafIndex];
+        String[] frameLabels = new String[size];
+        boolean labelled = false;
+        for (int i = 0; i < size; i++) {
+            if (types[i] != null) {
+                frameLabels[i] = FrameLabels.label(cleanType(types[i]), names[i]);
+                labelled |= frameLabels[i] != null;
+            }
+        }
 
         List<String> path = new ArrayList<>(Math.min(size, FLAME_DEPTH_LIMIT - 1));
         List<Integer> owners = new ArrayList<>(path.size());
+        List<String> pathLabels = labelled ? new ArrayList<>(path.size()) : null;
         for (int i = size - 1; i >= 0 && path.size() < FLAME_DEPTH_LIMIT - 1; i--) {
             if (types[i] != null) {
                 String type = cleanType(types[i]);
                 path.add(shortName(type) + "." + names[i]);
                 owners.add(frameOwner(type));
+                if (pathLabels != null) {
+                    pathLabels.add(frameLabels[i]);
+                }
             }
         }
         int[] ownerArr = new int[owners.size()];
@@ -1113,6 +1147,8 @@ final class JfrTimelineParser {
         }
 
         StringBuilder chain = new StringBuilder(96);
+        String[] chainLabels = new String[CALLER_CHAIN_FRAMES];
+        boolean chainLabelled = false;
         int added = 0;
         for (int i = leafIndex + 1; i < size && added < CALLER_CHAIN_FRAMES; i++) {
             if (types[i] == null) {
@@ -1122,10 +1158,14 @@ final class JfrTimelineParser {
                 chain.append(' ');
             }
             chain.append(shortName(cleanType(types[i]))).append('.').append(names[i]);
+            chainLabels[added] = frameLabels[i];
+            chainLabelled |= frameLabels[i] != null;
             added++;
         }
-        return new StackInfo(leaf, path.toArray(new String[0]), ownerArr, cpuModId, cpuModMethod,
-            added > 0 ? chain.toString() : null, subsystem, allocMod);
+        return new StackInfo(leaf, path.toArray(new String[0]), ownerArr,
+            pathLabels == null ? null : pathLabels.toArray(new String[0]), cpuModId, cpuModMethod,
+            added > 0 ? chain.toString() : null, chainLabelled ? java.util.Arrays.copyOf(chainLabels, added) : null,
+            subsystem, allocMod);
     }
 
     private static String classify(String[] types) {
@@ -1178,7 +1218,8 @@ final class JfrTimelineParser {
     }
 
     private static List<HotMethod> topMethods(Map<String, long[]> samplesByMethod,
-                                              Map<String, Map<String, long[]>> chainsByMethod) {
+                                              Map<String, Map<String, long[]>> chainsByMethod,
+                                              Map<String, String[]> chainLabels) {
         List<Map.Entry<String, long[]>> ordered = new ArrayList<>(samplesByMethod.entrySet());
         ordered.sort((a, b) -> Long.compare(b.getValue()[0], a.getValue()[0]));
         List<HotMethod> out = new ArrayList<>(Math.min(HOT_METHOD_LIMIT, ordered.size()));
@@ -1187,6 +1228,7 @@ final class JfrTimelineParser {
                 break;
             }
             List<String> callers = List.of();
+            List<String> callerLabels = List.of();
             Map<String, long[]> chains = chainsByMethod.get(en.getKey());
             if (chains != null && !chains.isEmpty()) {
                 String dominant = chains.entrySet().stream()
@@ -1194,9 +1236,13 @@ final class JfrTimelineParser {
                     .map(Map.Entry::getKey).orElse(null);
                 if (dominant != null) {
                     callers = List.of(dominant.split(" "));
+                    String[] labels = chainLabels.get(dominant);
+                    if (labels != null) {
+                        callerLabels = java.util.Arrays.asList(labels);
+                    }
                 }
             }
-            out.add(new HotMethod(en.getKey(), en.getValue()[0], callers));
+            out.add(new HotMethod(en.getKey(), en.getValue()[0], callers, callerLabels));
         }
         return out;
     }
@@ -1286,7 +1332,7 @@ final class JfrTimelineParser {
         }
     }
 
-    private static void flameInsert(FlameNode root, String thread, String[] frames, int[] owners) {
+    private static void flameInsert(FlameNode root, String thread, String[] frames, int[] owners, String[] labels) {
         root.samples++;
         FlameNode node = root.children.computeIfAbsent(thread, FlameNode::new);
         node.samples++;
@@ -1298,6 +1344,9 @@ final class JfrTimelineParser {
             node.samples++;
             if (node.owner == 0) {
                 node.owner = owners[i];
+            }
+            if (labels != null && node.label == null) {
+                node.label = labels[i];
             }
         }
     }
@@ -1330,7 +1379,7 @@ final class JfrTimelineParser {
                 children.add(toFlame(child, threshold));
             }
         }
-        return new Flame(node.name, node.samples, children, node.owner);
+        return new Flame(node.name, node.samples, children, node.owner, node.label);
     }
 
     private static int stateCode(String mapped) {
@@ -1626,6 +1675,36 @@ final class JfrTimelineParser {
         return values;
     }
 
+    private static List<Pt> totalsPerPass(Map<String, List<Pt>> byWorld) {
+        record WorldPt(String world, Pt pt) {
+        }
+        List<WorldPt> all = new ArrayList<>();
+        byWorld.forEach((world, pts) -> pts.forEach(pt -> all.add(new WorldPt(world, pt))));
+        all.sort(java.util.Comparator.comparingLong(w -> w.pt().t()));
+        List<Pt> out = new ArrayList<>();
+        Set<String> inPass = new HashSet<>();
+        long passStart = 0;
+        double sum = -1;
+        for (WorldPt sample : all) {
+            if (inPass.isEmpty() || sample.pt().t() - passStart > SAMPLE_PASS_GAP_MS || !inPass.add(sample.world())) {
+                if (sum >= 0) {
+                    out.add(new Pt(passStart, sum));
+                }
+                inPass.clear();
+                inPass.add(sample.world());
+                passStart = sample.pt().t();
+                sum = -1;
+            }
+            if (sample.pt().v() >= 0) {
+                sum = Math.max(sum, 0) + sample.pt().v();
+            }
+        }
+        if (sum >= 0) {
+            out.add(new Pt(passStart, sum));
+        }
+        return out;
+    }
+
     private static double[] sumSeries(List<double[]> series) {
         double[] out = null;
         for (double[] s : series) {
@@ -1703,6 +1782,26 @@ final class JfrTimelineParser {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    private static long settingMillis(String value) {
+        if (value == null) {
+            return -1;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+)\\s*(ns|us|ms|s|m|h|d)").matcher(value.trim());
+        if (!m.matches()) {
+            return -1;
+        }
+        long amount = Long.parseLong(m.group(1));
+        return switch (m.group(2)) {
+            case "ns" -> amount / 1_000_000;
+            case "us" -> amount / 1_000;
+            case "ms" -> amount;
+            case "s" -> amount * 1_000;
+            case "m" -> amount * 60_000;
+            case "h" -> amount * 3_600_000;
+            default -> amount * 86_400_000;
+        };
     }
 
     private static String getS(RecordedObject o, String f) {

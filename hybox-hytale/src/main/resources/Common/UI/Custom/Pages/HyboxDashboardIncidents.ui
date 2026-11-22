@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 
 Group {
   LayoutMode: Top;
@@ -8,16 +9,16 @@ Group {
     LayoutMode: Left;
     Anchor: (Height: 30, Bottom: 5);
     Padding: (Horizontal: 10);
-    Background: #7a9cc6(0.13);
-    Label { Text: "TIME"; Anchor: (Width: 165); Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
-    Label { Text: "SEVERITY"; Anchor: (Width: 100); Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
-    Label { Text: "TRIGGER"; Anchor: (Width: 160); Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
-    Label { Text: "WORLD"; Anchor: (Width: 145); Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
-    Label { Text: "HEADLINE"; FlexWeight: 1; Style: (FontSize: 11, TextColor: #96a9be, RenderBold: true, VerticalAlignment: Center); }
+    Background: $H.@Panel2;
+    Label { Text: "TIME"; Anchor: (Width: 165); Style: (FontSize: 11, TextColor: $H.@Text3, RenderBold: true, VerticalAlignment: Center); }
+    Label { Text: "SEVERITY"; Anchor: (Width: 100); Style: (FontSize: 11, TextColor: $H.@Text3, RenderBold: true, VerticalAlignment: Center); }
+    Label { Text: "TRIGGER"; Anchor: (Width: 160); Style: (FontSize: 11, TextColor: $H.@Text3, RenderBold: true, VerticalAlignment: Center); }
+    Label { Text: "WORLD"; Anchor: (Width: 145); Style: (FontSize: 11, TextColor: $H.@Text3, RenderBold: true, VerticalAlignment: Center); }
+    Label { Text: "HEADLINE"; FlexWeight: 1; Style: (FontSize: 11, TextColor: $H.@Text3, RenderBold: true, VerticalAlignment: Center); }
   }
   Label #IncidentEmpty {
     Anchor: (Height: 42);
-    Style: (FontSize: 13, TextColor: #96a9be, VerticalAlignment: Center);
+    Style: (FontSize: 13, TextColor: $H.@Text3, VerticalAlignment: Center);
     Visible: false;
   }
   Group #IncidentRows {
