@@ -6,20 +6,24 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 record HyboxTrendModel(boolean metricsEnabled, int days, Instant generatedAt, int samples,
                        long firstSample, long lastSample, List<Metric> metrics, List<String> unavailable,
                        double[] markers) {
     private static final int MAX_POINTS = 600;
+    private static final int DEFAULT_TARGET_TPS = 30;
 
     record Metric(String title, String unit, int precision, double min, double average,
-                  double max, double now, double[] values) {}
+                  double max, double now, double[] values, HyboxChartRenderer.Ref ref) {}
 
     static int days(int requested) {
         return Math.max(1, Math.min(30, requested));
     }
 
-    static HyboxTrendModel from(boolean enabled, int requestedDays, Instant now, MetricsLog.Trend trend, long[] incidents) {
+    static HyboxTrendModel from(boolean enabled, int requestedDays, Instant now, MetricsLog.Trend trend, long[] incidents,
+                                int targetTps) {
+        double target = targetTps > 0 ? targetTps : DEFAULT_TARGET_TPS;
         int days = days(requestedDays);
         long from = now.minus(Duration.ofDays(days)).toEpochMilli(), to = now.toEpochMilli();
         int samples = 0;
@@ -33,14 +37,16 @@ record HyboxTrendModel(boolean metricsEnabled, int days, Instant generatedAt, in
         List<Metric> metrics = new ArrayList<>(9);
         List<String> unavailable = new ArrayList<>();
         if (enabled && samples > 0) {
-            add(metrics, unavailable, "Tick time (ms)", "ms", 1, trend.tickAvgMs(), trend.timestamps(), from, to, points);
-            add(metrics, unavailable, "Ticks per second", "TPS", 1, trend.tps(), trend.timestamps(), from, to, points);
+            add(metrics, unavailable, "Tick time", "ms", 1, trend.tickAvgMs(), trend.timestamps(), from, to, points,
+                new HyboxChartRenderer.Ref(1000 / target, String.format(java.util.Locale.ROOT, "%.1f ms budget", 1000 / target)));
+            add(metrics, unavailable, "TPS", "TPS", 1, trend.tps(), trend.timestamps(), from, to, points,
+                new HyboxChartRenderer.Ref(target, String.format(java.util.Locale.ROOT, "%.0f TPS target", target)));
             add(metrics, unavailable, "Players online", "players", 0, trend.players(), trend.timestamps(), from, to, points);
-            add(metrics, unavailable, "Heap memory", "GiB", 2, trend.heapBytes(), trend.timestamps(), from, to, points);
+            add(metrics, unavailable, "Heap", "GiB", 2, trend.heapBytes(), trend.timestamps(), from, to, points);
             add(metrics, unavailable, "Process RSS", "GiB", 2, trend.rssBytes(), trend.timestamps(), from, to, points);
-            add(metrics, unavailable, "CPU (Metrics.Cpu)", "%", 1, trend.cpuPct(), trend.timestamps(), from, to, points);
+            add(metrics, unavailable, "CPU use", "%", 1, trend.cpuPct(), trend.timestamps(), from, to, points);
             add(metrics, unavailable, "GC time", "%", 1, trend.gcPct(), trend.timestamps(), from, to, points);
-            add(metrics, unavailable, "Allocation (Metrics.Allocation)", "MB/s", 1, trend.allocMbPerSec(), trend.timestamps(), from, to, points);
+            add(metrics, unavailable, "Allocation rate", "MiB/s", 1, trend.allocMbPerSec(), trend.timestamps(), from, to, points);
             add(metrics, unavailable, "Queued packets", "packets", 0, trend.queuedPackets(), trend.timestamps(), from, to, points);
         }
         double[] markers = Arrays.stream(incidents).filter(time -> time >= from && time <= to)
@@ -54,6 +60,11 @@ record HyboxTrendModel(boolean metricsEnabled, int days, Instant generatedAt, in
 
     private static void add(List<Metric> metrics, List<String> unavailable, String title, String unit, int precision,
                             double[] series, long[] times, long from, long to, int points) {
+        add(metrics, unavailable, title, unit, precision, series, times, from, to, points, null);
+    }
+
+    private static void add(List<Metric> metrics, List<String> unavailable, String title, String unit, int precision,
+                            double[] series, long[] times, long from, long to, int points, HyboxChartRenderer.Ref ref) {
         double min = Double.POSITIVE_INFINITY, max = Double.NEGATIVE_INFINITY, sum = 0, now = Double.NaN;
         int count = 0;
         double[] values = new double[points];
@@ -75,7 +86,7 @@ record HyboxTrendModel(boolean metricsEnabled, int days, Instant generatedAt, in
             return;
         }
         for (int i = 0; i < points; i++) values[i] = counts[i] == 0 ? Double.NaN : values[i] / counts[i];
-        String chartTitle = title.startsWith("CPU") ? "CPU (%)" : title.startsWith("Allocation") ? "Allocation (MB/s)" : title;
-        metrics.add(new Metric(chartTitle, unit, precision, min, sum / count, max, now, values));
+        String chartTitle = Set.of("TPS", "players", "packets").contains(unit) ? title : title + " (" + unit + ")";
+        metrics.add(new Metric(chartTitle, unit, precision, min, sum / count, max, now, values, ref));
     }
 }

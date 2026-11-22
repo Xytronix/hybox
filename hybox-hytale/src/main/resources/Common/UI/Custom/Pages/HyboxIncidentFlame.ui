@@ -1,16 +1,16 @@
 $C = "../Common.ui";
 $H = "HyboxTones.ui";
-@DefaultStyle = (Default: (Background: #7a9cc6(0.6)), Hovered: (Background: #7a9cc6(0.9)), Pressed: (Background: #ffffff(0.08)), Sounds: $C.@ButtonSounds);
-@EngineStyle = (Default: (Background: #3686b4(0.8)), Hovered: (Background: #3686b4), Pressed: (Background: #ffffff(0.08)), Sounds: $C.@ButtonSounds);
-@ModStyle = (Default: (Background: #e69a27(0.8)), Hovered: (Background: #e69a27), Pressed: (Background: #ffffff(0.08)), Sounds: $C.@ButtonSounds);
-@JdkStyle = (Default: (Background: #777b85(0.8)), Hovered: (Background: #777b85), Pressed: (Background: #ffffff(0.08)), Sounds: $C.@ButtonSounds);
+@DefaultStyle = (Default: (Background: #bdb8ad), Hovered: (Background: #d1cdc4), Pressed: (Background: #bdb8ad), Sounds: $C.@ButtonSounds);
+@EngineStyle = (Default: (Background: #d9c48c), Hovered: (Background: #e6d6a6), Pressed: (Background: #d9c48c), Sounds: $C.@ButtonSounds);
+@ModStyle = (Default: (Background: #ffd21f), Hovered: (Background: #ffe066), Pressed: (Background: #ffd21f), Sounds: $C.@ButtonSounds);
+@JdkStyle = (Default: (Background: #8f8a81), Hovered: (Background: #a29d93), Pressed: (Background: #8f8a81), Sounds: $C.@ButtonSounds);
 Group {
   Button #Frame {
     LayoutMode: Left;
     Anchor: (Width: 100, Height: 23);
-    Background: #7a9cc6(0.6);
+    Background: #bdb8ad;
     TextTooltipStyle: $H.@TooltipStyle;
     Style: @DefaultStyle;
-    Label #FrameLabel { FlexWeight: 1; Padding: (Horizontal: 4); Style: (FontSize: 10, TextColor: #ffffff, VerticalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 8); }
+    Label #FrameLabel { FlexWeight: 1; Padding: (Horizontal: 4); Style: (FontSize: 10, TextColor: $H.@OnAccent, VerticalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 10); }
   }
 }

@@ -2,9 +2,13 @@ package io.github.xytronix.hybox.hytale;
 
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import java.util.Locale;
+import io.github.xytronix.hybox.core.text.Units;
 
 final class HyboxChartRenderer {
     static final int HOVER_CELLS = 20;
+    private static final int REF_LABEL_WIDTH = 240;
+
+    record Ref(double value, String label) {}
 
     private HyboxChartRenderer() {}
 
@@ -19,7 +23,7 @@ final class HyboxChartRenderer {
     }
 
     static void plot(String selector, double[] values, double[] markers, int columnCap, String unit, int precision,
-                     double statedMax, boolean shadeIncident, HyboxIncidentRenderer.ChartImages images, UICommandBuilder commands) {
+                     double statedMax, Ref ref, boolean shadeIncident, HyboxIncidentRenderer.ChartImages images, UICommandBuilder commands) {
         int columns = Math.min(columnCap, values.length);
         double[] bars = new double[columns];
         double tallest = 0, peak = 0;
@@ -37,9 +41,19 @@ final class HyboxChartRenderer {
             if (Double.isFinite(bars[c])) tallest = Math.max(tallest, bars[c]);
         }
         double top = Double.isFinite(statedMax) ? statedMax : 0;
-        double scale = Math.max(top, tallest) > 0 ? Math.max(top, tallest) : 1;
+        boolean hasRef = ref != null && Double.isFinite(ref.value()) && ref.value() > 0;
+        if (hasRef) top = Math.max(top, ref.value() * 1.15);
+        double scale = axisTop(values, Math.max(top, tallest), precision);
         labels(selector, scale, unit, precision, commands);
-        commands.set(selector + " #ChartLegend.Text", "red = incident · bars = average per column");
+        if (hasRef) {
+            commands.set(selector + " #RefLabel.Text", ref.label());
+            commands.set(selector + " #RefLine.Visible", true);
+            commands.set(selector + " #RefLabel.Visible", true);
+            reference(selector, HyboxChartImage.HEIGHT - (int) Math.round(90 * ref.value() / scale), commands);
+        }
+        commands.set(selector + " #ChartLegend.Text", shadeIncident
+            ? "Bars show the average per column. The highlighted bar holds the incident."
+            : "Bars show the average per column. Thin lines mark incidents.");
         for (int c = 0; c < columns; c++) {
             if (!Double.isFinite(bars[c])) continue;
             int height = Math.max(1, (int) Math.round(90 * bars[c] / scale));
@@ -49,44 +63,58 @@ final class HyboxChartRenderer {
             if (shadeIncident) for (double marker : markers) {
                 if (marker >= c * values.length / columns && marker < (c + 1) * values.length / columns) incident = true;
             }
-            String color = incident ? "#ef8181" : "#7a9cc6";
-            commands.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Bottom: 0, Width: " + width + ", Height: " + height + "); Background: " + color + "(0.8); }");
+            String color = HyboxChartImage.hex(incident ? HyboxChartImage.INCIDENT : HyboxChartImage.LINE);
+            commands.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Bottom: 0, Width: " + width + ", Height: " + height + "); Background: " + color + "; }");
         }
         if (!shadeIncident) for (double marker : markers) {
             if (!Double.isFinite(marker) || marker < 0 || marker > values.length - 1) continue;
             int left = (int) Math.round(marker / Math.max(1, values.length - 1) * (HyboxChartImage.WIDTH - 1));
-            commands.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Bottom: 0, Width: 1, Height: 96); Background: #ef8181(0.8); }");
+            commands.appendInline(selector + " #Bars", "Group { Anchor: (Left: " + left + ", Bottom: 0, Width: 1, Height: 96); Background: " + HyboxChartImage.hex(HyboxChartImage.INCIDENT) + "; }");
         }
         if (images == null || values.length < 2) return;
-        double lineScale = Math.max(top, peak) > 0 ? Math.max(top, peak) : 1;
+        double lineScale = axisTop(values, Math.max(top, peak), precision);
         images.request(new HyboxIncidentRenderer.ChartRequest(
             () -> shadeIncident && markers.length == 1
                 ? HyboxChartImage.line(values, lineScale, markers[0]) : HyboxChartImage.line(values, lineScale, markers),
             (path, swap) -> {
                 swap.clear(selector + " #Bars");
                 labels(selector, lineScale, unit, precision, swap);
+                if (hasRef) reference(selector, HyboxChartImage.lineRow(ref.value(), lineScale), swap);
                 swap.set(selector + " #PlotImage.AssetPath", path);
                 swap.set(selector + " #PlotImage.Visible", true);
-                swap.set(selector + " #ChartLegend.Text", shadeIncident ? "every sample · red line = incident" : "sample averages · red lines = incidents");
+                swap.set(selector + " #ChartLegend.Text", shadeIncident ? "Every sample. The dashed line marks the incident." : "Sample averages. Dashed lines mark incidents.");
             }));
     }
 
-    static String value(double number, String unit, int precision) {
-        if (unit.equals("bytes")) {
-            if (number < 0) return "n/a";
-            if (number < 1024) return String.format(Locale.ROOT, "%,.0f B", number);
-            String[] units = {"KiB", "MiB", "GiB", "TiB"};
-            int i = -1;
-            do { number /= 1024; i++; } while (number >= 1024 && i < 3);
-            return String.format(Locale.ROOT, "%.1f ", number) + units[i];
+    private static void reference(String selector, int row, UICommandBuilder commands) {
+        int y = Math.max(0, Math.min(HyboxChartImage.HEIGHT - 1, row));
+        commands.setObject(selector + " #RefLine.Anchor", HyboxIncidentRenderer.anchor(0, y, HyboxChartImage.WIDTH, 1));
+        commands.setObject(selector + " #RefLabel.Anchor", HyboxIncidentRenderer.anchor(HyboxChartImage.WIDTH - REF_LABEL_WIDTH - 4, Math.max(0, y - 13), REF_LABEL_WIDTH, 12));
+    }
+
+    static double axisTop(double[] values, double top, int precision) {
+        if (precision != 0) return top > 0 ? top : 1;
+        double low = Double.POSITIVE_INFINITY, high = Double.NEGATIVE_INFINITY;
+        for (double value : values) {
+            if (!Double.isFinite(value)) continue;
+            low = Math.min(low, value);
+            high = Math.max(high, value);
         }
+        double whole = Math.ceil(Math.max(0, top));
+        if (low == high) whole = Math.max(whole, Math.ceil(high) + 1);
+        whole = Math.max(2, whole);
+        return whole % 2 == 0 ? whole : whole + 1;
+    }
+
+    static String value(double number, String unit, int precision) {
+        if (unit.equals("bytes")) return Units.bytes(Math.round(number));
         if (unit.equals("GiB")) number /= 1073741824.0;
         if (unit.equals("GB")) number /= 1e9;
         return String.format(Locale.ROOT, "%." + precision + "f", number) + suffix(unit);
     }
 
     static String suffix(String unit) {
-        return unit.isBlank() ? "" : unit.startsWith("/") ? unit : " " + unit;
+        return unit.isBlank() || unit.equals("count") ? "" : unit.startsWith("/") ? unit : " " + unit;
     }
 
     private static void labels(String selector, double scale, String unit, int precision, UICommandBuilder commands) {

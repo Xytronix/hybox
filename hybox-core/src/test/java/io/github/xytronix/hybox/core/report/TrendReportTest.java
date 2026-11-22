@@ -124,8 +124,20 @@ class TrendReportTest {
         assertTrue(html.contains("hybox.json"));
         assertTrue(html.contains("Metrics.Enabled</code> to <code>true"));
         assertTrue(html.contains("/hybox reload"));
-        assertTrue(html.contains("/hybox trend"));
-        assertTrue(html.contains("Metrics.RetentionDays"));
+        assertTrue(html.contains("Metrics history in <code>/hybox settings</code>"));
+    }
+
+    @Test
+    void incidentsCarryTimeSeverityHeadlinePlainTriggerAndBundleFile() throws Exception {
+        MetricsLog.Trend trend = trend(10);
+        Arrays.fill(trend.tps(), 30);
+        long at = START.toEpochMilli() + 4 * 60_000L;
+        String data = data(render(trend, List.of(new TrendReport.Incident(at, "DEGRADED",
+            "World default stopped responding", "HEARTBEAT_STALL", "incident-20260601-000400.000+0000-000001.zip"))));
+
+        assertTrue(data.contains("\"incidents\":[{\"t\":" + at + ",\"severity\":\"DEGRADED\","
+            + "\"headline\":\"World default stopped responding\",\"trigger\":\"Freeze\","
+            + "\"file\":\"incident-20260601-000400.000+0000-000001.zip\"}]"));
     }
 
     private static MetricsLog.Trend trend(int count) {
@@ -144,8 +156,12 @@ class TrendReportTest {
     }
 
     private static String render(MetricsLog.Trend trend) throws Exception {
+        return render(trend, List.of());
+    }
+
+    private static String render(MetricsLog.Trend trend, List<TrendReport.Incident> incidents) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        TrendReport.write(trend, 7, START.plusSeconds(7 * 86_400L), new long[0], out);
+        TrendReport.write(trend, 7, START.plusSeconds(7 * 86_400L), incidents, out);
         return out.toString(StandardCharsets.UTF_8);
     }
 

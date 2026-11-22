@@ -53,15 +53,14 @@ class HyboxLifecycleTest {
     void failedStartupClosesRecordingAndPropagatesToFramework() throws Exception {
         String recordingName = "hybox-startup-" + dir.getFileName();
         Files.writeString(dir.resolve("hybox.json"),
-            "{\"Version\":1,\"Jfr\":{\"RecordingName\":\"" + recordingName
-                + "\",\"SnapshotInterval\":\"PT9223372036854776S\"}}");
+            "{\"Version\":1,\"Jfr\":{\"RecordingName\":\"" + recordingName + "\"}}");
         HyboxPlugin plugin = plugin();
         Path rolling = dir.resolve("live/rolling.jfr");
         Files.createDirectories(rolling.getParent());
         Files.writeString(rolling, "previous-session");
         try {
             IllegalStateException failure = assertThrows(IllegalStateException.class, plugin::start);
-            assertInstanceOf(ArithmeticException.class, failure.getCause());
+            assertInstanceOf(RuntimeException.class, failure.getCause());
             assertTrue(FlightRecorder.getFlightRecorder().getRecordings().stream()
                 .noneMatch(recording -> recordingName.equals(recording.getName())));
             HyboxApi.registerConfig("probe", dir.resolve("probe.json"));

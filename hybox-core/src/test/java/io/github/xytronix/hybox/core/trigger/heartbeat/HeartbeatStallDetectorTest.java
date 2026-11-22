@@ -48,6 +48,25 @@ class HeartbeatStallDetectorTest {
     }
 
     @Test
+    void stallIsTimeTheLatestPostHasWaited() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
+        HeartbeatRegistry registry = new HeartbeatRegistry(clock);
+        HeartbeatStallDetector detector = new HeartbeatStallDetector(clock, registry, 1000);
+
+        registry.posted("world");
+        registry.beat("world");
+        clock.advance(Duration.ofMillis(900));
+        registry.posted("world");
+        clock.advance(Duration.ofMillis(900));
+        assertEquals(0, detector.check().size());
+
+        clock.advance(Duration.ofMillis(200));
+        List<TriggerEvent> events = detector.check();
+        assertEquals(1, events.size());
+        assertEquals("1100", events.get(0).attrs().get("stallMs"));
+    }
+
+    @Test
     void includesBeatingThreadIdInEvent() {
         MutableClock clock = new MutableClock(Instant.parse("2026-01-11T00:00:00Z"), ZoneOffset.UTC);
         HeartbeatRegistry registry = new HeartbeatRegistry(clock);

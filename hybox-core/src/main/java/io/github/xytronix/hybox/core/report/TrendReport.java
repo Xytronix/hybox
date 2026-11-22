@@ -8,12 +8,16 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Locale;
 
 import io.github.xytronix.hybox.core.json.JsonWriter;
 import io.github.xytronix.hybox.core.metrics.MetricsLog;
+import io.github.xytronix.hybox.core.trigger.TriggerNames;
 
 public final class TrendReport {
+    public record Incident(long atMs, String severity, String headline, String trigger, String file) {}
+
     private static final String TEMPLATE_RESOURCE = "trend-template.html";
     private static final String TITLE_TOKEN = "__TITLE__";
     private static final String DATA_TOKEN = "/*__DATA__*/null";
@@ -26,7 +30,7 @@ public final class TrendReport {
     private TrendReport() {
     }
 
-    public static void write(MetricsLog.Trend trend, int days, Instant generatedAt, long[] incidents,
+    public static void write(MetricsLog.Trend trend, int days, Instant generatedAt, List<Incident> incidents,
                              OutputStream out) throws IOException {
         String template = loadTemplate();
         String html = replaceOnce(template, TITLE_TOKEN, "Hybox Health Trends · " + days + "d");
@@ -37,7 +41,7 @@ public final class TrendReport {
         writer.flush();
     }
 
-    private static String buildData(MetricsLog.Trend trend, int days, Instant generatedAt, long[] incidents)
+    private static String buildData(MetricsLog.Trend trend, int days, Instant generatedAt, List<Incident> incidents)
         throws IOException {
         int n = trend.size();
         int buckets = Math.min(n, MAX_POINTS);
@@ -80,8 +84,14 @@ public final class TrendReport {
 
         json.name("incidents").beginArray();
         if (incidents != null) {
-            for (long ms : incidents) {
-                json.value((Number) ms);
+            for (Incident incident : incidents) {
+                json.beginObject();
+                json.name("t").value((Number) incident.atMs());
+                json.name("severity").value(incident.severity());
+                json.name("headline").value(incident.headline());
+                json.name("trigger").value(incident.trigger() == null ? null : TriggerNames.label(incident.trigger()));
+                json.name("file").value(incident.file());
+                json.endObject();
             }
         }
         json.endArray();

@@ -119,6 +119,9 @@ final class HytaleTickSystems {
 
     static List<SystemSample> topSystems(int perWorldLimit) {
         List<SystemSample> samples = new ArrayList<>();
+        if (perWorldLimit <= 0) {
+            return samples;
+        }
         try {
             for (Map.Entry<String, World> entry : Universe.get().getWorlds().entrySet()) {
                 String worldName = entry.getKey();
@@ -131,24 +134,36 @@ final class HytaleTickSystems {
                     var data = store.getRegistry().getData();
                     HistoricMetric[] metrics = store.getSystemMetrics();
                     int size = Math.min(data.getSystemSize(), metrics.length);
-                    List<SystemSample> collected = new ArrayList<>();
+                    int[] topIndex = new int[perWorldLimit];
+                    double[] topMs = new double[perWorldLimit];
+                    int count = 0;
                     for (int i = 0; i < size; i++) {
                         HistoricMetric metric = metrics[i];
                         if (metric == null) {
                             continue;
                         }
                         double avgMs = nanosToMs(metric.getAverage(PERIOD_1S));
-                        if (avgMs > 0) {
-                            collected.add(new SystemSample(worldName, systemName(data.getSystem(i)), avgMs));
+                        if (avgMs <= 0 || (count == perWorldLimit && avgMs <= topMs[count - 1])) {
+                            continue;
                         }
+                        int at = count < perWorldLimit ? count++ : count - 1;
+                        while (at > 0 && topMs[at - 1] < avgMs) {
+                            topMs[at] = topMs[at - 1];
+                            topIndex[at] = topIndex[at - 1];
+                            at--;
+                        }
+                        topMs[at] = avgMs;
+                        topIndex[at] = i;
+                    }
+                    List<SystemSample> collected = new ArrayList<>(count);
+                    for (int j = 0; j < count; j++) {
+                        collected.add(new SystemSample(worldName, systemName(data.getSystem(topIndex[j])), topMs[j]));
                     }
                     return collected;
                 });
-                if (worldSamples == null) {
-                    continue;
+                if (worldSamples != null) {
+                    samples.addAll(worldSamples);
                 }
-                worldSamples.sort((a, b) -> Double.compare(b.avgMs(), a.avgMs()));
-                samples.addAll(worldSamples.subList(0, Math.min(perWorldLimit, worldSamples.size())));
             }
         } catch (Throwable t) {
             return List.of();

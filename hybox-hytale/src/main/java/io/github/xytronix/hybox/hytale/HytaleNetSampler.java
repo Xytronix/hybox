@@ -54,7 +54,7 @@ final class HytaleNetSampler implements AutoCloseable {
         } catch (Exception e) {
             close();
             logger.log(System.Logger.Level.WARNING,
-                "Failed to start the network sampler; net-saturation captures disabled.", e);
+                "Failed to start the network sampler. Net-saturation captures are off.", e);
         }
     }
 

@@ -9,6 +9,7 @@ import io.github.xytronix.hybox.core.json.JsonWriter;
 
 final class ReportEvents {
     private static final int MAX_EVENTS = 120;
+    private static final String MOD_TYPE = "mod:";
 
     private ReportEvents() {
     }
@@ -19,8 +20,9 @@ final class ReportEvents {
         }
     }
 
-    static void write(JsonWriter json, List<ReportHtml.LogLine> log, JfrTimeline timeline) throws IOException {
-        List<ReportEvent> all = buildEvents(log, timeline);
+    static void write(JsonWriter json, List<ReportHtml.LogLine> log, JfrTimeline timeline, ModNames modNames)
+        throws IOException {
+        List<ReportEvent> all = buildEvents(log, timeline, modNames);
         int hidden = Math.max(0, all.size() - MAX_EVENTS);
         List<ReportEvent> shown = hidden > 0 ? all.subList(all.size() - MAX_EVENTS, all.size()) : all;
         writeEvents(json, shown);
@@ -35,7 +37,7 @@ final class ReportEvents {
         return s.substring(0, cut) + "…";
     }
 
-    private static List<ReportEvent> buildEvents(List<ReportHtml.LogLine> log, JfrTimeline timeline) {
+    private static List<ReportEvent> buildEvents(List<ReportHtml.LogLine> log, JfrTimeline timeline, ModNames modNames) {
         if (timeline == null || timeline.start() == null || timeline.end() == null) {
             return List.of();
         }
@@ -76,6 +78,16 @@ final class ReportEvents {
             String label = pe.category().isBlank() ? pe.message() : "[" + pe.category() + "] " + pe.message();
             label = truncate(label, 80);
             raw.add(new ReportEvent((pe.timeMs() - start) / (double) (end - start), "plugin", label, 1));
+        }
+        for (JfrTimeline.ModAction action : timeline.modActions()) {
+            if (action.timeMs() < start || action.timeMs() > end) {
+                continue;
+            }
+            String label = action.category().isEmpty() ? action.message()
+                : action.message().isEmpty() ? "[" + action.category() + "]"
+                : "[" + action.category() + "] " + action.message();
+            raw.add(new ReportEvent((action.timeMs() - start) / (double) (end - start),
+                MOD_TYPE + modNames.id(action.mod()), truncate(label, 80), 1));
         }
         for (JfrTimeline.ConnEvent ce : conns) {
             if (ce.timeMs() < start || ce.timeMs() > end) {

@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +22,8 @@ import io.github.xytronix.hybox.core.trigger.tick.TickDegradedDetector;
 
 final class HytaleHealthScheduler {
     private static final int TICK_AVG_PERIOD_INDEX = 1;
+    private static final long MIN_BEAT_PERIOD_MS = 50L;
+    private static final long MAX_BEAT_PERIOD_MS = 250L;
 
     private final HyboxRuntime runtime;
     private final System.Logger logger;
@@ -32,7 +35,6 @@ final class HytaleHealthScheduler {
     private final Path rollingFile;
     private final Supplier<HyboxRuntime.Engine> engine;
 
-    private final AtomicBoolean stallCheckRunning = new AtomicBoolean(false);
     private final AtomicBoolean snapshotRunning = new AtomicBoolean(false);
     private final AtomicBoolean tickSampleRunning = new AtomicBoolean(false);
     private final AtomicBoolean healthCheckRunning = new AtomicBoolean(false);
@@ -113,7 +115,7 @@ final class HytaleHealthScheduler {
         try {
             universe = Universe.get();
         } catch (Exception e) {
-            logger.log(System.Logger.Level.WARNING, "Universe.get() failed; heartbeats disabled until restart.", e);
+            logger.log(System.Logger.Level.WARNING, "Universe.get() failed. Heartbeats are off until restart.", e);
             return;
         }
 
@@ -128,8 +130,7 @@ final class HytaleHealthScheduler {
         if (closed) {
             return;
         }
-        scheduler.scheduleAtFixedRate(heartbeatPump::tick, 0L, 50L, TimeUnit.MILLISECONDS);
-        scheduler.scheduleAtFixedRate(this::scheduleStallCheck, 250L, 250L, TimeUnit.MILLISECONDS);
+        scheduleHeartbeat(0L);
         scheduler.scheduleAtFixedRate(this::scheduleTickSample, sampleMs, sampleMs, TimeUnit.MILLISECONDS);
         scheduler.scheduleAtFixedRate(this::scheduleHealthCheck, 5_000L, 5_000L, TimeUnit.MILLISECONDS);
     }
@@ -202,31 +203,44 @@ final class HytaleHealthScheduler {
         }, () -> tickSampleRunning.set(false));
     }
 
-    private void scheduleStallCheck() {
-        if (!stallCheckRunning.compareAndSet(false, true)) {
-            return;
+    static long beatPeriodMillis(long stallDegradedMs) {
+        return Math.max(MIN_BEAT_PERIOD_MS, Math.min(MAX_BEAT_PERIOD_MS, stallDegradedMs / 4));
+    }
+
+    private void scheduleHeartbeat(long delayMs) {
+        try {
+            scheduler.schedule(this::heartbeatCycle, delayMs, TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException ignored) {
         }
-        runtime.submitWorker(() -> {
-            try {
-                HyboxRuntime.Engine current = engine.get();
-                HeartbeatStallDetector stall = current.stallDetector();
-                if (stall != null) {
-                    for (TriggerEvent event : stall.check()) {
-                        runtime.scheduleCapture(event);
-                    }
+    }
+
+    private void heartbeatCycle() {
+        long period = MAX_BEAT_PERIOD_MS;
+        try {
+            HyboxRuntime.Engine current = engine.get();
+            period = beatPeriodMillis(current.config().triggerPolicy().stallDegradedMs());
+            heartbeatPump.tick();
+            HeartbeatStallDetector stall = current.stallDetector();
+            if (stall != null) {
+                for (TriggerEvent event : stall.check()) {
+                    runtime.scheduleCapture(event);
                 }
-                TickDegradedDetector tick = current.tickDegradedDetector();
-                if (tick != null) {
-                    for (TriggerEvent event : tick.check()) {
-                        runtime.scheduleCapture(event);
-                    }
-                }
-            } catch (Exception e) {
-                logger.log(System.Logger.Level.WARNING, "Stall check failed.", e);
-            } finally {
-                stallCheckRunning.set(false);
             }
-        }, () -> stallCheckRunning.set(false));
+            TickDegradedDetector tick = current.tickDegradedDetector();
+            if (tick != null) {
+                for (TriggerEvent event : tick.check()) {
+                    runtime.scheduleCapture(event);
+                }
+            }
+        } catch (Exception e) {
+            logger.log(System.Logger.Level.WARNING, "Stall check failed.", e);
+        } finally {
+            synchronized (this) {
+                if (!closed) {
+                    scheduleHeartbeat(period);
+                }
+            }
+        }
     }
 
     static Map<String, Double> tickAverageMillis() {

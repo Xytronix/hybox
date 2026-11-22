@@ -6,7 +6,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -37,42 +37,41 @@ final class HytaleHeartbeatPump {
     }
 
     void tick(Map<String, World> worlds) {
-        Map<String, World> live = new HashMap<>();
+        boolean retired = false;
+        for (Iterator<Map.Entry<String, Heartbeat>> it = heartbeats.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, Heartbeat> entry = it.next();
+            Heartbeat heartbeat = entry.getValue();
+            if (worlds.get(entry.getKey()) != heartbeat.world || !heartbeat.world.isAlive()) {
+                heartbeat.retire();
+                it.remove();
+                retired = true;
+            }
+        }
+        if (retired) {
+            heartbeatRegistry.retain(heartbeats.keySet());
+        }
+
         for (Map.Entry<String, World> entry : worlds.entrySet()) {
             String scope = entry.getKey();
             World world = entry.getValue();
-            if (scope != null && !scope.isBlank() && world != null && world.isAlive()) {
-                live.put(scope, world);
+            if (scope == null || scope.isBlank() || world == null || !world.isAlive()) {
+                continue;
             }
-        }
-
-        heartbeats.entrySet().removeIf(entry -> {
-            if (live.get(entry.getKey()) == entry.getValue().world) {
-                return false;
+            Heartbeat heartbeat = heartbeats.get(scope);
+            if (heartbeat == null) {
+                heartbeat = new Heartbeat(scope, world);
+                Heartbeat raced = heartbeats.putIfAbsent(scope, heartbeat);
+                if (raced != null) {
+                    heartbeat = raced;
+                }
             }
-            entry.getValue().retire();
-            return true;
-        });
-        heartbeatRegistry.retain(heartbeats.keySet());
-
-        for (Map.Entry<String, World> entry : live.entrySet()) {
-            String scope = entry.getKey();
-            World world = entry.getValue();
-            Heartbeat heartbeat = heartbeats.computeIfAbsent(scope, ignored -> new Heartbeat(world));
-            if (!heartbeat.pending.compareAndSet(false, true)) {
+            if (heartbeat.world != world || !heartbeat.pending.compareAndSet(false, true)) {
                 continue;
             }
 
             try {
-                world.execute(() -> {
-                    try {
-                        heartbeat.beat(heartbeatRegistry, scope);
-                    } catch (Exception e) {
-                        logger.log(System.Logger.Level.WARNING, "Failed to beat heartbeat for " + scope, e);
-                    } finally {
-                        heartbeat.pending.set(false);
-                    }
-                });
+                heartbeatRegistry.posted(scope);
+                world.execute(heartbeat.task);
             } catch (Exception e) {
                 heartbeat.pending.set(false);
                 if (rejectedByStoppingWorld(e)) {
@@ -95,18 +94,31 @@ final class HytaleHeartbeatPump {
         return false;
     }
 
-    private static final class Heartbeat {
+    private final class Heartbeat {
+        private final String scope;
         private final World world;
         private final AtomicBoolean pending = new AtomicBoolean();
+        private final Runnable task = this::run;
         private boolean retired;
 
-        private Heartbeat(World world) {
+        private Heartbeat(String scope, World world) {
+            this.scope = scope;
             this.world = world;
         }
 
-        private synchronized void beat(HeartbeatRegistry registry, String scope) {
+        private void run() {
+            try {
+                beat();
+            } catch (Exception e) {
+                logger.log(System.Logger.Level.WARNING, "Failed to beat heartbeat for " + scope, e);
+            } finally {
+                pending.set(false);
+            }
+        }
+
+        private synchronized void beat() {
             if (!retired) {
-                registry.beat(scope);
+                heartbeatRegistry.beat(scope);
             }
         }
 
@@ -152,12 +164,12 @@ final class HytaleHeartbeatPump {
                 Instant last = registry.lastBeat(scope);
                 if (last != null && last.isAfter(triggerAt)) {
                     logger.log(System.Logger.Level.INFO,
-                        "Heartbeat for '" + scope + "' resumed; dumping recording with post-incident recovery.");
+                        "Heartbeat for '" + scope + "' resumed. Saving the recording with the recovery.");
                     return dumps;
                 }
             } else if (recovered != null && recovered.getAsBoolean()) {
                 logger.log(System.Logger.Level.INFO,
-                    event.kind() + " for '" + scope + "' recovered; dumping recording with post-incident recovery.");
+                    event.kind() + " for '" + scope + "' recovered. Saving the recording with the recovery.");
                 return dumps;
             }
             if (nextDump != null && dumps.size() < maxDumps && !clock.instant().isBefore(nextDump)) {
@@ -174,11 +186,11 @@ final class HytaleHeartbeatPump {
         if (heartbeat) {
             logger.log(System.Logger.Level.INFO,
                 "Heartbeat for '" + scope + "' did not resume within " + maxWait.toSeconds()
-                + "s; dumping the recording now.");
+                + "s. Saving the recording now.");
         } else {
             logger.log(System.Logger.Level.INFO,
                 "Recorded a " + maxWait.toSeconds() + "s post-incident tail for " + event.kind()
-                + "; dumping the recording.");
+                + ". Saving the recording.");
         }
         return dumps;
     }
