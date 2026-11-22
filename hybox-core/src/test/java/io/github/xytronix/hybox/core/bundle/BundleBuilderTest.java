@@ -117,6 +117,58 @@ class BundleBuilderTest {
         }
     }
 
+    @Test
+    void artifacts_excludeNumberedThreadDumpsAndMetrics(@TempDir Path tempDir) throws Exception {
+        Path recording = tempDir.resolve("recording.jfr");
+        Files.write(recording, new byte[] {1, 2, 3});
+
+        Clock clock = Clock.fixed(Instant.parse("2024-05-06T07:08:09.010Z"), ZoneOffset.UTC);
+        IncidentReport report = simpleReport(clock);
+
+        List<BundleAttachment> extras = List.of(
+            new BundleAttachment("extras/threads-1.txt", "a".getBytes(StandardCharsets.UTF_8)),
+            new BundleAttachment("extras/threads-2.txt", "b".getBytes(StandardCharsets.UTF_8)),
+            new BundleAttachment("extras/metrics/health-2024-05-06.csv", "c".getBytes(StandardCharsets.UTF_8)),
+            new BundleAttachment("extras/plugins.txt", "d".getBytes(StandardCharsets.UTF_8)));
+
+        java.util.Set<String> enabled = new java.util.HashSet<>(BundleArtifacts.ALL);
+        enabled.remove("threads");
+        enabled.remove("metrics");
+        Path outputZip = tempDir.resolve("filtered.zip");
+        new BundleBuilder(clock).build(report, recording, outputZip, extras, enabled);
+
+        try (ZipFile zip = new ZipFile(outputZip.toFile())) {
+            assertNull(zip.getEntry("extras/threads-1.txt"));
+            assertNull(zip.getEntry("extras/threads-2.txt"));
+            assertNull(zip.getEntry("extras/metrics/health-2024-05-06.csv"));
+            assertNotNull(zip.getEntry("extras/plugins.txt"));
+        }
+    }
+
+    @Test
+    void duplicateExtraPathsKeepFirstEntry(@TempDir Path tempDir) throws Exception {
+        Path recording = tempDir.resolve("recording.jfr");
+        Files.write(recording, new byte[] {1, 2, 3});
+
+        Clock clock = Clock.fixed(Instant.parse("2024-05-06T07:08:09.010Z"), ZoneOffset.UTC);
+        IncidentReport report = simpleReport(clock);
+
+        List<BundleAttachment> extras = List.of(
+            new BundleAttachment("extras/shared.txt", "first".getBytes(StandardCharsets.UTF_8)),
+            new BundleAttachment("extras/shared.txt", "second".getBytes(StandardCharsets.UTF_8)),
+            new BundleAttachment("report.html", "plugin".getBytes(StandardCharsets.UTF_8)));
+
+        Path outputZip = tempDir.resolve("duplicates.zip");
+        new BundleBuilder(clock).build(report, recording, outputZip, extras);
+
+        try (ZipFile zip = new ZipFile(outputZip.toFile())) {
+            assertArrayEquals("first".getBytes(StandardCharsets.UTF_8),
+                zip.getInputStream(zip.getEntry("extras/shared.txt")).readAllBytes());
+            assertFalse(new String(zip.getInputStream(zip.getEntry("report.html")).readAllBytes(),
+                StandardCharsets.UTF_8).equals("plugin"));
+        }
+    }
+
     private static IncidentReport reportWithEscapes(Clock clock) {
         IncidentId id = IncidentIds.next(clock);
         Instant createdAt = clock.instant();

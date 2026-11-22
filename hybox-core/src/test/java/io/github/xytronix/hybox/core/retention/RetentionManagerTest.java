@@ -43,6 +43,62 @@ class RetentionManagerTest {
     }
 
     @Test
+    void enforce_maxCountOne_keepsNewestWithoutWarning(@TempDir Path tempDir) {
+        createIncidentZip(tempDir, "incident-20260111-010000.000Z-000001.zip", 10);
+        Path newest = createIncidentZip(tempDir, "incident-20260111-010001.000Z-000002.zip", 10);
+        java.util.List<String> warnings = new java.util.ArrayList<>();
+        RetentionManager manager = managerCollecting(warnings);
+
+        RetentionStats stats = manager.enforce(tempDir, new RetentionPolicy(1, 0L, null));
+        manager.enforce(tempDir, new RetentionPolicy(1, 0L, null));
+
+        assertEquals(1, stats.deleted());
+        assertTrue(Files.exists(newest));
+        assertEquals(java.util.List.of(), warnings);
+    }
+
+    @Test
+    void enforce_maxTotalBytes_keepsNewestWithoutWarningOnceUnderLimit(@TempDir Path tempDir) {
+        createIncidentZip(tempDir, "incident-20260111-010000.000Z-000001.zip", 100);
+        Path newest = createIncidentZip(tempDir, "incident-20260111-010001.000Z-000002.zip", 100);
+        java.util.List<String> warnings = new java.util.ArrayList<>();
+
+        RetentionStats stats = managerCollecting(warnings).enforce(tempDir, new RetentionPolicy(0, 150L, null));
+
+        assertEquals(1, stats.deleted());
+        assertTrue(Files.exists(newest));
+        assertEquals(java.util.List.of(), warnings);
+    }
+
+    @Test
+    void enforce_maxTotalBytes_warnsWhenNewestAloneExceedsLimit(@TempDir Path tempDir) {
+        createIncidentZip(tempDir, "incident-20260111-010000.000Z-000001.zip", 100);
+        Path newest = createIncidentZip(tempDir, "incident-20260111-010001.000Z-000002.zip", 100);
+        java.util.List<String> warnings = new java.util.ArrayList<>();
+
+        RetentionStats stats = managerCollecting(warnings).enforce(tempDir, new RetentionPolicy(0, 50L, null));
+
+        assertEquals(1, stats.deleted());
+        assertTrue(Files.exists(newest));
+        assertEquals(java.util.List.of("Retention would remove newest incident; stopping deletions."), warnings);
+    }
+
+    private static RetentionManager managerCollecting(java.util.List<String> warnings) {
+        System.Logger logger = new System.Logger() {
+            public String getName() { return "retention-test"; }
+            public boolean isLoggable(Level level) { return true; }
+            public void log(Level level, java.util.ResourceBundle bundle, String message, Throwable thrown) {
+                if (level == Level.WARNING) warnings.add(message);
+            }
+            public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
+                if (level == Level.WARNING) warnings.add(format);
+            }
+        };
+        return new RetentionManager(
+            Clock.fixed(Instant.parse("2026-01-11T02:00:00Z"), ZoneOffset.UTC), logger, FileDeleter.defaultDeleter());
+    }
+
+    @Test
     void enforce_maxAge_deletesOldestBeyondCutoff(@TempDir Path tempDir) {
         createIncidentZip(tempDir, "incident-20260111-003000.000Z-000001.zip", 10);
         createIncidentZip(tempDir, "incident-20260111-005900.000Z-000002.zip", 10);

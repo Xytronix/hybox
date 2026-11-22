@@ -449,9 +449,40 @@ class HyboxIncidentViewerTest {
         UICommandBuilder allThreads = new UICommandBuilder(), minuteThreads = new UICommandBuilder();
         HyboxIncidentRenderer.render(model, state("threads", 0, "all"), allThreads, new UIEventBuilder());
         HyboxIncidentRenderer.render(model, state("threads", 0, "1m"), minuteThreads, new UIEventBuilder());
-        String allIntervals = Arrays.stream(allThreads.getCommands()).filter(c -> c.selector != null && c.selector.endsWith("#Strip.TooltipText")).map(c -> c.data).findFirst().orElseThrow();
-        String minuteIntervals = Arrays.stream(minuteThreads.getCommands()).filter(c -> c.selector != null && c.selector.endsWith("#Strip.TooltipText")).map(c -> c.data).findFirst().orElseThrow();
+        String allIntervals = Arrays.stream(allThreads.getCommands()).filter(c -> c.selector != null && c.selector.endsWith("#StripHover[1].TooltipText")).map(c -> c.data).findFirst().orElseThrow();
+        String minuteIntervals = Arrays.stream(minuteThreads.getCommands()).filter(c -> c.selector != null && c.selector.endsWith("#StripHover[1].TooltipText")).map(c -> c.data).findFirst().orElseThrow();
+        assertTrue(allIntervals.matches(".*\\d\\d:\\d\\d:\\d\\d–\\d\\d:\\d\\d:\\d\\d · .*"), allIntervals);
         assertNotEquals(allIntervals, minuteIntervals, "Thread state strips honor the selected time range");
+    }
+
+    @Test
+    void manyPluginMetricsPaginateWithinTheElementBudget() throws Exception {
+        JsonObject data = fixture();
+        JsonArray metrics = new JsonArray();
+        for (int i = 0; i < 64; i++) {
+            JsonObject o = new JsonObject();
+            o.addProperty("name", "plugin/rate-" + i); o.addProperty("kind", "count"); o.addProperty("bucketSec", 3.75);
+            o.addProperty("total", 100); o.add("amounts", series(240)); o.add("series", series(240));
+            metrics.add(o);
+        }
+        for (int i = 0; i < 130; i++) {
+            JsonObject o = new JsonObject();
+            o.addProperty("name", "plugin/idle-" + i); o.addProperty("kind", "count"); o.addProperty("total", 0);
+            o.addProperty("uncharted", i < 120 ? "zero" : "single"); o.add("series", JsonNull.INSTANCE);
+            metrics.add(o);
+        }
+        data.add("pluginMetrics", metrics);
+        IncidentModel model = IncidentModel.load(bundle(data, ""));
+        int pages = HyboxIncidentRenderer.pageCount(model, state("pluginmetrics", 0, "all"));
+        assertTrue(pages > 1);
+        assertTrue(HyboxIncidentRenderer.maxElements(model, "pluginmetrics") < 1500);
+        StringBuilder all = new StringBuilder();
+        for (int page = 0; page < pages; page++) {
+            UICommandBuilder cmd = new UICommandBuilder();
+            HyboxIncidentRenderer.render(model, state("pluginmetrics", page, "all"), cmd, new UIEventBuilder());
+            for (CustomUICommand c : cmd.getCommands()) if (c.data != null) all.append(c.data).append('\n');
+        }
+        for (String name : List.of("plugin/rate-0 ", "plugin/rate-63 ", "plugin/idle-0\"", "plugin/idle-129 ")) assertTrue(all.toString().contains(name), name);
     }
 
     @Test

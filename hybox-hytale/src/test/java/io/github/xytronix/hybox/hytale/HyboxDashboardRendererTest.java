@@ -84,7 +84,7 @@ class HyboxDashboardRendererTest {
     @Test
     void warningBannerIsHiddenForHealthyModel() {
         var healthy = new DashboardModel(List.of(), List.of(), null, null,
-            List.of(), "", List.of(), "", "", true, Duration.ofMinutes(15), false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+            List.of(), "", List.of(), "", "", true, "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         var commands = new UICommandBuilder();
         HyboxDashboardRenderer.render(healthy, "overview", commands, new UIEventBuilder());
         assertFalse(org.bson.BsonDocument.parse(command(commands, "#Warnings.Visible").data).getBoolean("0").getValue());
@@ -114,7 +114,7 @@ class HyboxDashboardRendererTest {
             var model = new DashboardModel(List.of(new DashboardModel.Tile("t", "v", "d", tone, "SEV")),
                 List.of(new DashboardModel.Warning("w", tone)), null, "dumping recording",
                 List.of(new HyboxIncidents.Incident("i", Path.of("i.zip"), NOW, "K", "h", "CRITICAL", "w")),
-                "", List.of(new HyboxChatFormatter.Trigger("t", tone == DashboardModel.Tone.OK, "x")), "", "", true, Duration.ofMinutes(15), false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+                "", List.of(new HyboxChatFormatter.Trigger("t", tone == DashboardModel.Tone.OK, "x")), "", "", true, "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
             for (String tab : List.of("overview", "incidents", "triggers")) {
                 var commands = new UICommandBuilder();
                 HyboxDashboardRenderer.render(model, tab, commands, new UIEventBuilder());
@@ -130,7 +130,7 @@ class HyboxDashboardRendererTest {
     void captureStepListDistinguishesCompletedCurrentAndPendingSteps() {
         var commands = new UICommandBuilder();
         var model = new DashboardModel(List.of(), List.of(), null, "dumping recording", List.of(), "", List.of(), "", "", false,
-            Duration.ofMinutes(15), false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+            "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         HyboxDashboardRenderer.render(model, "overview", commands, new UIEventBuilder());
         for (int i = 0; i < 5; i++) {
             assertEquals(i < 3 ? "#80c991" : i == 3 ? "#d3e3ed" : "#96a9be",
@@ -143,7 +143,7 @@ class HyboxDashboardRendererTest {
     @Test
     void profileRequesterIsHiddenWhenUnknown() {
         var model = new DashboardModel(List.of(), List.of(), new DashboardModel.Profile(NOW, Duration.ofMinutes(5), NOW, null),
-            null, List.of(), "", List.of(), "", "", true, Duration.ofMinutes(15), false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+            null, List.of(), "", List.of(), "", "", true, "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         var commands = new UICommandBuilder();
         HyboxDashboardRenderer.render(model, "overview", commands, new UIEventBuilder());
         assertFalse(command(commands, "#ProfileCaptureAt.Text").data.contains("started by"));
@@ -154,12 +154,12 @@ class HyboxDashboardRendererTest {
         var incident = new HyboxIncidents.Incident("000010", Path.of("incident-000010.zip"), NOW, "MANUAL", "Manual capture", "INFO", "server");
         for (boolean ready : List.of(false, true)) {
             var model = new DashboardModel(List.of(), List.of(), null, null, List.of(incident), "", List.of(), "", "", true,
-                Duration.ofMinutes(15), ready, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+                "Saves thread dumps as an incident bundle.", ready, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
             var commands = new UICommandBuilder();
             var events = new UIEventBuilder();
             HyboxDashboardRenderer.render(model, "overview", commands, events);
             assertEquals(ready, bool(commands, "#OpenLastButton.Visible"));
-            assertEquals(model.captureHint(), string(commands, "#CaptureHint.Text"));
+            assertEquals("Saves thread dumps as an incident bundle.", string(commands, "#CaptureHint.Text"));
             assertTrue(Arrays.stream(commands.getCommands()).noneMatch(command -> "#CaptureHint.TooltipText".equals(command.selector)));
         }
     }
@@ -169,7 +169,7 @@ class HyboxDashboardRendererTest {
         var incident = new HyboxIncidents.Incident("000010", Path.of("incident-000010.zip"), NOW, "MANUAL", "Manual capture", "INFO", "server");
         for (String step : Arrays.asList(null, "collecting")) {
             var model = new DashboardModel(List.of(), List.of(), null, step, step == null ? List.of() : List.of(incident),
-                "Loading recent incidents…", List.of(), "", "", false, Duration.ofMinutes(15), true, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+                "Loading recent incidents…", List.of(), "", "", false, "", true, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
             var commands = new UICommandBuilder();
             var events = new UIEventBuilder();
             HyboxDashboardRenderer.render(model, "overview", commands, events);
@@ -193,7 +193,7 @@ class HyboxDashboardRendererTest {
     void trendsButtonIsDisabledOnlyWhenTrendPermissionIsDenied() {
         for (boolean trendsAllowed : List.of(false, true)) {
             var model = new DashboardModel(List.of(), List.of(), null, null, List.of(), "", List.of(), "", "", false,
-                Duration.ofMinutes(15), false, false, false, false, false, trendsAllowed, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+                "", false, false, false, false, false, trendsAllowed, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
             for (String tab : List.of("overview", "incidents", "triggers")) {
                 var commands = new UICommandBuilder();
                 HyboxDashboardRenderer.render(model, tab, commands, new UIEventBuilder());
@@ -230,7 +230,7 @@ class HyboxDashboardRendererTest {
         for (boolean stopAllowed : List.of(false, true)) {
             for (boolean cancelAllowed : List.of(false, true)) {
                 var running = new DashboardModel(List.of(), List.of(), profile, "waiting for post-incident evidence", List.of(), "",
-                    List.of(), "", "", true, Duration.ofMinutes(15), false, stopAllowed, cancelAllowed, stopAllowed, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+                    List.of(), "", "", true, "", false, stopAllowed, cancelAllowed, stopAllowed, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
                 var commands = new UICommandBuilder();
                 HyboxDashboardRenderer.render(running, "overview", commands, new UIEventBuilder());
                 assertEquals(stopAllowed, bool(commands, "#ProfileSaveNow.Visible"));
@@ -246,7 +246,7 @@ class HyboxDashboardRendererTest {
             }
         }
         var dumping = new DashboardModel(List.of(), List.of(), null, "dumping recording", List.of(), "",
-            List.of(), "", "", true, Duration.ofMinutes(15), false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+            List.of(), "", "", true, "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         var commands = new UICommandBuilder();
         HyboxDashboardRenderer.render(dumping, "overview", commands, new UIEventBuilder());
         assertFalse(bool(commands, "#SkipWait.Visible"), "Writing the bundle itself cannot be skipped");
@@ -255,17 +255,17 @@ class HyboxDashboardRendererTest {
     @Test
     void saveNowShowsSavingUntilTheCaptureStepsTakeOver() {
         var waiting = DashboardModel.from(health(false), NOW, null, List.of(), "", List.of(), "", "", true,
-            Duration.ofMinutes(15), false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+            "", false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         assertTrue(waiting.profileSaving());
         var commands = new UICommandBuilder();
         HyboxDashboardRenderer.render(waiting, "overview", commands, new UIEventBuilder());
         assertTrue(bool(commands, "#ProfileSaving.Visible"));
         assertFalse(bool(commands, "#NothingRunning.Visible"));
         var capturing = DashboardModel.from(health(true), NOW, null, List.of(), "", List.of(), "", "", true,
-            Duration.ofMinutes(15), false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+            "", false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         assertFalse(capturing.profileSaving(), "Capture steps replace the saving card once the bundle is being written");
         var stillProfiling = DashboardModel.from(health(false), NOW, new DashboardModel.Profile(NOW, Duration.ofMinutes(5), NOW, null),
-            List.of(), "", List.of(), "", "", true, Duration.ofMinutes(15), false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+            List.of(), "", List.of(), "", "", true, "", false, true, true, false, true, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
         assertFalse(stillProfiling.profileSaving());
     }
 
@@ -353,7 +353,7 @@ class HyboxDashboardRendererTest {
 
     private static DashboardModel idle(DashboardModel.ProfileForm form, DashboardModel.Heap heap) {
         return new DashboardModel(List.of(), List.of(), null, null, List.of(), "", List.of(), "", "", true,
-            Duration.ofMinutes(15), false, true, true, false, false, true, form, heap);
+            "", false, true, true, false, false, true, form, heap);
     }
 
     private static HyboxRuntime.Health health(boolean capturing) {
@@ -382,6 +382,6 @@ class HyboxDashboardRendererTest {
             List.of(new DashboardModel.Warning(HOSTILE, DashboardModel.Tone.WARN)),
             new DashboardModel.Profile(NOW.minusSeconds(150), Duration.ofMinutes(5), NOW, HOSTILE), HOSTILE,
             List.of(new HyboxIncidents.Incident(HOSTILE, Path.of("example.zip"), NOW, HOSTILE, HOSTILE, HOSTILE, HOSTILE)),
-            "", List.of(new HyboxChatFormatter.Trigger(HOSTILE, true, HOSTILE)), HOSTILE, HOSTILE, true, Duration.ofMinutes(15), false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+            "", List.of(new HyboxChatFormatter.Trigger(HOSTILE, true, HOSTILE)), HOSTILE, HOSTILE, true, "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
     }
 }

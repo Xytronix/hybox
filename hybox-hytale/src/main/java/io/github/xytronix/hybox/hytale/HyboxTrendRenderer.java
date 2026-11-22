@@ -12,6 +12,7 @@ import java.util.Locale;
 final class HyboxTrendRenderer {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("MMM d HH:mm", Locale.ROOT).withZone(ZoneOffset.UTC);
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT).withZone(ZoneOffset.UTC);
+    private static final DateTimeFormatter SECONDS = DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT).withZone(ZoneOffset.UTC);
 
     record ViewState(String feedback, boolean loading, boolean saving, boolean trendAllowed,
                      boolean settingsAllowed, boolean dashboardAllowed) {}
@@ -54,14 +55,30 @@ final class HyboxTrendRenderer {
             String stats = "min " + value(metric.min(), metric) + " · avg " + value(metric.average(), metric)
                 + " · max " + value(metric.max(), metric) + " · now " + value(metric.now(), metric);
             commands.set(selector + " #ChartStats.Text", stats);
-            commands.set(selector + " #ChartStats.TooltipText", stats);
             for (int x = 0; x < 5; x++) {
                 long time = model.rangeStart() + (model.generatedAt().toEpochMilli() - model.rangeStart()) * x / 4;
                 commands.set(selector + " #X" + x + ".Text", (model.days() == 1 ? TIME : DATE).format(Instant.ofEpochMilli(time)));
             }
-            commands.set(selector + " #Plot.TooltipText", "UTC · red markers: " + model.markers().length + " incidents in range");
-            HyboxChartRenderer.plot(selector, metric.values(), model.markers(), 120, metric.unit(), metric.precision(), false, images, commands);
+            HyboxChartRenderer.plot(selector, metric.values(), model.markers(), 120 - HyboxChartRenderer.HOVER_CELLS, metric.unit(), metric.precision(),
+                metric.max(), false, images, commands);
+            HyboxChartRenderer.hover(commands, selector + " #Hover", HyboxChartImage.WIDTH, HyboxChartImage.HEIGHT, tips(model, metric));
         }
+    }
+
+    private static java.util.List<String> tips(HyboxTrendModel model, HyboxTrendModel.Metric metric) {
+        double[] values = metric.values();
+        int n = values.length, cells = Math.min(HyboxChartRenderer.HOVER_CELLS, n);
+        long start = model.rangeStart(), span = model.generatedAt().toEpochMilli() - start;
+        java.util.List<String> tips = new java.util.ArrayList<>();
+        for (int c = 0; c < cells; c++) {
+            int from = c * n / cells, to = (c + 1) * n / cells;
+            double sum = 0;
+            int count = 0;
+            for (int i = from; i < to; i++) if (Double.isFinite(values[i])) { sum += values[i]; count++; }
+            Instant time = Instant.ofEpochMilli(start + span * from / Math.max(1, n - 1));
+            tips.add((model.days() == 1 ? SECONDS : DATE).format(time) + " · " + (count == 0 ? "no data" : value(sum / count, metric)));
+        }
+        return tips;
     }
 
     static void feedback(ViewState state, UICommandBuilder commands) {

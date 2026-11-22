@@ -6,9 +6,9 @@ Group {
   Background: #1a1a1a(0.3);
   Group {
     LayoutMode: Left;
-    Label #Name { Anchor: (Width: 350, Right: 12); Style: (FontSize: 12, TextColor: #ffffff, Wrap: true); TextTooltipStyle: $C.@DefaultTextTooltipStyle; }
+    Label #Name { Anchor: (Width: 350, Right: 12); Style: (FontSize: 12, TextColor: #ffffff, Wrap: true); }
     Label #Facts { Anchor: (Width: 290, Right: 12); Style: (FontSize: 11, TextColor: #bfcdd5, Wrap: true); }
     Label #Amount { FlexWeight: 1; Style: (FontSize: 12, TextColor: #7a9cc6, Wrap: true, HorizontalAlignment: End); }
   }
-  Label #Details { Anchor: (Top: 4); Style: (FontSize: 11, TextColor: #96a9be, Wrap: true); TextTooltipStyle: $C.@DefaultTextTooltipStyle; }
+  Label #Details { Anchor: (Top: 4); Style: (FontSize: 11, TextColor: #96a9be, Wrap: true); }
 }

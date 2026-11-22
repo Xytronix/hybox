@@ -1,4 +1,5 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 Group {
   LayoutMode: Top;
   Anchor: (Width: 940, Bottom: 6);
@@ -12,7 +13,7 @@ Group {
       FlexWeight: 1;
       Anchor: (Right: 8);
       Style: (FontSize: 12, RenderBold: true, TextColor: #d3e3ed, VerticalAlignment: Center, Wrap: true, WrapMaxLines: 1);
-      TextTooltipStyle: $C.@DefaultTextTooltipStyle;
+      TextTooltipStyle: $H.@TooltipStyle;
     }
     Label #State {
       Anchor: (Width: 110, Height: 22, Right: 10);
@@ -29,14 +30,14 @@ Group {
   Label #Top {
     Anchor: (Height: 18, Top: 3, Bottom: 3);
     Style: (FontSize: 11, TextColor: #bfcdd5, Wrap: true, WrapMaxLines: 1);
-    TextTooltipStyle: $C.@DefaultTextTooltipStyle;
+    TextTooltipStyle: $H.@TooltipStyle;
   }
   Group #Strip {
     Anchor: (Width: 940, Height: 12, Bottom: 4);
     Background: #ffffff(0.04);
-    TextTooltipStyle: $C.@DefaultTextTooltipStyle;
     Group #StripBars { Anchor: (Full: 0); }
     AssetImage #StripImage { Anchor: (Left: 0, Top: 0, Width: 940, Height: 12); Visible: false; }
+    Group #StripHover { Anchor: (Full: 0); }
   }
   Label #Methods {
     Style: (FontSize: 10, TextColor: #96a9be, Wrap: true, WrapMaxLines: 4);

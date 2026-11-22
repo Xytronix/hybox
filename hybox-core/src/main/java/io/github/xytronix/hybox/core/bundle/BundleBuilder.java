@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -181,9 +182,16 @@ public final class BundleBuilder {
     }
 
     private void writeExtras(List<BundleAttachment> extras, ZipOutputStream zip, Set<String> enabled) throws IOException {
+        Set<String> written = new HashSet<>(List.of("incident.json", "report.html", "recording.jfr",
+            "env/jvm.txt", "env/os.txt"));
         for (BundleAttachment extra : extras) {
             String key = BundleArtifacts.keyForPath(extra.pathInZip());
             if (key != null && !enabled.contains(key)) {
+                continue;
+            }
+            if (!written.add(extra.pathInZip())) {
+                logger.log(System.Logger.Level.WARNING,
+                    "Skipping duplicate bundle entry " + extra.pathInZip() + "; the first entry is kept.");
                 continue;
             }
             ZipEntry entry = zipEntry(extra.pathInZip());

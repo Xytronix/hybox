@@ -24,6 +24,7 @@ class HyboxApiPrivacyTest {
     @TempDir Path dir;
 
     private CallbackExecutor callbacks;
+    private final List<String> warnings = new java.util.concurrent.CopyOnWriteArrayList<>();
     @AfterEach
     void cleanup() {
         HyboxApi.shutdown();
@@ -142,6 +143,21 @@ class HyboxApiPrivacyTest {
         assertEquals(0, callbacks.health().quarantined());
     }
 
+    @Test
+    void duplicatePluginExtraPathKeepsFirstAndWarnsOnce() throws Exception {
+        var runtime = runtime();
+        HyboxApi.registerExtras("first", (report, event) ->
+            List.of(new BundleAttachment("extras/shared.txt", new byte[] {1})));
+        HyboxApi.registerExtras("second", (report, event) ->
+            List.of(new BundleAttachment("extras/shared.txt", new byte[] {2})));
+        var extras = runtime.extrasRegistry().extras(null, null);
+        assertEquals(1, extras.size());
+        assertArrayEquals(new byte[] {1}, extras.get(0).data());
+        assertEquals(1, warnings.size());
+        assertTrue(warnings.get(0).contains("'second'"));
+        assertTrue(warnings.get(0).contains("extras/shared.txt"));
+    }
+
     private void discardInFlight(String mutation) throws Exception {
         var runtime = runtime();
         var entered = new CountDownLatch(1);
@@ -190,6 +206,18 @@ class HyboxApiPrivacyTest {
         var executor = HyboxRuntime.class.getDeclaredField("callbacks");
         executor.setAccessible(true);
         executor.set(runtime, callbacks);
+        var logger = HyboxRuntime.class.getDeclaredField("logger");
+        logger.setAccessible(true);
+        logger.set(runtime, new System.Logger() {
+            public String getName() { return "privacy-test"; }
+            public boolean isLoggable(Level level) { return true; }
+            public void log(Level level, java.util.ResourceBundle bundle, String message, Throwable thrown) {
+                if (level == Level.WARNING) warnings.add(message);
+            }
+            public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
+                if (level == Level.WARNING) warnings.add(format);
+            }
+        });
         setPolicy(runtime, true, true);
         HyboxApi.init(runtime);
         return runtime;
