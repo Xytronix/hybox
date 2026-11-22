@@ -104,7 +104,7 @@ class HyboxSettingsReloadTest {
               "MaxAge": "PT30M", "MaxSizeBytes": 536870912,
               "RecordingName": "custom-recorder", "DisabledEvents": ["jdk.CPULoad"],
               "Configuration": "profile", "SnapshotInterval": "PT20M", "SampleInterval": "PT20S",
-              "OldObjectSampling": true, "PostIncidentMaxWait": "PT30S",
+              "OldObjectSampling": false, "PostIncidentMaxWait": "PT30S",
               "ThreadDumpCount": 5, "ThreadDumpInterval": "PT5S"
             },
             "Trigger": {"Cooldown": "PT1M"},

@@ -145,6 +145,29 @@ class JfrControllerTest {
     }
 
     @Test
+    void defaultConfigurationKeepsReportEventsAndDropsUnreadOnes() throws Exception {
+        try (JfrController controller = new JfrController(Duration.ofSeconds(60), 16L * 1024L * 1024L,
+            "hybox-test")) {
+            controller.start();
+            Recording recording = extractRecording(controller);
+            for (String event : List.of("jdk.ThreadPark", "jdk.ThreadSleep", "jdk.JavaMonitorWait",
+                "jdk.NativeMethodSample", "jdk.SystemProcess", "jdk.InitialEnvironmentVariable")) {
+                assertEquals("false", recording.getSettings().get(event + "#enabled"), event);
+            }
+            for (String event : List.of("jdk.ExecutionSample", "jdk.ObjectAllocationSample", "jdk.OldObjectSample",
+                "jdk.CPULoad", "jdk.GarbageCollection", "jdk.InitialSystemProperty", "jdk.ThreadDump",
+                "jdk.FileRead", "jdk.SafepointBegin", "jdk.JavaMonitorEnter")) {
+                assertEquals("true", recording.getSettings().get(event + "#enabled"), event);
+            }
+
+            controller.applyConfiguration("profile");
+            assertEquals("true", recording.getSettings().get("jdk.ThreadPark#enabled"));
+            controller.applyConfiguration(null);
+            assertEquals("false", recording.getSettings().get("jdk.ThreadPark#enabled"));
+        }
+    }
+
+    @Test
     void applyConfigurationSwitchesSettingsLiveWithoutRestart(@TempDir Path tempDir) throws Exception {
         assertTrue(FlightRecorder.isAvailable(), "JFR is not available in this runtime.");
         try (JfrController controller = new JfrController(

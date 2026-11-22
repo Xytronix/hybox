@@ -1,38 +1,41 @@
 $C = "../Common.ui";
+$H = "HyboxTones.ui";
 Group {
   LayoutMode: Top;
   Anchor: (Bottom: 12);
   Padding: (Full: 10);
-  Background: #ffffff(0.04);
-  Label #ChartTitle { Anchor: (Height: 20, Bottom: 3); Style: (FontSize: 13, RenderBold: true, TextColor: #ffffff, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 9); }
-  Label #ChartStats { Anchor: (Height: 20, Bottom: 6); Style: (FontSize: 11, TextColor: #bfcdd5, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 8); }
+  Background: $H.@Panel;
+  Label #ChartTitle { Anchor: (Height: 20, Bottom: 3); Style: (FontSize: 13, RenderBold: true, TextColor: $H.@Text, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 10); }
+  Label #ChartStats { Anchor: (Height: 20, Bottom: 6); Style: (FontSize: 11, TextColor: $H.@Text2, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 10); }
   Group #Frame {
     LayoutMode: Left;
     Anchor: (Width: 940, Height: 102);
     Group #YAxis {
       Anchor: (Width: 56, Height: 102, Right: 4);
-      Label #YMax { Anchor: (Left: 0, Top: 0, Width: 56, Height: 12); Style: (FontSize: 9, TextColor: #96a9be, HorizontalAlignment: End); }
-      Label #YMid { Anchor: (Left: 0, Top: 45, Width: 56, Height: 12); Style: (FontSize: 9, TextColor: #96a9be, HorizontalAlignment: End); }
-      Label #YMin { Anchor: (Left: 0, Top: 90, Width: 56, Height: 12); Style: (FontSize: 9, TextColor: #96a9be, HorizontalAlignment: End); }
+      Label #YMax { Anchor: (Left: 0, Top: 0, Width: 56, Height: 12); Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: End); }
+      Label #YMid { Anchor: (Left: 0, Top: 45, Width: 56, Height: 12); Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: End); }
+      Label #YMin { Anchor: (Left: 0, Top: 90, Width: 56, Height: 12); Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: End); }
     }
     Group #Plot {
       Anchor: (Width: 880, Height: 96);
-      Background: #ffffff(0.04);
-      Group #GridMax { Anchor: (Left: 0, Top: 6, Width: 880, Height: 1); Background: #ffffff(0.12); }
-      Group #GridMid { Anchor: (Left: 0, Top: 51, Width: 880, Height: 1); Background: #ffffff(0.08); }
-      Group #Baseline { Anchor: (Left: 0, Bottom: 0, Width: 880, Height: 1); Background: #96a9be(0.8); }
+      Background: $H.@Bg2;
+      Group #GridMax { Anchor: (Left: 0, Top: 6, Width: 880, Height: 1); Background: $H.@Border; }
+      Group #GridMid { Anchor: (Left: 0, Top: 51, Width: 880, Height: 1); Background: $H.@Panel2; }
+      Group #Baseline { Anchor: (Left: 0, Bottom: 0, Width: 880, Height: 1); Background: $H.@Border3; }
       Group #Bars { Anchor: (Full: 0); }
       AssetImage #PlotImage { Anchor: (Left: 0, Top: 0, Width: 880, Height: 96); Visible: false; }
+      Group #RefLine { Anchor: (Left: 0, Top: 0, Width: 880, Height: 1); Background: $H.@SeriesNeutral; Visible: false; }
+      Label #RefLabel { Anchor: (Left: 636, Top: 0, Width: 240, Height: 12); Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: End); Visible: false; }
       Group #Hover { Anchor: (Full: 0); }
     }
   }
   Group #XAxis {
     Anchor: (Left: 60, Width: 880, Height: 14, Top: 3);
-    Label #X0 { Anchor: (Left: 0, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: #96a9be, HorizontalAlignment: Start); }
-    Label #X1 { Anchor: (Left: 170, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: #96a9be, HorizontalAlignment: Center); }
-    Label #X2 { Anchor: (Left: 390, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: #96a9be, HorizontalAlignment: Center); }
-    Label #X3 { Anchor: (Left: 610, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: #96a9be, HorizontalAlignment: Center); }
-    Label #X4 { Anchor: (Right: 0, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: #96a9be, HorizontalAlignment: End); }
+    Label #X0 { Anchor: (Left: 0, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: Start); }
+    Label #X1 { Anchor: (Left: 170, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: Center); }
+    Label #X2 { Anchor: (Left: 390, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: Center); }
+    Label #X3 { Anchor: (Left: 610, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: Center); }
+    Label #X4 { Anchor: (Right: 0, Top: 0, Width: 100, Height: 14); Style: (FontSize: 9, TextColor: $H.@Text3, HorizontalAlignment: End); }
   }
-  Label #ChartLegend { Anchor: (Height: 16, Top: 3); Style: (FontSize: 10, TextColor: #96a9be); }
+  Label #ChartLegend { Anchor: (Height: 16, Top: 3); Style: (FontSize: 10, TextColor: $H.@Text3); }
 }

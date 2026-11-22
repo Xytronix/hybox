@@ -15,6 +15,7 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import io.github.xytronix.hybox.hytale.HytaleHyboxConfig.HyboxSettings;
+import io.github.xytronix.hybox.hytale.HytaleHyboxConfig.SettingField;
 import io.github.xytronix.hybox.hytale.HyboxChatFormatter.Tone;
 import io.github.xytronix.hybox.hytale.HyboxSettingsRenderer.Feedback;
 import java.util.ArrayList;
@@ -28,14 +29,20 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
     private final World world;
     private final AbstractCommand settingsCommand;
     private final Runnable back;
+    private final String storage;
     private HyboxSettings settings;
     private HyboxSettings original;
+    private HyboxSettings edited;
+    private boolean editedInvalid;
+    private boolean unsavedShown;
+    private String leaveWarned;
+    private List<SettingField> pendingRestart;
     private Feedback feedback = new Feedback("", Tone.OK);
     private boolean saving;
     private boolean dismissed;
 
-    private HyboxSettingsPage(HyboxRuntime runtime, PlayerRef playerRef, World world,
-                              AbstractCommand settingsCommand, Runnable back, HyboxSettings settings) {
+    private HyboxSettingsPage(HyboxRuntime runtime, PlayerRef playerRef, World world, AbstractCommand settingsCommand,
+                              Runnable back, HyboxSettings settings, String storage, List<SettingField> pendingRestart) {
         super(playerRef, CustomPageLifetime.CanDismiss, PageData.CODEC);
         this.runtime = runtime;
         this.world = world;
@@ -43,10 +50,14 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
         this.back = back;
         this.settings = settings;
         this.original = settings;
+        this.edited = settings;
+        this.storage = storage;
+        this.pendingRestart = pendingRestart;
     }
 
     static void open(HyboxRuntime runtime, Ref<EntityStore> ref, Store<EntityStore> store,
-                     World world, AbstractCommand settingsCommand, Runnable back) {
+                     World world, AbstractCommand settingsCommand, Runnable back,
+                     java.util.function.Consumer<String> onError) {
         if (!ref.isValid() || ref.getStore() != store) return;
         Player player = store.getComponent(ref, Player.getComponentType());
         PlayerRef playerRef = store.getComponent(ref, PlayerRef.getComponentType());
@@ -60,50 +71,75 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
         runtime.submitWorker(() -> {
             try {
                 HyboxSettings settings = HytaleHyboxConfig.read(runtime.dataDir(), LOGGER);
+                String storage = HyboxSettingsRenderer.storage(runtime.storageUsage());
+                List<SettingField> restart = HytaleHyboxConfig.pendingRestart(settings, runtime.startupConfig());
                 world.execute(() -> {
                     if (!ref.isValid() || ref.getStore() != store) return;
                     Player current = store.getComponent(ref, Player.getComponentType());
                     if (current == null || current.getPageManager().getCustomPage() != previousPage) return;
                     if (!settingsCommand.hasPermission(playerRef)) return;
-                    current.getPageManager().openCustomPage(ref, store,
-                        new HyboxSettingsPage(runtime, playerRef, world, settingsCommand, back, settings));
+                    current.getPageManager().openCustomPage(ref, store, new HyboxSettingsPage(
+                        runtime, playerRef, world, settingsCommand, back, settings, storage, restart));
                 });
             } catch (RuntimeException failure) {
                 LOGGER.log(System.Logger.Level.WARNING, "Unable to read Hybox settings.", failure);
-                world.execute(() -> {
-                    if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(Tone.ERROR,
-                        "Unable to read hybox.json; the existing configuration was not changed."));
-                });
+                world.execute(() -> failed(ref, playerRef, onError, Tone.ERROR,
+                    "Unable to read hybox.json. The settings were not changed."));
             }
-        }, () -> world.execute(() -> {
-            if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(Tone.WARN,
-                "Hybox worker is busy or stopping; try /hybox settings again."));
-        }));
+        }, () -> world.execute(() -> failed(ref, playerRef, onError, Tone.WARN,
+            "Hybox is busy. Try again in a moment.")));
+    }
+
+    private static void failed(Ref<EntityStore> ref, PlayerRef playerRef, java.util.function.Consumer<String> onError,
+                               Tone tone, String message) {
+        if (onError != null) onError.accept(message);
+        else if (ref.isValid()) playerRef.sendMessage(HyboxChatFormatter.message(tone, message));
     }
 
     @Override
     public void build(Ref<EntityStore> ref, UICommandBuilder commands, UIEventBuilder events,
                       Store<EntityStore> store) {
         commands.append("Pages/HyboxSettings.ui");
-        HyboxSettingsRenderer.render(settings, feedback, commands, events);
+        unsavedShown = unsaved();
+        HyboxSettingsRenderer.render(settings, storage, feedback, pendingRestart, unsavedShown, commands, events);
     }
 
     @Override
     public void handleDataEvent(Ref<EntityStore> ref, Store<EntityStore> store, PageData data) {
         if (dismissed || data.action == null) return;
         switch (data.action) {
-            case "save" -> save(ref, store, data);
-            case "back" -> {
-                dismissed = true;
-                close();
-                back.run();
+            case "change" -> {
+                track(data);
+                leaveWarned = null;
+                if (unsaved() != unsavedShown) updateFeedback();
             }
-            case "close" -> {
+            case "save" -> save(ref, store, data);
+            case "back", "close" -> {
+                track(data);
+                if (unsaved() && !data.action.equals(leaveWarned)) {
+                    leaveWarned = data.action;
+                    String button = data.action.equals("back") ? "Back to dashboard" : "Close";
+                    feedback = new Feedback("You have unsaved changes. Press " + button
+                        + " again to leave without saving, or Save and reload to keep them.", Tone.WARN);
+                    updateFeedback();
+                    return;
+                }
                 dismissed = true;
                 close();
+                if (data.action.equals("back")) back.run();
             }
             default -> { }
         }
+    }
+
+    private void track(PageData data) {
+        List<String> problems = new ArrayList<>();
+        edited = data.settings(edited, problems);
+        editedInvalid = !problems.isEmpty();
+    }
+
+    private boolean unsaved() {
+        return editedInvalid || !edited.equals(original);
     }
 
     private void save(Ref<EntityStore> ref, Store<EntityStore> store, PageData data) {
@@ -113,6 +149,7 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
             updateFeedback();
             return;
         }
+        track(data);
         List<String> problems = new ArrayList<>();
         HyboxSettings submitted = data.settings(settings, problems);
         problems.addAll(submitted.validate());
@@ -129,12 +166,14 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
         runtime.submitWorker(() -> {
             Feedback result;
             boolean persisted = false;
+            List<SettingField> restart = pendingRestart;
             try {
                 if (!settingsCommand.hasPermission(playerRef)) {
-                    result = new Feedback("Settings permission was revoked; hybox.json was not changed.", Tone.ERROR);
+                    result = new Feedback("Settings permission was revoked. hybox.json was not changed.", Tone.ERROR);
                 } else {
                     HytaleHyboxConfig.write(runtime.dataDir(), baseline, submitted, LOGGER);
                     persisted = true;
+                    restart = HytaleHyboxConfig.pendingRestart(submitted, runtime.startupConfig());
                     String reloaded = runtime.reload();
                     result = new Feedback(reloaded.startsWith("Reload failed:")
                         ? "Saved hybox.json. " + reloaded + " Run /hybox reload when ready."
@@ -148,9 +187,14 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
             }
             Feedback completed = result;
             boolean completedSave = persisted;
+            List<SettingField> completedRestart = restart;
             world.execute(() -> {
                 saving = false;
-                if (completedSave) original = submitted;
+                if (completedSave) {
+                    original = submitted;
+                    pendingRestart = completedRestart;
+                    leaveWarned = null;
+                }
                 if (!active(ref, store)) return;
                 feedback = completed;
                 updateFeedback();
@@ -158,14 +202,16 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
         }, () -> world.execute(() -> {
             saving = false;
             if (!active(ref, store)) return;
-            feedback = new Feedback("Hybox worker is busy or stopping; settings were not saved.", Tone.WARN);
+            feedback = new Feedback("Hybox is busy. Try again in a moment. Settings were not saved.", Tone.WARN);
             updateFeedback();
         }));
     }
 
     private void updateFeedback() {
         UICommandBuilder commands = new UICommandBuilder();
+        unsavedShown = unsaved();
         HyboxSettingsRenderer.renderFeedback(feedback, commands);
+        HyboxSettingsRenderer.renderStatus(pendingRestart, unsavedShown, commands);
         commands.set("#SaveButton.Disabled", saving);
         sendUpdate(commands, new UIEventBuilder(), false);
     }
@@ -178,6 +224,10 @@ final class HyboxSettingsPage extends InteractiveCustomUIPage<HyboxSettingsPage.
 
     @Override
     public void onDismiss(Ref<EntityStore> ref, Store<EntityStore> store) {
+        if (!dismissed && !saving && unsaved()) {
+            playerRef.sendMessage(HyboxChatFormatter.message(Tone.WARN,
+                "Hybox settings closed without saving. Your changes were not kept."));
+        }
         dismissed = true;
     }
 

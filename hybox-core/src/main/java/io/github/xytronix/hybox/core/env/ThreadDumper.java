@@ -8,6 +8,8 @@ import java.lang.management.ThreadMXBean;
 import java.util.Arrays;
 import java.util.Comparator;
 
+import io.github.xytronix.hybox.core.health.FrameLabels;
+
 public final class ThreadDumper {
     private ThreadDumper() {
     }
@@ -44,7 +46,7 @@ public final class ThreadDumper {
         StackTraceElement[] stack = info.getStackTrace();
         MonitorInfo[] monitors = info.getLockedMonitors();
         for (int depth = 0; depth < stack.length; depth++) {
-            out.append("    at ").append(stack[depth]).append('\n');
+            out.append("    at ").append(stack[depth]).append(FrameLabels.suffix(stack[depth])).append('\n');
             for (MonitorInfo monitor : monitors) {
                 if (monitor.getLockedStackDepth() == depth) {
                     out.append("    - locked ").append(monitor).append('\n');

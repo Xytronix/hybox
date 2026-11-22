@@ -53,4 +53,16 @@ class TextRedactorTest {
 
         assertFalse(redacted.contains("swordfish"));
     }
+
+    @Test
+    void keepsJvmHytaleAndPluginVersionsThatLookLikeAddresses() {
+        TextRedactor redactor = new TextRedactor(TextRedactor.DEFAULT_PATTERNS,
+            () -> List.of("25.0.4.1+1-LTS", "0.7.7", "1.2.3.4"));
+
+        assertEquals("Java runtime Temurin 25.0.4.1+1-LTS, Refixes 1.2.3.4, bind [REDACTED]",
+            redactor.redact("Java runtime Temurin 25.0.4.1+1-LTS, Refixes 1.2.3.4, bind 10.0.4.1:5520"));
+        String running = "Temurin " + System.getProperty("java.runtime.version");
+        assertEquals(running, new TextRedactor(TextRedactor.DEFAULT_PATTERNS).redact(running));
+        assertEquals("[REDACTED]+1-LTS", new TextRedactor(TextRedactor.DEFAULT_PATTERNS).redact("25.9.9.9+1-LTS"));
+    }
 }

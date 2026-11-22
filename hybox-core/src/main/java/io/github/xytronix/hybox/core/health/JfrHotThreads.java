@@ -3,11 +3,10 @@ package io.github.xytronix.hybox.core.health;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import jdk.jfr.consumer.RecordedEvent;
 import jdk.jfr.consumer.RecordedFrame;
@@ -17,6 +16,12 @@ import jdk.jfr.consumer.RecordingFile;
 
 public final class JfrHotThreads {
     private static final String EXECUTION_SAMPLE = "jdk.ExecutionSample";
+    private static final Set<String> ALLOCATION_EVENTS = Set.of(
+        "jdk.ObjectAllocationSample", "jdk.ObjectAllocationInNewTLAB", "jdk.ObjectAllocationOutsideTLAB");
+    private static final int HOT_THREAD_METHOD_LIMIT = 6;
+    private static final int HOT_THREAD_MOD_LIMIT = 3;
+
+    private record Top(String method, JfrModAttribution.Owners owners) {}
 
     private JfrHotThreads() {
     }
@@ -24,11 +29,16 @@ public final class JfrHotThreads {
     public static List<HealthSnapshot.HotThread> parse(Path recording, int limit) {
         Map<String, long[]> samplesByThread = new HashMap<>();
         Map<String, Map<String, Long>> topMethodByThread = new HashMap<>();
-        JfrStackCache<RecordedStackTrace, String> tops = new JfrStackCache<>(JfrHotThreads::topMethod);
+        JfrModAttribution mods = new JfrModAttribution();
+        JfrStackCache<RecordedStackTrace, Top> tops = new JfrStackCache<>(stack -> top(stack, mods));
         try (RecordingFile file = new RecordingFile(recording)) {
             while (file.hasMoreEvents()) {
                 RecordedEvent event = file.readEvent();
-                if (!EXECUTION_SAMPLE.equals(event.getEventType().getName())) {
+                String type = event.getEventType().getName();
+                if (!EXECUTION_SAMPLE.equals(type)) {
+                    if (ALLOCATION_EVENTS.contains(type) && event.getStackTrace() != null) {
+                        tops.get(event.getStackTrace());
+                    }
                     continue;
                 }
                 RecordedThread thread = event.getThread("sampledThread");
@@ -45,30 +55,33 @@ public final class JfrHotThreads {
                 samplesByThread.computeIfAbsent(threadName, k -> new long[1])[0]++;
 
                 RecordedStackTrace stack = event.getStackTrace();
-                String top = stack == null ? null : tops.get(stack);
+                Top top = stack == null ? null : tops.get(stack);
                 if (top != null) {
-                    topMethodByThread
-                        .computeIfAbsent(threadName, k -> new HashMap<>())
-                        .merge(top, 1L, Long::sum);
+                    mods.cpu(top.owners(), threadName);
+                    if (top.method() != null) {
+                        topMethodByThread
+                            .computeIfAbsent(threadName, k -> new HashMap<>())
+                            .merge(top.method(), 1L, Long::sum);
+                    }
                 }
             }
         } catch (Exception e) {
             return List.of();
         }
 
+        Map<String, Map<String, JfrTimeline.ModShare>> modsByThread = mods.cpuBy(UnaryOperator.identity(),
+            HOT_THREAD_MOD_LIMIT);
         List<HealthSnapshot.HotThread> out = new ArrayList<>(samplesByThread.size());
         for (Map.Entry<String, long[]> entry : samplesByThread.entrySet()) {
             String name = entry.getKey();
             long samples = entry.getValue()[0];
             Map<String, Long> methods = topMethodByThread.get(name);
-            out.add(new HealthSnapshot.HotThread(
-                name, samples, dominantMethod(methods), topMethods(methods, HOT_THREAD_METHOD_LIMIT)));
+            out.add(new HealthSnapshot.HotThread(name, samples, dominantMethod(methods),
+                topMethods(methods, HOT_THREAD_METHOD_LIMIT), modsByThread.get(name)));
         }
         out.sort((a, b) -> Long.compare(b.samples(), a.samples()));
         return out.size() > limit ? new ArrayList<>(out.subList(0, limit)) : out;
     }
-
-    private static final int HOT_THREAD_METHOD_LIMIT = 6;
 
     private static List<HealthSnapshot.MethodSample> topMethods(Map<String, Long> methods, int limit) {
         if (methods == null || methods.isEmpty()) {
@@ -81,105 +94,16 @@ public final class JfrHotThreads {
             .toList();
     }
 
-    private static final String[] ENGINE_PREFIXES = {
-        "com.hypixel.", "java.", "jdk.", "sun.", "javax.", "io.netty.", "com.mojang.",
-        "it.unimi.", "org.joml", "org.lwjgl", "com.google.", "kotlin.", "scala.",
-        "org.spongepowered.", "org.bson", "org.mongodb", "org.slf4j", "org.apache."
-    };
-
-    public static LinkedHashMap<String, String> modContribution(Path recording, int limit) {
-        Map<String, long[]> samplesByMod = new HashMap<>();
-        Map<String, Map<String, Long>> methodByMod = new HashMap<>();
-        JfrStackCache<RecordedStackTrace, String[][]> stackMods = new JfrStackCache<>(JfrHotThreads::modFrames);
-        try (RecordingFile file = new RecordingFile(recording)) {
-            while (file.hasMoreEvents()) {
-                RecordedEvent event = file.readEvent();
-                if (!EXECUTION_SAMPLE.equals(event.getEventType().getName())) {
-                    continue;
-                }
-                RecordedStackTrace stack = event.getStackTrace();
-                if (stack == null) {
-                    continue;
-                }
-                String[][] modFrames = stackMods.get(stack);
-                for (String[] modFrame : modFrames) {
-                    methodByMod.computeIfAbsent(modFrame[0], k -> new HashMap<>())
-                        .merge(modFrame[1], 1L, Long::sum);
-                }
-                Set<String> modsInSample = new HashSet<>();
-                for (String[] modFrame : modFrames) {
-                    if (modsInSample.add(modFrame[0])) {
-                        samplesByMod.computeIfAbsent(modFrame[0], k -> new long[1])[0]++;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            return new LinkedHashMap<>();
-        }
-
-        List<Map.Entry<String, long[]>> ordered = new ArrayList<>(samplesByMod.entrySet());
-        ordered.sort((a, b) -> Long.compare(b.getValue()[0], a.getValue()[0]));
-        LinkedHashMap<String, String> out = new LinkedHashMap<>();
-        int count = 0;
-        for (Map.Entry<String, long[]> entry : ordered) {
-            if (count++ >= limit) {
+    private static Top top(RecordedStackTrace stack, JfrModAttribution mods) {
+        String method = null;
+        for (RecordedFrame frame : stack.getFrames()) {
+            if (frame.isJavaFrame() && frame.getMethod() != null) {
+                method = JfrTimelineParser.cleanType(frame.getMethod().getType().getName())
+                    + "." + frame.getMethod().getName();
                 break;
             }
-            long samples = entry.getValue()[0];
-            out.put(entry.getKey(), samples + " samples · " + dominantMethod(methodByMod.get(entry.getKey())));
         }
-        return out;
-    }
-
-    static boolean isEngine(String type) {
-        for (String prefix : ENGINE_PREFIXES) {
-            if (type.startsWith(prefix)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    static String modId(String type) {
-        int first = type.indexOf('.');
-        if (first < 0) {
-            return type;
-        }
-        int second = type.indexOf('.', first + 1);
-        if (second < 0) {
-            return type;
-        }
-        int third = type.indexOf('.', second + 1);
-        return third < 0 ? type : type.substring(0, third);
-    }
-
-    private static String[][] modFrames(RecordedStackTrace stack) {
-        List<String[]> out = new ArrayList<>();
-        for (RecordedFrame frame : stack.getFrames()) {
-            if (!frame.isJavaFrame() || frame.getMethod() == null) {
-                continue;
-            }
-            String type = frame.getMethod().getType().getName();
-            if (isEngine(type)) {
-                continue;
-            }
-            out.add(new String[] {modId(type), JfrTimelineParser.cleanType(type) + "." + frame.getMethod().getName()});
-        }
-        return out.toArray(new String[0][]);
-    }
-
-    private static String topMethod(RecordedStackTrace stack) {
-        if (stack == null) {
-            return null;
-        }
-        List<RecordedFrame> frames = stack.getFrames();
-        for (RecordedFrame frame : frames) {
-            if (frame.isJavaFrame() && frame.getMethod() != null) {
-                return JfrTimelineParser.cleanType(frame.getMethod().getType().getName())
-                    + "." + frame.getMethod().getName();
-            }
-        }
-        return null;
+        return new Top(method, mods.owners(stack));
     }
 
     private static String dominantMethod(Map<String, Long> methods) {

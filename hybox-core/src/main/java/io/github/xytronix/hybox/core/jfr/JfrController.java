@@ -5,8 +5,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.ParseException;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import jdk.jfr.Configuration;
 import jdk.jfr.EventSettings;
@@ -21,6 +26,10 @@ import jdk.jfr.RecordingState;
 public final class JfrController implements AutoCloseable {
     private static final String DEFAULT_CONFIGURATION = "default";
     private static final String DUMP_MARKER_PREFIX = "hybox dump:";
+    static final Set<String> LEAN_DISABLED_EVENTS = Stream.concat(
+            Stream.of("jdk.ThreadPark", "jdk.ThreadSleep", "jdk.JavaMonitorWait", "jdk.NativeMethodSample"),
+            RecordingScrubber.DROPPED_EVENTS.stream().filter(name -> !name.equals("jdk.InitialSystemProperty")))
+        .collect(Collectors.toUnmodifiableSet());
 
     private final Duration maxAge;
     private final long maxSizeBytes;
@@ -90,7 +99,7 @@ public final class JfrController implements AutoCloseable {
         String name = configurationOverride == null || configurationOverride.isBlank()
             ? configurationName : configurationOverride;
         try {
-            rec.setSettings(Configuration.getConfiguration(name).getSettings());
+            rec.setSettings(settings(name));
         } catch (Exception e) {
             logger.log(System.Logger.Level.WARNING,
                 "Failed to apply JFR configuration '" + name + "' to the live recording.", e);
@@ -112,7 +121,7 @@ public final class JfrController implements AutoCloseable {
             created.setMaxSize(Math.max(0L, maxSizeBytes));
             if (maxAge.isZero() && maxSizeBytes <= 0L) {
                 logger.log(System.Logger.Level.WARNING,
-                    "JFR recording has no age or size cap (both unlimited); the on-disk recording can grow until it "
+                    "JFR recording has no age or size cap (both unlimited). The recording on disk can grow until it "
                     + "fills the disk. Set Jfr.MaxAge or Jfr.MaxSizeBytes to a positive value to bound it.");
             }
             enableMarkerEvent(created);
@@ -228,10 +237,20 @@ public final class JfrController implements AutoCloseable {
 
     private Recording tryLoadConfiguration(String configurationName) {
         try {
-            return new Recording(Configuration.getConfiguration(configurationName));
+            return new Recording(settings(configurationName));
         } catch (IOException | ParseException e) {
             logger.log(System.Logger.Level.DEBUG, "Failed to load JFR configuration '" + configurationName + "'.", e);
             return null;
         }
+    }
+
+    static Map<String, String> settings(String configurationName) throws IOException, ParseException {
+        Map<String, String> settings = new HashMap<>(Configuration.getConfiguration(configurationName).getSettings());
+        if (DEFAULT_CONFIGURATION.equals(configurationName)) {
+            for (String event : LEAN_DISABLED_EVENTS) {
+                settings.put(event + "#enabled", "false");
+            }
+        }
+        return settings;
     }
 }

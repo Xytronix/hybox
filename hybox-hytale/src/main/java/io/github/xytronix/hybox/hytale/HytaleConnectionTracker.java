@@ -62,7 +62,7 @@ final class HytaleConnectionTracker {
                 e -> commitServerMarker("shutdown initiated"));
         } catch (Throwable t) {
             logger.log(System.Logger.Level.WARNING,
-                "Failed to subscribe to player connection events; connection timeline disabled.", t);
+                "Failed to subscribe to player connection events. The connection timeline is off.", t);
         }
     }
 

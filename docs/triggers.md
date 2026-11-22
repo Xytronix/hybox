@@ -6,8 +6,8 @@ A trigger asks Hybox to save a bundle. Defaults are in [Configuration](configura
 
 | Kind | Measures | Fires when | Severity | Checked |
 | --- | --- | --- | --- | --- |
-| `HEARTBEAT_STALL` | Time since each world thread last ran a task that Hybox posts every 50 ms. | A world has not run it for `StallDegradedMs`. | Critical at `StallCriticalMs` or more, otherwise degraded. | Every 250 ms |
-| `TICK_DEGRADED` | Average tick time of each world, from Hytale. | The average reaches `TickAvgDegradedMs`. | Critical at `TickAvgCriticalMs` or more, otherwise degraded. | Every 250 ms |
+| `HEARTBEAT_STALL` | How long a task that Hybox posts to each world thread has waited to run. Hybox posts it every 250 ms (a quarter of `StallDegradedMs` if that is below 1 second, at least every 50 ms). | The task has waited for `StallDegradedMs`. | Critical at `StallCriticalMs` or more, otherwise degraded. | With each post |
+| `TICK_DEGRADED` | Average tick time of each world, from Hytale. | The average reaches `TickAvgDegradedMs`. | Critical at `TickAvgCriticalMs` or more, otherwise degraded. | With each heartbeat post |
 | `WORLD_FAILURE` | Worlds that Hytale removes because of an exception, outside shutdown. | Such a world is removed. It has no switch. | Critical | On the event |
 | `DEADLOCK` | Deadlocked threads, from the JVM. | The set of deadlocked threads changes and is not empty. | Critical | Every 5 s |
 | `HEAP_PRESSURE` | Old-generation heap pool use after the last GC, as a share of its maximum. Without a pool named old or tenured, the first heap pool. | Use stays at `HeapPressurePct` or more for `HeapPressureSustain`. | Critical at 97% or more, otherwise degraded. | Every 5 s |
@@ -21,7 +21,14 @@ A trigger asks Hybox to save a bundle. Defaults are in [Configuration](configura
 
 Each detector fires once, then re-arms: tick, heap, GC, CPU and network below 90% of the threshold, heartbeat when the world runs the task again, player drop when the count is no longer a drop.
 
-The scope is the world name for `HEARTBEAT_STALL`, `TICK_DEGRADED` and `WORLD_FAILURE`; `jvm` for deadlock, heap, GC and CPU; `net` for network; and `server` otherwise.
+The scope groups triggers for debounce:
+
+| Scope | Triggers |
+| --- | --- |
+| The world name | `HEARTBEAT_STALL`, `TICK_DEGRADED`, `WORLD_FAILURE` |
+| `jvm` | `DEADLOCK`, `HEAP_PRESSURE`, `GC_PRESSURE`, `CPU_SATURATION` |
+| `net` | `NET_SATURATION` |
+| `server` | All others |
 
 ### Log error filters
 
@@ -40,7 +47,7 @@ Hybox checks each trigger in this order. The capture at the end of a profile ski
 | --- | --- |
 | Cooldown | Any trigger was accepted within `Cooldown`, unless the kind is in `CooldownExemptKinds`. Manual captures count. |
 | Debounce | The same kind and scope was accepted within `Debounce`. |
-| One at a time | A capture, including its post-incident wait, is running. Automatic triggers are dropped; manual captures reply `Capture busy; try again shortly.` |
+| One at a time | A capture, including its post-incident wait, is running. Automatic triggers are dropped. Manual captures reply `A capture is already running. Try again when it ends.` |
 
 ## Severity
 

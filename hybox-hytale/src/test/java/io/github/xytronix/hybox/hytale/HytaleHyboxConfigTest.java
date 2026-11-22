@@ -127,7 +127,7 @@ class HytaleHyboxConfigTest {
         assertEquals(Duration.ofMinutes(2), config.postIncidentMaxWait());
         assertEquals(Duration.ofMinutes(10), config.jfrSnapshotInterval());
         assertEquals(Duration.ofSeconds(10), config.jfrSampleInterval());
-        assertFalse(config.jfrOldObjectSampling());
+        assertTrue(config.jfrOldObjectSampling());
         assertEquals(100, config.triggerPolicy().tickAvgDegradedMs());
         assertEquals(250, config.triggerPolicy().tickAvgCriticalMs());
         assertFalse(config.triggerPolicy().detectors().modules().logError());
@@ -289,7 +289,7 @@ class HytaleHyboxConfigTest {
         assertEquals(256L, settings.value(settingField("JfrMaxSizeMiB")));
         assertEquals(10L, settings.value(settingField("JfrSampleIntervalSeconds")));
         assertEquals(10L, settings.value(settingField("JfrSnapshotIntervalMinutes")));
-        assertEquals(false, settings.value(settingField("JfrOldObjectSampling")));
+        assertEquals(true, settings.value(settingField("JfrOldObjectSampling")));
         assertTrue(settings.validate().isEmpty());
         assertFalse(Files.exists(HytaleHyboxConfig.path(dataDir)));
     }
@@ -341,7 +341,7 @@ class HytaleHyboxConfigTest {
                 var invalid = changedSettings(original, java.util.Map.of(field.id(), invalidValue));
                 String label = field.id() + "=" + invalidValue;
                 assertTrue(invalid.validate().stream().anyMatch(problem ->
-                    problem.startsWith(field.errorName() + " must be between ")), label);
+                    problem.startsWith(field.name() + " must be between ")), label);
 
                 assertThrows(IllegalArgumentException.class,
                     () -> HytaleHyboxConfig.write(dataDir, original, invalid, SETTINGS_LOGGER), label);
@@ -360,9 +360,9 @@ class HytaleHyboxConfigTest {
 
         for (String[] pair : List.of(
                 new String[] {"HeartbeatStall", "StallDegraded", "StallCritical",
-                    "Heartbeat critical threshold must be at least the degraded threshold."},
+                    "Heartbeat stall: Critical must be at least Degraded."},
                 new String[] {"TickDegraded", "TickAvgDegraded", "TickAvgCritical",
-                    "Tick critical threshold must be at least the degraded threshold."})) {
+                    "Slow ticks: Critical must be at least Degraded."})) {
             long lower = settingField(pair[1]).min();
             long higher = lower + 1;
             for (boolean enabled : new boolean[] {false, true}) {
@@ -419,26 +419,26 @@ class HytaleHyboxConfigTest {
             throws Exception {
         Path configPath = HytaleHyboxConfig.path(dataDir);
         var expectedDocument = settingsDocument();
-        putConfigValue(expectedDocument, "Jfr.MaxAge", new com.google.gson.JsonPrimitive("PT90S"));
+        putConfigValue(expectedDocument, "Jfr.MaxAge", new com.google.gson.JsonPrimitive("PT330S"));
         putConfigValue(expectedDocument, "Jfr.MaxSizeBytes", new com.google.gson.JsonPrimitive(536870913L));
         putConfigValue(expectedDocument, "Jfr.SnapshotInterval", new com.google.gson.JsonPrimitive("PT23S"));
         putConfigValue(expectedDocument, "Jfr.SampleInterval", new com.google.gson.JsonPrimitive("PT5.9S"));
         putConfigValue(expectedDocument, "Jfr.PostIncidentMaxWait", new com.google.gson.JsonPrimitive("PT37.5S"));
         putConfigValue(expectedDocument, "Jfr.ThreadDumpInterval", new com.google.gson.JsonPrimitive("PT17.75S"));
         putConfigValue(expectedDocument, "Trigger.Cooldown", new com.google.gson.JsonPrimitive("PT33.750S"));
-        putConfigValue(expectedDocument, "Retention.MaxTotalBytes", new com.google.gson.JsonPrimitive(3145729L));
+        putConfigValue(expectedDocument, "Retention.MaxTotalBytes", new com.google.gson.JsonPrimitive(67108865L));
         putConfigValue(expectedDocument, "Retention.MaxAge", new com.google.gson.JsonPrimitive("PT37H"));
         Files.writeString(configPath, expectedDocument.toString(), StandardCharsets.UTF_8);
         HyboxSettings original = HytaleHyboxConfig.read(dataDir, SETTINGS_LOGGER);
 
-        assertEquals(1L, original.value(settingField("JfrMaxAgeMinutes")));
+        assertEquals(5L, original.value(settingField("JfrMaxAgeMinutes")));
         assertEquals(512L, original.value(settingField("JfrMaxSizeMiB")));
         assertEquals(0L, original.value(settingField("JfrSnapshotIntervalMinutes")));
         assertEquals(5L, original.value(settingField("JfrSampleIntervalSeconds")));
         assertEquals(37L, original.value(settingField("PostIncidentMaxWait")));
         assertEquals(17L, original.value(settingField("ThreadDumpInterval")));
         assertEquals(33L, original.value(settingField("Cooldown")));
-        assertEquals(3L, original.value(settingField("RetentionMaxTotalMiB")));
+        assertEquals(64L, original.value(settingField("RetentionMaxTotalMiB")));
         assertEquals(1L, original.value(settingField("RetentionMaxAgeDays")));
         assertEquals(List.of(), original.validate());
         var submitted = changedSettings(original, java.util.Map.of("CaptureEnabled", false));
@@ -451,16 +451,16 @@ class HytaleHyboxConfigTest {
         assertEquals(submitted, HytaleHyboxConfig.read(dataDir, SETTINGS_LOGGER));
 
         var converted = changedSettings(submitted, java.util.Map.of(
-            "JfrMaxAgeMinutes", 2L, "JfrMaxSizeMiB", 513L, "JfrSnapshotIntervalMinutes", 3L,
-            "RetentionMaxAgeDays", 2L, "RetentionMaxTotalMiB", 4L, "Cooldown", 34L));
+            "JfrMaxAgeMinutes", 6L, "JfrMaxSizeMiB", 513L, "JfrSnapshotIntervalMinutes", 3L,
+            "RetentionMaxAgeDays", 2L, "RetentionMaxTotalMiB", 65L, "Cooldown", 34L));
 
         HytaleHyboxConfig.write(dataDir, submitted, converted, SETTINGS_LOGGER);
 
-        putConfigValue(expectedDocument, "Jfr.MaxAge", new com.google.gson.JsonPrimitive("PT2M"));
+        putConfigValue(expectedDocument, "Jfr.MaxAge", new com.google.gson.JsonPrimitive("PT6M"));
         putConfigValue(expectedDocument, "Jfr.MaxSizeBytes", new com.google.gson.JsonPrimitive(537919488L));
         putConfigValue(expectedDocument, "Jfr.SnapshotInterval", new com.google.gson.JsonPrimitive("PT3M"));
         putConfigValue(expectedDocument, "Retention.MaxAge", new com.google.gson.JsonPrimitive("PT48H"));
-        putConfigValue(expectedDocument, "Retention.MaxTotalBytes", new com.google.gson.JsonPrimitive(4194304L));
+        putConfigValue(expectedDocument, "Retention.MaxTotalBytes", new com.google.gson.JsonPrimitive(68157440L));
         putConfigValue(expectedDocument, "Trigger.Cooldown", new com.google.gson.JsonPrimitive("PT34S"));
         assertEquals(expectedDocument,
             com.google.gson.JsonParser.parseString(Files.readString(configPath)).getAsJsonObject());
@@ -497,7 +497,7 @@ class HytaleHyboxConfigTest {
             com.google.gson.JsonParser.parseString(Files.readString(configPath)).getAsJsonObject());
         HyboxSettings restored = HytaleHyboxConfig.read(dataDir, SETTINGS_LOGGER);
         assertEquals(69L, restored.value(settingField("Cooldown")));
-        assertEquals(1L, restored.value(settingField("JfrMaxAgeMinutes")));
+        assertEquals(5L, restored.value(settingField("JfrMaxAgeMinutes")));
         assertEquals(0L, restored.value(settingField("JfrSnapshotIntervalMinutes")));
         assertEquals(1L, restored.value(settingField("RetentionMaxAgeDays")));
         assertEquals(false, restored.value(settingField("JfrOldObjectSampling")));
@@ -560,7 +560,7 @@ class HytaleHyboxConfigTest {
         assertEquals(expectedDocument, com.google.gson.JsonParser.parseString(savedJson).getAsJsonObject());
         HyboxSettings saved = HytaleHyboxConfig.read(dataDir, SETTINGS_LOGGER);
         var invalid = changedSettings(saved, java.util.Map.of("RetentionMaxAgeDays", 0L));
-        assertTrue(invalid.validate().stream().anyMatch(problem -> problem.startsWith("Retention age")));
+        assertTrue(invalid.validate().stream().anyMatch(problem -> problem.startsWith("Capture and storage: Age")));
 
         assertThrows(IllegalArgumentException.class,
             () -> HytaleHyboxConfig.write(dataDir, saved, invalid, SETTINGS_LOGGER));
@@ -598,6 +598,80 @@ class HytaleHyboxConfigTest {
             () -> HytaleHyboxConfig.write(dataDir, original, invalid, SETTINGS_LOGGER));
 
         assertFalse(Files.exists(HytaleHyboxConfig.path(dataDir)));
+    }
+
+    @Test
+    void startupClampsValuesOutsideTheNewRangesWithOneWarningEachAndLeavesTheFileAlone(@TempDir Path dataDir)
+            throws Exception {
+        Path configPath = HytaleHyboxConfig.path(dataDir);
+        String json = """
+            {
+              "Version": 1, "Jfr": { "MaxAge": "PT90S" },
+              "Trigger": { "StallDegradedMs": 200, "StallCriticalMs": 10000, "HeapPressurePct": 40 },
+              "Retention": { "MaxAge": "PT87600H", "MaxTotalBytes": 33554432 }
+            }
+            """;
+        Files.writeString(configPath, json, StandardCharsets.UTF_8);
+        List<String> warnings = new java.util.ArrayList<>();
+        System.Logger logger = new System.Logger() {
+            public String getName() { return "clamp"; }
+            public boolean isLoggable(Level level) { return true; }
+            public void log(Level level, java.util.ResourceBundle bundle, String msg, Throwable thrown) {
+                if (level == Level.WARNING) warnings.add(msg);
+            }
+            public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
+                if (level == Level.WARNING) warnings.add(format);
+            }
+        };
+
+        HyboxConfig config = HytaleHyboxConfig.loadOrCreate(dataDir, logger);
+
+        assertEquals(500, config.triggerPolicy().stallDegradedMs());
+        assertEquals(10000, config.triggerPolicy().stallCriticalMs());
+        assertEquals(50, config.triggerPolicy().detectors().heapPressurePct());
+        assertEquals(Duration.ofDays(365), config.capturePolicy().retention().maxAge());
+        assertEquals(64L * 1024 * 1024, config.capturePolicy().retention().maxTotalBytes());
+        assertEquals(Duration.ofMinutes(5), config.jfrMaxAge());
+        assertEquals(5, warnings.size(), warnings.toString());
+        assertTrue(warnings.contains("Config Jfr.MaxAge (Recording: History) is 90 seconds, outside the"
+            + " allowed range 5 minutes to 1 day. Using 5 minutes. hybox.json was not changed."), warnings.toString());
+        assertTrue(warnings.contains("Config Retention.MaxAge (Capture and storage: Age) is 3650 days, outside the"
+            + " allowed range 1 day to 365 days. Using 365 days. hybox.json was not changed."), warnings.toString());
+        assertEquals(json, Files.readString(configPath, StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void restartNoteListsSavedRecordingSettingsUntilTheRunningConfigMatches(@TempDir Path dataDir) {
+        HyboxConfig running = HytaleHyboxConfig.loadOrCreate(dataDir, SETTINGS_LOGGER);
+        HyboxSettings saved = HytaleHyboxConfig.read(dataDir, SETTINGS_LOGGER);
+        assertEquals(List.of(), HytaleHyboxConfig.pendingRestart(saved, running));
+
+        var changed = changedSettings(saved, java.util.Map.of(
+            "JfrMaxAgeMinutes", 30L, "JfrOldObjectSampling", false, "Cooldown", 90L));
+        HytaleHyboxConfig.write(dataDir, saved, changed, SETTINGS_LOGGER);
+        HyboxSettings reread = HytaleHyboxConfig.read(dataDir, SETTINGS_LOGGER);
+        assertEquals(List.of("JfrMaxAgeMinutes", "JfrOldObjectSampling"),
+            HytaleHyboxConfig.pendingRestart(reread, running).stream().map(HytaleHyboxConfig.SettingField::id).toList());
+        assertEquals(List.of(), HytaleHyboxConfig.pendingRestart(reread,
+            HytaleHyboxConfig.loadOrCreate(dataDir, SETTINGS_LOGGER)));
+    }
+
+    @Test
+    void rangesAreShownInTheUnitsOwnersUse() {
+        assertEquals("Heartbeat stall: Degraded must be between 500 ms and 10 minutes.",
+            rejection("StallDegraded", 1L));
+        assertEquals("Slow ticks: Critical must be between 10 ms and 10 seconds.", rejection("TickAvgCritical", 1L));
+        assertEquals("Cooldown must be between 0 seconds and 1 hour.", rejection("Cooldown", 3601L));
+        assertEquals("Capture and storage: Total must be between 64 MiB and 1 TiB.",
+            rejection("RetentionMaxTotalMiB", 1L));
+        assertEquals("Recording: History must be between 5 minutes and 1 day.", rejection("JfrMaxAgeMinutes", 1L));
+        assertEquals("Heap pressure: Heap used must be between 50% and 100%.", rejection("HeapPressurePct", 1L));
+    }
+
+    private static String rejection(String id, long value) {
+        List<String> problems = new java.util.ArrayList<>();
+        settingField(id).validate(value, problems);
+        return problems.getFirst();
     }
 
     private static HytaleHyboxConfig.SettingField settingField(String id) {

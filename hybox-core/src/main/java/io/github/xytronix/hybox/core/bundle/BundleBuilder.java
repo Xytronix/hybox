@@ -2,10 +2,10 @@ package io.github.xytronix.hybox.core.bundle;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -16,12 +16,16 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.UnaryOperator;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import io.github.xytronix.hybox.core.env.EnvCollector;
+import io.github.xytronix.hybox.core.env.PathMasker;
+import io.github.xytronix.hybox.core.env.PrivateArguments;
 import io.github.xytronix.hybox.core.env.TextRedactor;
 import io.github.xytronix.hybox.core.health.JfrTimeline;
 import io.github.xytronix.hybox.core.incident.IncidentReport;
+import io.github.xytronix.hybox.core.jfr.RecordingScrubber;
 import io.github.xytronix.hybox.core.json.IncidentJson;
 import io.github.xytronix.hybox.core.report.ReportHtml;
 
@@ -29,10 +33,14 @@ import io.github.xytronix.hybox.core.report.ReportHtml;
  * Builds deterministic incident bundles.
  */
 public final class BundleBuilder {
+    private static final TextRedactor NETWORK_ADDRESSES =
+        new TextRedactor(List.of(TextRedactor.IPV4, TextRedactor.IPV6));
+
     private final Clock clock;
     private final System.Logger logger;
     private final TextRedactor redactor;
     private final UnaryOperator<String> textMasker;
+    private final PathMasker pathMasker;
 
     public BundleBuilder(Clock clock) {
         this(clock, System.getLogger(BundleBuilder.class.getName()));
@@ -48,10 +56,16 @@ public final class BundleBuilder {
 
     public BundleBuilder(Clock clock, System.Logger logger, TextRedactor redactor,
                          UnaryOperator<String> textMasker) {
+        this(clock, logger, redactor, textMasker, PathMasker.local());
+    }
+
+    public BundleBuilder(Clock clock, System.Logger logger, TextRedactor redactor,
+                         UnaryOperator<String> textMasker, PathMasker pathMasker) {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.logger = Objects.requireNonNull(logger, "logger");
         this.redactor = redactor;
         this.textMasker = textMasker;
+        this.pathMasker = Objects.requireNonNull(pathMasker, "pathMasker");
     }
 
     public Path build(
@@ -88,7 +102,7 @@ public final class BundleBuilder {
                     writeReportHtml(report, recordingJfr, zip);
                 }
                 if (enabled.contains(BundleArtifacts.JFR)) {
-                    writeRecording(recordingJfr, zip);
+                    writeRecording(recordingJfr, destination.getParent(), zip);
                 }
                 if (enabled.contains(BundleArtifacts.ENV)) {
                     writeEnvFiles(zip);
@@ -122,25 +136,74 @@ public final class BundleBuilder {
     }
 
     private byte[] maybeRedact(byte[] data) {
-        return maybeMask(redactor == null ? data : redactor.redact(data));
+        return maybeMask(redactor == null ? data : redactor.redact(data), true);
     }
 
-    private byte[] maybeMask(byte[] data) {
-        if (textMasker == null || data == null || data.length == 0) {
+    private byte[] maybeMask(byte[] data, boolean paths) {
+        if (data == null || data.length == 0) {
             return data;
         }
         String text = new String(data, StandardCharsets.UTF_8);
-        String masked = textMasker.apply(text);
+        String masked = textMasker == null ? text : textMasker.apply(text);
+        if (paths) {
+            masked = pathMasker.apply(masked);
+        }
         return text.equals(masked) ? data : masked.getBytes(StandardCharsets.UTF_8);
     }
 
-    private void writeRecording(Path recordingJfr, ZipOutputStream zip) throws IOException {
-        ZipEntry entry = zipEntry("recording.jfr");
-        zip.putNextEntry(entry);
-        try (InputStream in = Files.newInputStream(recordingJfr)) {
-            in.transferTo(zip);
+    private String mask(String text) {
+        return pathMasker.apply(textMasker == null ? text : textMasker.apply(text));
+    }
+
+    private boolean sensitive(String text) {
+        if (text.isEmpty()) {
+            return false;
         }
-        zip.closeEntry();
+        return !mask(text).equals(text)
+            || !NETWORK_ADDRESSES.redact(text).equals(text)
+            || (redactor != null && !redactor.redact(text).equals(text));
+    }
+
+    private void writeRecording(Path recordingJfr, Path workDir, ZipOutputStream zip) throws IOException {
+        if (!Files.isRegularFile(recordingJfr)) {
+            throw new NoSuchFileException(recordingJfr.toString());
+        }
+        List<UnaryOperator<String>> maskers = new ArrayList<>();
+        maskers.add(this::mask);
+        maskers.add(NETWORK_ADDRESSES::redact);
+        maskers.add(PrivateArguments::mask);
+        if (redactor != null) {
+            maskers.add(redactor::redact);
+        }
+        String user = System.getProperty("user.name", "");
+        if (user.length() >= 3) {
+            Pattern userName = Pattern.compile("(?<![\\w-])" + Pattern.quote(user) + "(?![\\w-])");
+            maskers.add(text -> userName.matcher(text).replaceAll("user"));
+        }
+        Path cleaned = Files.createTempFile(workDir, ".hybox-", ".jfr.tmp");
+        try {
+            RecordingScrubber.Result result;
+            try {
+                result = new RecordingScrubber(this::sensitive, maskers).write(recordingJfr, cleaned);
+            } catch (IOException | RuntimeException e) {
+                logger.log(System.Logger.Level.WARNING, "Left recording.jfr out of the bundle because it could "
+                    + "not be cleaned of private data. The report still uses the full recording.", e);
+                return;
+            }
+            if (result.fallback() != null) {
+                logger.log(System.Logger.Level.WARNING, "Could not mask private data in recording.jfr in place "
+                    + "because " + result.fallback() + ". Left out every event with private data instead.",
+                    result.failure());
+            }
+            long total = result.dropped().values().stream().mapToLong(Long::longValue).sum();
+            logger.log(System.Logger.Level.INFO, "Cleaned recording.jfr for sharing: masked private data in "
+                + result.maskedStrings() + " strings and left out " + total + " events " + result.dropped() + ".");
+            zip.putNextEntry(zipEntry("recording.jfr"));
+            Files.copy(cleaned, zip);
+            zip.closeEntry();
+        } finally {
+            Files.deleteIfExists(cleaned);
+        }
     }
 
     private void writeReportHtml(IncidentReport report, Path recordingJfr, ZipOutputStream zip) throws IOException {
@@ -152,20 +215,21 @@ public final class BundleBuilder {
             } else if (Files.size(recordingJfr) == 0) {
                 unavailableReason = "recording file is empty";
             } else {
-                timeline = JfrTimeline.parse(recordingJfr);
+                timeline = JfrTimeline.parse(recordingJfr, report.meta().createdAt());
                 if (timeline == null) {
                     unavailableReason = "recording is empty, unreadable, or contains no usable events";
                 }
             }
         } catch (Exception e) {
             unavailableReason = "recording could not be read: " + e.getMessage();
-            logger.log(System.Logger.Level.WARNING, "JFR timeline parse failed; report renders without series.", e);
+            logger.log(System.Logger.Level.WARNING, "JFR timeline parse failed. The report has no charts.", e);
         }
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        ReportHtml.write(report, timeline, unavailableReason, buffer);
+        ReportHtml.write(report, timeline, unavailableReason, pathMasker, buffer);
         ZipEntry entry = zipEntry("report.html");
         zip.putNextEntry(entry);
-        zip.write(maybeRedact(buffer.toByteArray()));
+        byte[] html = buffer.toByteArray();
+        zip.write(maybeMask(redactor == null ? html : redactor.redact(html), false));
         zip.closeEntry();
     }
 
@@ -191,12 +255,12 @@ public final class BundleBuilder {
             }
             if (!written.add(extra.pathInZip())) {
                 logger.log(System.Logger.Level.WARNING,
-                    "Skipping duplicate bundle entry " + extra.pathInZip() + "; the first entry is kept.");
+                    "Skipping duplicate bundle entry " + extra.pathInZip() + ". The first entry is kept.");
                 continue;
             }
             ZipEntry entry = zipEntry(extra.pathInZip());
             zip.putNextEntry(entry);
-            zip.write(extra.isText() ? maybeMask(extra.data()) : extra.data());
+            zip.write(extra.isText() ? maybeMask(extra.data(), true) : extra.data());
             zip.closeEntry();
         }
     }

@@ -1,6 +1,18 @@
 $C = "../Common.ui";
-$C.@TextButton #Range {
-  @Text = "";
-  Anchor: (Width: 104, Height: 30, Right: 5);
-  Padding: (Horizontal: 8);
+$H = "HyboxTones.ui";
+Button #Range {
+  LayoutMode: Top;
+  Anchor: (Width: 104, Height: 33, Right: 5);
+  Style: (
+    Default: (Background: $H.@AccentTint),
+    Hovered: (Background: $H.@AccentTint),
+    Pressed: (Background: $H.@AccentTint),
+    Sounds: $C.@ButtonSounds
+  );
+  Label #RangeLabel {
+    FlexWeight: 1;
+    Padding: (Horizontal: 8);
+    Style: (FontSize: 14, RenderBold: true, TextColor: $H.@Accent, HorizontalAlignment: Center, VerticalAlignment: Center, ShrinkTextToFit: true, MinShrinkTextToFitFontSize: 11);
+  }
+  Group #RangeMarker { Anchor: (Height: 3); Background: $H.@Accent; }
 }
