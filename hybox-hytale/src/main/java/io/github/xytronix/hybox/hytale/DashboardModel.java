@@ -1,5 +1,7 @@
 package io.github.xytronix.hybox.hytale;
 
+import io.github.xytronix.hybox.core.bundle.BundleArtifacts;
+import io.github.xytronix.hybox.core.capture.CapturePolicy;
 import io.github.xytronix.hybox.core.capture.CaptureResult;
 import io.github.xytronix.hybox.core.capture.HeapHistogram;
 import java.nio.file.Path;
@@ -7,11 +9,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 record DashboardModel(List<Tile> tiles, List<Warning> warnings, Profile profile, String captureStep,
                       List<HyboxIncidents.Incident> incidents, String incidentsMessage,
                       List<HyboxChatFormatter.Trigger> triggers, String triggerTiming,
-                      String feedback, boolean captureAllowed, Duration recordingMaxAge, boolean openLastAvailable,
+                      String feedback, boolean captureAllowed, String captureHint, boolean openLastAvailable,
                       boolean profileStopAllowed, boolean profileCancelAllowed, boolean skipWaitAllowed, boolean profileSaving,
                       boolean trendsAllowed, ProfileForm profileForm, Heap heap) {
     enum Tone {
@@ -76,7 +79,9 @@ record DashboardModel(List<Tile> tiles, List<Warning> warnings, Profile profile,
         return from(runtime.health(), now, profile, incidents, incidentsMessage,
             HyboxChatFormatter.triggers(policy, HyboxDashboardPage.armedTriggers(runtime)),
             "Cooldown " + policy.cooldown() + " · debounce " + policy.debounce(), feedback, captureAllowed,
-            runtime.config().jfrMaxAge(), openLastAvailable, profileStopAllowed, profileCancelAllowed,
+            captureHint(runtime.config().jfrMaxAge(), runtime.config().threadDumpCount(), runtime.config().capturePolicy(),
+                !HyboxApi.registeredConfigPaths().isEmpty()), openLastAvailable,
+            profileStopAllowed, profileCancelAllowed,
             captureAllowed && runtime.recoveryWaitActive(),
             profileSaving || runtime.profileCapturePending(), trendsAllowed, profileForm, heap);
     }
@@ -84,7 +89,7 @@ record DashboardModel(List<Tile> tiles, List<Warning> warnings, Profile profile,
     static DashboardModel from(HyboxRuntime.Health health, Instant now, Profile profile,
                                List<HyboxIncidents.Incident> incidents, String incidentsMessage,
                                List<HyboxChatFormatter.Trigger> triggers, String triggerTiming,
-                               String feedback, boolean captureAllowed, Duration recordingMaxAge, boolean openLastAvailable,
+                               String feedback, boolean captureAllowed, String captureHint, boolean openLastAvailable,
                                boolean profileStopAllowed, boolean profileCancelAllowed, boolean skipWaitAllowed, boolean profileSaving,
                                boolean trendsAllowed, ProfileForm profileForm, Heap heap) {
         List<Tile> tiles = new ArrayList<>(6);
@@ -129,7 +134,7 @@ record DashboardModel(List<Tile> tiles, List<Warning> warnings, Profile profile,
         String step = health.captureBusy() ? health.captureProgress() : null;
         return new DashboardModel(tiles, warnings, profile, step,
             incidents, incidentsMessage, triggers, triggerTiming, feedback, captureAllowed && !health.captureBusy(),
-            recordingMaxAge, openLastAvailable, profileStopAllowed && profile != null, profileCancelAllowed && profile != null,
+            captureHint, openLastAvailable, profileStopAllowed && profile != null, profileCancelAllowed && profile != null,
             skipWaitAllowed,
             profileSaving && profile == null && (step == null || step.equals("queued")), trendsAllowed, profileForm, heap);
     }
@@ -164,14 +169,26 @@ record DashboardModel(List<Tile> tiles, List<Warning> warnings, Profile profile,
         return profileIdle() && profileForm.allowed() && !profileForm.starting();
     }
 
-    String captureHint() {
-        long seconds = recordingMaxAge.toSeconds();
-        String window = seconds % 86_400 == 0 ? units(seconds / 86_400, "day")
-            : seconds % 3_600 == 0 ? units(seconds / 3_600, "hour")
-            : seconds % 60 == 0 ? units(seconds / 60, "minute") : units(seconds, "second");
-        String recording = recordingMaxAge.isZero() ? "the rolling recording" : "the last " + window + " of recording";
-        return "Saves " + recording
-            + ", thread dumps, server log and config as an incident bundle.";
+    static String captureHint(Duration recordingMaxAge, int threadDumpCount, CapturePolicy capture,
+                              boolean pluginConfigsRegistered) {
+        Set<String> artifacts = capture.artifacts();
+        boolean report = artifacts.contains(BundleArtifacts.REPORT);
+        List<String> parts = new ArrayList<>(4);
+        if (artifacts.contains(BundleArtifacts.JFR)) {
+            long seconds = recordingMaxAge.toSeconds();
+            String window = seconds % 86_400 == 0 ? units(seconds / 86_400, "day")
+                : seconds % 3_600 == 0 ? units(seconds / 3_600, "hour")
+                : seconds % 60 == 0 ? units(seconds / 60, "minute") : units(seconds, "second");
+            parts.add(recordingMaxAge.isZero() ? "the rolling recording" : "the last " + window + " of recording");
+        }
+        if (artifacts.contains(BundleArtifacts.THREADS) && threadDumpCount > 0) parts.add("thread dumps");
+        if (capture.includeServerLog() && capture.logTailLines() > 0
+            && (report || artifacts.contains(BundleArtifacts.SERVER_LOG))) parts.add("server log");
+        if (report && (capture.includeServerConfig() || capture.includeModConfigs()
+            || capture.allowModConfigOptIn() && pluginConfigsRegistered)) parts.add("config");
+        if (parts.isEmpty()) return "Saves an incident summary as an incident bundle.";
+        String last = parts.removeLast();
+        return "Saves " + (parts.isEmpty() ? last : String.join(", ", parts) + " and " + last) + " as an incident bundle.";
     }
 
     static String captureFeedback(CaptureResult result, Path incidentDir) {

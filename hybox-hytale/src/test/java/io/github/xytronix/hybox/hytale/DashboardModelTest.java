@@ -2,13 +2,16 @@ package io.github.xytronix.hybox.hytale;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.github.xytronix.hybox.core.capture.CapturePolicy;
 import io.github.xytronix.hybox.core.capture.CaptureResult;
 import io.github.xytronix.hybox.core.incident.IncidentId;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class DashboardModelTest {
     private static final Instant START = Instant.parse("2026-10-22T12:00:00Z");
@@ -86,33 +89,63 @@ class DashboardModelTest {
     @Test
     void captureStageIndicesMatchRuntimeStepsAndKeepUnknownStepsRaw() {
         var steps = List.of("queued", "collecting", "waiting for post-incident evidence", "dumping recording", "building bundle");
-        for (int i = 0; i < steps.size(); i++) assertEquals(i, activity(steps.get(i), Duration.ofMinutes(15), false, List.of()).captureStepIndex());
-        assertEquals(-1, activity("starting profile", Duration.ofMinutes(15), false, List.of()).captureStepIndex());
-        assertEquals(-1, activity(null, Duration.ofMinutes(15), false, List.of()).captureStepIndex());
+        for (int i = 0; i < steps.size(); i++) assertEquals(i, activity(steps.get(i), "", false, List.of()).captureStepIndex());
+        assertEquals(-1, activity("starting profile", "", false, List.of()).captureStepIndex());
+        assertEquals(-1, activity(null, "", false, List.of()).captureStepIndex());
     }
 
     @Test
-    void captureHintUsesConfiguredRecordingWindow() {
+    void captureHintUsesConfiguredRecordingWindow(@TempDir Path dir) throws Exception {
+        var everything = capture(dir, "\"IncludeServerLog\":true,\"IncludeServerConfig\":true");
         assertEquals("Saves the last 15 minutes of recording, thread dumps, server log and config as an incident bundle.",
-            activity(null, Duration.ofMinutes(15), false, List.of()).captureHint());
+            DashboardModel.captureHint(Duration.ofMinutes(15), 3, everything, false));
         assertEquals("Saves the last 1 day of recording, thread dumps, server log and config as an incident bundle.",
-            activity(null, Duration.ofDays(1), false, List.of()).captureHint());
+            DashboardModel.captureHint(Duration.ofDays(1), 3, everything, false));
         assertEquals("Saves the last 1 hour of recording, thread dumps, server log and config as an incident bundle.",
-            activity(null, Duration.ofHours(1), false, List.of()).captureHint());
+            DashboardModel.captureHint(Duration.ofHours(1), 3, everything, false));
         assertEquals("Saves the last 75 seconds of recording, thread dumps, server log and config as an incident bundle.",
-            activity(null, Duration.ofSeconds(75), false, List.of()).captureHint());
+            DashboardModel.captureHint(Duration.ofSeconds(75), 3, everything, false));
         assertEquals("Saves the rolling recording, thread dumps, server log and config as an incident bundle.",
-            activity(null, Duration.ZERO, false, List.of()).captureHint());
+            DashboardModel.captureHint(Duration.ZERO, 3, everything, false));
+    }
+
+    @Test
+    void captureHintListsOnlyConfiguredContents(@TempDir Path dir) throws Exception {
+        assertEquals("Saves the last 15 minutes of recording and thread dumps as an incident bundle.",
+            DashboardModel.captureHint(Duration.ofMinutes(15), 3, capture(dir, ""), false));
+        assertEquals("Saves the last 15 minutes of recording and server log as an incident bundle.",
+            DashboardModel.captureHint(Duration.ofMinutes(15), 3,
+                capture(dir, "\"IncludeServerLog\":true,\"Artifacts\":[\"jfr\",\"report\"]"), false));
+        assertEquals("Saves thread dumps as an incident bundle.", DashboardModel.captureHint(Duration.ofMinutes(15), 3,
+            capture(dir, "\"IncludeServerLog\":true,\"IncludeModConfigs\":true,\"Artifacts\":[\"threads\"]"), false));
+        assertEquals("Saves an incident summary as an incident bundle.", DashboardModel.captureHint(Duration.ofMinutes(15), 3,
+            capture(dir, "\"IncludeServerLog\":true,\"LogTailLines\":0,\"Artifacts\":[\"report\"]"), false));
+    }
+
+    @Test
+    void captureHintFollowsThreadDumpCountAndPluginConfigOptIn(@TempDir Path dir) throws Exception {
+        var defaults = capture(dir, "");
+        assertEquals("Saves the last 15 minutes of recording as an incident bundle.",
+            DashboardModel.captureHint(Duration.ofMinutes(15), 0, defaults, false));
+        assertEquals("Saves the last 15 minutes of recording, thread dumps and config as an incident bundle.",
+            DashboardModel.captureHint(Duration.ofMinutes(15), 3, defaults, true));
+        assertEquals("Saves the last 15 minutes of recording and thread dumps as an incident bundle.",
+            DashboardModel.captureHint(Duration.ofMinutes(15), 3, capture(dir, "\"AllowModConfigOptIn\":false"), true));
+    }
+
+    private static CapturePolicy capture(Path dir, String settings) throws Exception {
+        Files.writeString(dir.resolve("hybox.json"), "{\"Version\":1,\"Capture\":{" + settings + "}}");
+        return HytaleHyboxConfig.loadOrCreate(dir, System.getLogger("dashboard-test")).capturePolicy();
     }
 
     @Test
     void openLastIncidentRequiresSuccessfulCompletionReloadAndNoCaptureInProgress() {
         var incident = new HyboxIncidents.Incident("000010", Path.of("incident-000010.zip"), START,
             "MANUAL", "Manual capture", "INFO", "server");
-        assertFalse(activity(null, Duration.ofMinutes(15), false, List.of(incident)).canOpenLastIncident());
-        assertFalse(activity(null, Duration.ofMinutes(15), true, List.of()).canOpenLastIncident());
-        assertFalse(activity("collecting", Duration.ofMinutes(15), true, List.of(incident)).canOpenLastIncident());
-        assertTrue(activity(null, Duration.ofMinutes(15), true, List.of(incident)).canOpenLastIncident());
+        assertFalse(activity(null, "", false, List.of(incident)).canOpenLastIncident());
+        assertFalse(activity(null, "", true, List.of()).canOpenLastIncident());
+        assertFalse(activity("collecting", "", true, List.of(incident)).canOpenLastIncident());
+        assertTrue(activity(null, "", true, List.of(incident)).canOpenLastIncident());
     }
 
     @Test
@@ -123,7 +156,7 @@ class DashboardModelTest {
             for (boolean stopAllowed : List.of(false, true)) {
                 for (boolean cancelAllowed : List.of(false, true)) {
                     var model = DashboardModel.from(health, START, profile, List.of(), "", List.of(), "", "", true,
-                        Duration.ofMinutes(15), false, stopAllowed, cancelAllowed, false, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+                        "", false, stopAllowed, cancelAllowed, false, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
                     assertEquals(active && stopAllowed, model.profileStopAllowed());
                     assertEquals(active && cancelAllowed, model.profileCancelAllowed());
                 }
@@ -137,7 +170,7 @@ class DashboardModelTest {
             var health = health(true, null, null, null, captureBusy, new CallbackExecutor.Health(0, 0, 0, 0, 0, 0, null));
             for (boolean trendsAllowed : List.of(false, true)) {
                 var model = DashboardModel.from(health, START, null, List.of(), "", List.of(), "", "", true,
-                    Duration.ofMinutes(15), false, false, false, false, false, trendsAllowed, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+                    "", false, false, false, false, false, trendsAllowed, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
                 assertEquals(trendsAllowed, model.trendsAllowed());
             }
         }
@@ -153,14 +186,14 @@ class DashboardModelTest {
             DashboardModel.captureFeedback(CaptureResult.of(CaptureResult.Status.BUSY), Path.of("incidents")));
     }
 
-    private static DashboardModel activity(String step, Duration maxAge, boolean openLast, List<HyboxIncidents.Incident> incidents) {
-        return new DashboardModel(List.of(), List.of(), null, step, incidents, "", List.of(), "", "", true, maxAge, openLast, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+    private static DashboardModel activity(String step, String hint, boolean openLast, List<HyboxIncidents.Incident> incidents) {
+        return new DashboardModel(List.of(), List.of(), null, step, incidents, "", List.of(), "", "", true, hint, openLast, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
     }
 
     private static DashboardModel model(HyboxRuntime.Health health, String severity) {
         var incident = new HyboxIncidents.Incident("example", Path.of("example.zip"), START.minusSeconds(60),
             "MANUAL", "Manual capture", severity, "default");
-        return DashboardModel.from(health, START, null, List.of(incident), "", List.of(), "", "", true, Duration.ofMinutes(15), false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
+        return DashboardModel.from(health, START, null, List.of(incident), "", List.of(), "", "", true, "", false, true, true, true, false, true, DashboardModel.ProfileForm.DEFAULT, DashboardModel.Heap.EMPTY);
     }
 
     private static HyboxRuntime.Health health(boolean running, String snapshotError, String captureError,
