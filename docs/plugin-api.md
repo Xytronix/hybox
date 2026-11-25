@@ -77,7 +77,7 @@ Write setting events from their own periodic hook the same way.
 
 ## HyboxApi setup
 
-To use `HyboxApi`, add Hybox as a dependency. Hybox is not published to a Maven repository. [Build it](/mod/hybox/installing-hybox#build-and-install) and put the JAR in your project, for example in `libs/`.
+To use `HyboxApi`, add Hybox as a dependency. Hybox is not published to a Maven repository. Download the JAR from the [releases](https://github.com/Xytronix/hybox/releases) and put it in your project, for example in `libs/`.
 
 ```kotlin
 dependencies {
