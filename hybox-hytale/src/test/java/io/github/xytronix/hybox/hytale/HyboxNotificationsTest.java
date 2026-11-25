@@ -11,6 +11,14 @@ import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 
 class HyboxNotificationsTest {
+    private static Clock clock(Instant[] now) {
+        return new Clock() {
+            @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+            @Override public Instant instant() { return now[0]; }
+        };
+    }
+
     @Test
     void everyCaptureOutcomeUsesTheMatchingNativeNotificationStyle() {
         for (var status : CaptureResult.Status.values()) {
@@ -34,11 +42,7 @@ class HyboxNotificationsTest {
     void aBurstOfIncidentsAlertsStaffOnceUnlessItGetsWorse() {
         Instant start = Instant.parse("2026-11-19T10:00:00Z");
         Instant[] now = {start};
-        var throttle = new HyboxNotifications.Throttle(new Clock() {
-            @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
-            @Override public Clock withZone(java.time.ZoneId zone) { return this; }
-            @Override public Instant instant() { return now[0]; }
-        });
+        var throttle = new HyboxNotifications.Throttle(clock(now));
 
         var first = throttle.admit("a", "DEGRADED", "World default is slow: 80 ms per tick");
         assertNotNull(first);
@@ -63,11 +67,7 @@ class HyboxNotificationsTest {
     void staffHearWhenTheBundleOfAnAlertedIncidentIsSavedAndWhenAHeldOneGetsWorse() {
         Instant start = Instant.parse("2026-11-19T10:00:00Z");
         Instant[] now = {start};
-        var throttle = new HyboxNotifications.Throttle(new Clock() {
-            @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
-            @Override public Clock withZone(java.time.ZoneId zone) { return this; }
-            @Override public Instant instant() { return now[0]; }
-        });
+        var throttle = new HyboxNotifications.Throttle(clock(now));
 
         var accepted = throttle.admit("a", "DEGRADED", "World default stopped responding for 2.1 s");
         assertNotNull(accepted);
