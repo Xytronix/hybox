@@ -18,7 +18,8 @@ class MixinSectionTest {
         Map<String, String> entries = MixinSection.entries("Hyinit 0.3.1",
             new MixinSection.Versions("0.3.1", "launcher", "0.8.7", "0.17.5", "0.5.5", 812L, 431_000_000L, 2L, 950L, 0L),
             List.of(new MixinSection.Source("refixes-0.6.1.jar", "IroriPowered:Refixes", "0.6.1", SHA,
-                List.of("refixes.mixins.json"), true, false, null, 3L)),
+                List.of("refixes.mixins.json"), true, false, null, 3L, 221_289_712L, 67L),
+                new MixinSection.Source("old.jar", null, null, null, List.of(), true, false, null, 0L, null, null)),
             List.of(new MixinSection.Config("refixes.mixins.json", "refixes-0.6.1.jar", "cc.irori.refixes.early.mixin",
                 List.of("cc.irori.refixes.early.mixin.MixinWorld"), 1, "0.16.0", 1000, true)),
             List.of(new MixinSection.Problem("error", "Mixin transformation of a.B failed", "x.jar", "boom", null),
@@ -40,7 +41,8 @@ class MixinSectionTest {
         assertTrue(text.contains("\"version\":\"0.3.1\",\"launchMode\":\"launcher\",\"mixin\":\"0.8.7\""), text);
         assertTrue(text.contains("\"transformMs\":431.0"), text);
         assertTrue(text.contains("\"sources\":[[\"refixes-0.6.1.jar\",\"IroriPowered:Refixes\",\"0.6.1\",\"" + SHA
-            + "\",[\"refixes.mixins.json\"],true,false,null,3]]"), text);
+            + "\",[\"refixes.mixins.json\"],true,false,null,3,221.3,67],"
+            + "[\"old.jar\",null,null,null,[],true,false,null,0,null,null]]"), text);
         assertTrue(text.contains("\"problems\":[[\"error\",\"Mixin transformation of a.B failed\",\"x.jar\",\"boom\"],"
             + "[\"warn\",\"Mixin c.D was skipped\",null,null]]"), text);
         assertTrue(text.contains("\"overlaps\":[[\"a.B.tick\",[[\"Refixes\",\"c.M1\"],[\"Other\",\"d.M2\"]]]]"), text);
@@ -76,7 +78,7 @@ class MixinSectionTest {
         Map<String, String> entries = MixinSection.entries("Hyinit 0.3.1",
             new MixinSection.Versions("0.3.1", "launcher", "0.8.7", "0.17.5", "0.5.5", 1L, 1L, 0L, 1L, 0L),
             List.of(new MixinSection.Source("HbxThrowing-1.0.0.jar", "Hbx:HbxThrowing", "1.0.0", null,
-                List.of("hbxthrowing.mixins.json"), false, false, null, 0L)),
+                List.of("hbxthrowing.mixins.json"), false, false, null, 0L, null, null)),
             List.of(new MixinSection.Config("hbxthrowing.mixins.json", "HbxThrowing-1.0.0.jar", "com.hbx.throwing.mixin",
                 List.of("com.hbx.throwing.mixin.ThrowingMixin"), 1, null, 1000, true)),
             List.of(new MixinSection.Problem("error", "Mixin transformation of a.B failed", "HbxThrowing-1.0.0.jar",

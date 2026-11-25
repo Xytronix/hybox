@@ -84,6 +84,7 @@ final class HyboxIncidentRenderer {
     private static final int CPU_WORLDS = 3;
     private static final int CPU_WORLD_ROWS = 5;
     private static final int CPU_MODS = 5;
+    private static final int MIXIN_COST_MIN_SAMPLES = 300;
     private static final int CPU_SUBSYSTEMS = 5;
     private static final int ENGINE_SYSTEMS = 8;
     private static final int HOT_METHODS = 6;
@@ -98,6 +99,7 @@ final class HyboxIncidentRenderer {
     private static final int WORLD_PLAYERS = 5;
     private static final int ENTITY_TYPES = 6;
     private static final int MIXIN_ROWS = 10;
+    private static final String MIXIN_APPLY_NOTE = "Mixin apply time is spent once when a class loads, mostly at startup. It is not CPU while the server runs.";
     private static final int TIP_CALLERS = 5;
     private static final int ROW_CHARS = 1800;
     private static final int KEY_TIP_CHARS = 34;
@@ -467,7 +469,7 @@ final class HyboxIncidentRenderer {
             }
             case "metrics" -> dataIsSeries(model.object("series").get("mspt")) || dataIsSeries(model.object("series").get("msptIncident"))
                 || dataIsSeries(model.object("series").get("tps"));
-            case "cpu" -> filled(model, "cpu") || filled(model, "subsystems") || filled(model, "modCpu") || filled(model, "cpuByWorld");
+            case "cpu" -> filled(model, "cpu") || filled(model, "subsystems") || filled(model, "modCpu") || filled(model, "cpuByWorld") || filled(model, "mixinCost");
             case "engine" -> filled(model, "tickSystems");
             case "methods" -> filled(model, "hotMethods");
             case "flame" -> filled(model, "flame");
@@ -672,6 +674,7 @@ final class HyboxIncidentRenderer {
             p.blocks.addAll(modShares.subList(0, Math.min(CPU_MODS, modShares.size())));
             p.rest(modShares.size() - CPU_MODS, "more mod");
         }
+        mixinCost(p);
         JsonArray subsystems = array(p.use("subsystems"));
         if (!subsystems.isEmpty()) p.card("Engine subsystems");
         for (JsonElement element : subsystems.asList().subList(0, Math.min(CPU_SUBSYSTEMS, subsystems.size()))) {
@@ -679,6 +682,57 @@ final class HyboxIncidentRenderer {
             p.share(text(at(a, 0)), percent(number(at(a, 1), 0), total), number(at(a, 1), 0) / Math.max(1, total));
         }
         p.rest(subsystems.size() - CPU_SUBSYSTEMS, "more subsystem");
+    }
+
+    private static void mixinCost(Plan p) {
+        JsonObject cost = object(p.use("mixinCost"));
+        double world = number(cost.get("worldSamples"), 0);
+        List<JsonObject> rows = new ArrayList<>();
+        for (JsonElement element : array(cost.get("rows"))) {
+            JsonObject row = object(element);
+            if (number(row.get("own"), 0) > 0 || number(row.get("started"), 0) > 0) rows.add(row);
+        }
+        if (world <= 0 || rows.isEmpty()) return;
+        boolean low = world < MIXIN_COST_MIN_SAMPLES;
+        p.card("Mixin code by mod");
+        if (low) p.paragraph("Only " + count(world, "world thread sample") + ". Too few for shares, so these are sample counts.");
+        List<String> names = rows.stream().map(HyboxIncidentRenderer::mixinCostName).toList();
+        for (int i = 0; i < Math.min(CPU_MODS, rows.size()); i++) {
+            JsonObject row = rows.get(i);
+            String name = names.get(i);
+            if (Collections.frequency(names, name) > 1 && present(row.get("file"))) name = text(row, "file");
+            double own = number(row.get("own"), 0), started = number(row.get("started"), 0);
+            JsonArray hot = array(row.get(own > 0 ? "ownMethods" : "startedMethods"));
+            String method = hot.isEmpty() ? "" : ", mostly " + shortMethod(text(at(array(hot.get(0)), 0)));
+            String ownText = mixinCostAmount(own, world, low);
+            p.share(name, ownText, low ? 0 : own / world);
+            p.paragraph((own > 0 ? ownText + (low ? " ran" : " of world thread samples ran") + " in its own Mixin code" + method + "."
+                : "No world thread sample ran in its own Mixin code.")
+                + " At most " + mixinCostAmount(started, world, low) + " with the Hytale code that Mixin code called"
+                + (own > 0 ? "" : method) + ". " + mixinCostAmount(number(row.get("reach"), 0), world, low)
+                + " had a method it changed on the stack, which is not its cost.");
+        }
+        p.rest(rows.size() - CPU_MODS, "more mod");
+        double pool = number(cost.get("poolSamples"), 0);
+        boolean poolLow = pool < MIXIN_COST_MIN_SAMPLES;
+        int shown = 0;
+        for (JsonElement element : array(cost.get("poolRows"))) {
+            JsonObject row = object(element);
+            double own = number(row.get("own"), 0), started = number(row.get("started"), 0);
+            if (pool <= 0 || own <= 0 && started <= 0 || shown++ >= CPU_MODS) continue;
+            p.paragraph("On common pool threads, which is not world thread time, " + mixinCostAmount(own, pool, poolLow)
+                + (poolLow ? "" : " of their samples") + " ran in the own Mixin code of " + mixinCostName(row) + " and at most "
+                + mixinCostAmount(started, pool, poolLow) + " with the Hytale code that Mixin code called."
+                + (poolLow ? " Only " + count(pool, "common pool sample") + ", too few for shares." : ""));
+        }
+    }
+
+    private static String mixinCostName(JsonObject row) {
+        return present(row.get("mod")) ? text(row, "mod") : present(row.get("file")) ? text(row, "file") : "unknown";
+    }
+
+    private static String mixinCostAmount(double samples, double world, boolean low) {
+        return low ? count(samples, "sample") : percent(samples, world);
     }
 
     private static List<Map.Entry<String, Double>> worldShares(IncidentModel model) {
@@ -1065,6 +1119,23 @@ final class HyboxIncidentRenderer {
             p.row(shortMethod(text(at(o, 0))), String.join(", ", patches));
         }
         p.rest(overlaps.size() - MIXIN_ROWS, "more shared method");
+        List<String[]> mods = new ArrayList<>();
+        boolean timed = false;
+        for (JsonElement element : sources) {
+            JsonArray s = array(element);
+            List<String> parts = new ArrayList<>(2);
+            if (present(at(s, 9))) parts.add("Mixin apply time " + millis(number(at(s, 9), 0)));
+            if (present(at(s, 10))) parts.add(count(number(at(s, 10), 0), "Mixin") + " off by the mod's settings");
+            if (parts.isEmpty()) continue;
+            timed |= present(at(s, 9));
+            String plugin = opt(at(s, 1));
+            mods.add(new String[] {plugin.isEmpty() ? text(at(s, 0)) : plugin.substring(plugin.indexOf(':') + 1), String.join(". ", parts) + "."});
+        }
+        if (mods.isEmpty()) return;
+        p.card("Early plugin JARs");
+        if (timed) p.paragraph(MIXIN_APPLY_NOTE);
+        for (String[] mod : mods.subList(0, Math.min(MIXIN_ROWS, mods.size()))) p.row(mod[0], mod[1]);
+        p.rest(mods.size() - MIXIN_ROWS, "more mod");
     }
 
     private static String stackTraceNote(JsonArray problems) {

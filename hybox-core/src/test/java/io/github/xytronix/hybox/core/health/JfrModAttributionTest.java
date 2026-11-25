@@ -14,7 +14,11 @@ class JfrModAttributionTest {
     private static final String SAVING = "com.hypixel.hytale.server.core.universe.world.storage.component.ChunkSavingSystems$Ticking";
     private static final String REFIXES = "IroriPowered:Refixes";
 
-    private record Frame(String type, String method, String loader, String label) {}
+    private record Frame(String type, String method, String loader, FrameLabels.Label label) {}
+
+    private static FrameLabels.Label label(boolean merged, String mixin) {
+        return new FrameLabels.Label(merged, List.of(new FrameLabels.Origin("Refixes", "refixes-0.6.1.jar", List.of(mixin))));
+    }
 
     private static Frame f(String type, String method) {
         return new Frame(type, method, null, null);
@@ -40,7 +44,7 @@ class JfrModAttributionTest {
             f(SAVING, "wrapOperation$zzk001$refixesjar$refixes$acknowledgeColumnTransfers"),
             f(TICKING, "run$mixinextras$wrapped$39"),
             f(TICKING, "wrapMethod$zfi000$refixesjar$refixes$settleFailedStartup"),
-            new Frame(TICKING, "run", null, "changed by Mixin from Refixes (MixinTickingThread)"),
+            new Frame(TICKING, "run", null, label(false, "MixinTickingThread")),
             f("java.lang.Thread", "run"));
     }
 
@@ -130,10 +134,10 @@ class JfrModAttributionTest {
         JfrModAttribution mods = new JfrModAttribution();
         String world = "com.hypixel.hytale.server.core.universe.world.World";
         JfrModAttribution.Owners merged = owners(mods,
-            new Frame(world, "refixes$tickBudget", null, "Mixin code from Refixes (MixinWorld)"),
-            new Frame(world, "tick", null, "changed by Mixin from Refixes (MixinWorld)"));
+            new Frame(world, "refixes$tickBudget", null, label(true, "MixinWorld")),
+            new Frame(world, "tick", null, label(false, "MixinWorld")));
         JfrModAttribution.Owners target = owners(mods,
-            new Frame(world, "tick", null, "changed by Mixin from Refixes (MixinWorld)"),
+            new Frame(world, "tick", null, label(false, "MixinWorld")),
             new Frame("cc.irori.refixes.listener.WorldListener", "onTick", REFIXES, null));
 
         assertEquals("@Refixes", merged.self());

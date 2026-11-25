@@ -3157,6 +3157,69 @@ function mixinStackHtml(trace){
   const body=trace.map(l=>`<span class="stk${esc(l[1])}"${l[2]?` data-mod="${esc(l[2])}"`:""}>${esc(l[0])}</span>`).join("\n");
   return `<details class="mxstk"><summary>Stack trace <small>${esc(sum)}</small></summary><pre class="stk">${body}</pre></details>`;
 }
+const MOD_COST_NOTE="Counted on world thread samples. Mixin code on common pool threads is in its own table below when there is any, and other threads are not counted. Own Mixin code is the cost: the sample ran in code the mod's Mixins added to Hytale, in a class of the same JAR that code called, or in library code they called. Started by it adds the Hytale code those Mixins called, up to the point where they hand back to the code they wrapped. That is at most what the mod costs, since a redirect also counts the call it replaced. On the stack counts samples with any method the mod's Mixins changed or added. That shows where its hooks sit, not what they cost. Code the JAR runs as a normal plugin is in CPU by mod.";
+const MOD_COST_MIN_SAMPLES=300;
+const MOD_COST_LOW="Too few for shares, so the columns show sample counts.";
+const MOD_COST_POOL_NOTE="This is not world thread time. Hytale runs parallel entity ticking and chunk saving on the common pool, so a share here is a share of that work and does not add to the table above. The columns mean the same.";
+function modCostRows(){
+  const C=D.mixinCost;
+  if(!C||!C.worldSamples||!Array.isArray(C.rows)) return [];
+  return C.rows.filter(r=>r.own>0||r.started>0||r.reach>0);
+}
+function modCostName(r){return r.mod||(r.file?String(r.file).replace(/\.jar$/i,""):"unknown");}
+function modCostLabel(r,rows){const n=modCostName(r);return r.file&&rows.filter(x=>modCostName(x)===n).length>1?r.file:n;}
+function modCostPoolRows(){
+  const C=D.mixinCost;
+  return modCostRows().length&&C.poolSamples>0&&Array.isArray(C.poolRows)?C.poolRows.filter(r=>r.own>0||r.started>0):[];
+}
+function modCostLow(T){return (T===undefined?D.mixinCost.worldSamples:T)<MOD_COST_MIN_SAMPLES;}
+function modCostAmount(n,T){return modCostLow(T)?plural(fmt(n),"sample","samples"):`${fixed(pct(n,T===undefined?D.mixinCost.worldSamples:T),1)}%`;}
+function modCostMethod(m,T){return modCostLow(T)?modCostAmount(m[1],T):`${plural(fmt(m[1]),"sample","samples")}, ${modCostAmount(m[1],T)}`;}
+function modCostTable(rows,T,id,where){
+  const low=modCostLow(T);
+  const list=ms=>(ms||[]).length?`<ul class="stacklines">${ms.map(m=>`<li><span data-tipov="${esc(m[0])}">${esc(mixinLeaf(m[0]))}</span> ${modCostMethod(m,T)}</li>`).join("")}</ul>`:"";
+  const cell=n=>`<td class="r" data-num="${n}"${low?"":` data-tip="${esc(plural(fmt(n),"sample","samples"))}"`}>${modCostAmount(n,T)}</td>`;
+  const body=rows.map(r=>{
+    const hot=list(r.ownMethods), started=list(r.startedMethods), changed=list(r.changedMethods);
+    const more=adv("hot methods",(hot?`<div class="subnote">Own Mixin code</div>${hot}`:"")+(started?`<div class="subnote">Started by its Mixin code, at most</div>${started}`:"")+(changed?`<div class="subnote">Changed Hytale methods on the stack, not a cost</div>${changed}`:""));
+    return `<tr><td class="nm" data-sval="${esc(modCostName(r))}"><span class="tnc2" data-tipov="${esc(r.file||modCostName(r))}">${esc(modCostName(r))}</span>${r.file?`<div class="pkg">${esc(r.file)}</div>`:""}${more}</td>`
+      +cell(r.own)+cell(r.started)+cell(r.reach)+"</tr>";
+  }).join("");
+  const head=thc("Mod","Early plugin JAR whose Mixins added the code",{sort:"text"})
+    +thc("Own Mixin code",`${where} samples that ran in this mod's Mixin code or in a class of the same JAR that code called. This is the cost.`,{sort:"num",r:true,def:"desc"})
+    +thc("Started by it, at most","Adds the Hytale code its Mixin code called. At most what the mod costs, since a redirect also counts the call it replaced.",{sort:"num",r:true})
+    +thc("On the stack","A method the mod's Mixins changed or added was on the stack. This is not its cost.",{sort:"num",r:true});
+  return `<div class="tscroll"><table class="sortable" id="${id}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function modCostPoolLead(P){return modCostLow(P)?`Only ${fmt(P)} common pool samples. ${MOD_COST_LOW}`:`Shares of ${fmt(P)} common pool samples.`;}
+function modCostHtml(){
+  const C=D.mixinCost, rows=modCostRows();
+  if(!rows.length) return "";
+  const T=C.worldSamples, low=modCostLow(), pool=modCostPoolRows(), P=C.poolSamples;
+  const lead=low?`Only <b>${fmt(T)}</b> world thread samples. ${MOD_COST_LOW}`:`World thread CPU by early plugin JAR, from <b>${fmt(T)}</b> world thread samples.`;
+  return `<p class="lead">${lead}</p>${recordingScopeBadge()}<div class="subnote">${esc(MOD_COST_NOTE)}</div>`+modCostTable(rows,T,"mxc-t","World thread")
+    +(pool.length?`<h3 class="subh">On common pool threads, not world thread time</h3><div class="subnote">${esc(MOD_COST_POOL_NOTE)} ${modCostPoolLead(P)}</div>`+modCostTable(pool,P,"mxp-t","Common pool"):"");
+}
+function modCostMarkdown(){
+  const C=D.mixinCost, rows=modCostRows();
+  if(!rows.length) return [];
+  const L=[`## Mixin code by mod`,MOD_COST_NOTE,...(modCostLow()?[`Only ${fmt(C.worldSamples)} world thread samples. ${MOD_COST_LOW}`]:[]),"","| Mod | JAR | Own Mixin code | Started by it, at most | On the stack |","|---|---|---|---|---|"];
+  rows.forEach(r=>L.push(`| ${modCostName(r)} | ${r.file||"-"} | ${modCostAmount(r.own)} | ${modCostAmount(r.started)} | ${modCostAmount(r.reach)} |`));
+  rows.forEach(r=>{
+    const name=modCostLabel(r,rows), lines=ms=>ms.map(m=>`- ${m[0]} ${modCostMethod(m)}`);
+    if((r.ownMethods||[]).length) L.push("",`Own Mixin code of ${name}:`,...lines(r.ownMethods));
+    if((r.startedMethods||[]).length) L.push("",`Started by Mixin code of ${name}, at most:`,...lines(r.startedMethods));
+    if((r.changedMethods||[]).length) L.push("",`Changed methods of ${name} on the stack, not a cost:`,...lines(r.changedMethods));
+  });
+  const pool=modCostPoolRows(), P=C.poolSamples;
+  if(pool.length){
+    L.push("",`On common pool threads, not world thread time. ${modCostPoolLead(P)}`,"","| Mod | JAR | Own Mixin code | Started by it, at most | On the stack |","|---|---|---|---|---|");
+    pool.forEach(r=>L.push(`| ${modCostName(r)} | ${r.file||"-"} | ${modCostAmount(r.own,P)} | ${modCostAmount(r.started,P)} | ${modCostAmount(r.reach,P)} |`));
+  }
+  L.push("");
+  return L;
+}
+const MIXIN_APPLY_NOTE="Mixin apply time is spent once when a class loads, mostly at startup. It is not CPU while the server runs.";
 function mixinsHtml(){
   const M=D.mixins;
   if(!M) return "";
@@ -3188,17 +3251,18 @@ function mixinsHtml(){
     ["Hyinit startup",has(H.bootstrapMs)?`${fmt(H.bootstrapMs)} ms before Hytale started`:null]
   ].filter(r=>r[1]).map(r=>`<div class="row"><span class="k">${esc(r[0])}</span><span class="v">${esc(String(r[1]))}</span></div>`).join("");
   const card=`<div class="kvcard" style="margin-bottom:14px"><div class="kvh"><span class="ic">${I.layers}</span><b>Versions</b></div><div class="kv">${kv}</div></div>`;
+  const timed=sources.some(s=>has(s[9])), offs=sources.some(s=>has(s[10]));
   const srows=sources.map(s=>{
-    const [file,plugin,ver,sha,configs,main,skipped,compat,methods]=s;
+    const [file,plugin,ver,sha,configs,main,skipped,compat,methods,applyMs,off]=s;
     const tags=(skipped?` <span class="ovltag badtag" data-tip="The plugin was disabled at startup, so its Mixins were not applied.">Mixins skipped</span>`:"")
       +(compat?` <span class="ovltag" data-tip="Declared Mixin compatibility">compat ${esc(compat)}</span>`:"");
     const name=plugin?String(plugin).split(":").pop():String(file||"").replace(/\.jar$/i,"");
     const hp=plugin?(D.plugins||[]).find(p=>((p[0]?p[0]+":":"")+p[1]).toLowerCase()===String(plugin).toLowerCase()):null;
     const nameLink=hp&&hp[3]?esc(name):modNameLink(name,hp?hp[6]:null,plugin?name:name.replace(/-\d[\w.+-]*$/,"")||name);
-    return `<tr><td class="nm" data-sval="${esc(name)}">${nameLink}${tags}</td><td class="pkg">${esc(file||"·")}</td><td class="vtag">${esc(ver||"·")}</td><td data-sval="${esc(sha||"")}">${sha?`<span class="sha" data-tip="SHA-256 ${esc(sha)}">${esc(String(sha).slice(0,8))}</span>`:`<span class="pkg">·</span>`}</td><td class="r" data-num="${methods||0}">${has(methods)?fmt(methods):"·"}</td><td style="white-space:normal">${(configs||[]).map(c=>`<span class="mxchip">${esc(c)}</span>`).join(" ")}</td></tr>`;
+    return `<tr><td class="nm" data-sval="${esc(name)}">${nameLink}${tags}</td><td class="pkg">${esc(file||"·")}</td><td class="vtag">${esc(ver||"·")}</td><td data-sval="${esc(sha||"")}">${sha?`<span class="sha" data-tip="SHA-256 ${esc(sha)}">${esc(String(sha).slice(0,8))}</span>`:`<span class="pkg">·</span>`}</td><td class="r" data-num="${methods||0}">${has(methods)?fmt(methods):"·"}</td>${timed?`<td class="r" data-num="${applyMs||0}">${has(applyMs)?`${fmt(applyMs)} ms`:"·"}</td>`:""}${offs?`<td class="r" data-num="${off||0}">${has(off)?fmt(off):"·"}</td>`:""}<td style="white-space:normal">${(configs||[]).map(c=>`<span class="mxchip">${esc(c)}</span>`).join(" ")}</td></tr>`;
   }).join("");
   const stable=sources.length?`<div class="card" style="margin-bottom:14px"><h3><span class="ic">${I.layers}</span> Early plugin JARs</h3>
-    <div class="tscroll"><table class="sortable" id="mxs-t"><thead><tr>${thc("Mod","Plugin name from the JAR's manifest. Opens the mod website, or a CurseForge search when it has none.",{sort:"text"})}${thc("JAR","File name in the early plugins folder",{sort:"text"})}${thc("Version","Version from the JAR's manifest",{sort:"text"})}${thc("SHA-256","First 8 characters. Hover for the full checksum.",{sort:"text"})}${thc("Methods","Methods that this JAR's Mixins added or changed so far",{sort:"num",r:true,def:"desc"})}${thc("Mixin configs","Configs Hyinit registered from this JAR")}</tr></thead><tbody>${srows}</tbody></table></div></div>`:"";
+    <div class="tscroll"><table class="sortable" id="mxs-t"><thead><tr>${thc("Mod","Plugin name from the JAR's manifest. Opens the mod website, or a CurseForge search when it has none.",{sort:"text"})}${thc("JAR","File name in the early plugins folder",{sort:"text"})}${thc("Version","Version from the JAR's manifest",{sort:"text"})}${thc("SHA-256","First 8 characters. Hover for the full checksum.",{sort:"text"})}${thc("Methods","Methods that this JAR's Mixins added or changed so far",{sort:"num",r:true,def:"desc"})}${timed?thc("Mixin apply time",MIXIN_APPLY_NOTE,{sort:"num",r:true}):""}${offs?thc("Off by the mod's settings","Mixins the mod's own config plugin turned off, for example by a switch in its config file. They are not errors.",{sort:"num",r:true}):""}${thc("Mixin configs","Configs Hyinit registered from this JAR")}</tr></thead><tbody>${srows}</tbody></table></div>${timed?`<div class="subnote" style="margin:10px 0 0">${esc(MIXIN_APPLY_NOTE)}</div>`:""}</div>`:"";
   const crows=cfgs.map(c=>{
     const [name,mixins,source,pkg,targets,compat,priority,required]=c;
     const n=(mixins||[]).length;
@@ -3238,6 +3302,7 @@ const onlyHybox=(D.pluginMetrics||[]).length>0&&D.pluginMetrics.every(m=>/hybox/
 const html=[
   sec("metrics",I.pulse,"Key metrics","",metricsHtml()),
   sec("cpu",I.cpu,"CPU & load","",cpuHtml()),
+  sec("mixincode",I.layers,"Mixin code by mod",modCostRows().length?"world thread CPU by early plugin JAR":"",modCostHtml()),
   sec("engine",I.chip,"Engine systems","per-system tick wall time",engineHtml()),
   sec("flame",I.fire,"Flame graph","",flameHtml()+(methodsTable?`<details class="adv" id="methods"><summary>Top methods as a table <small>${(D.hotMethods||[]).length} methods</small></summary><div class="advbody">${methodsTable}</div></details>`:""),true),
   sec("memory",I.heap,"Memory & GC",DV.gcName?("heap + "+DV.gcName):"heap",memHtml()),
@@ -3520,6 +3585,7 @@ function buildMarkdown(){
     D.modCpu.slice(0,10).forEach(m=>L.push(`| ${m[0]} | ${fmt(m[1])} | ${fixed(pct(m[1],T),1)}% | ${m[2]||"-"} | ${(m[3]&&m[3].length)?m[3].map(t=>`${thName(t)} ${fixed((100*t[1]/Math.max(1,m[1])),0)}%`).join(", "):"-"} |`));
     L.push("");
   }
+  L.push(...modCostMarkdown());
   if(D.gcCauses&&D.gcCauses.length){
     L.push(`## GC causes`,"| Cause | Collections | Total pause ms |","|---|---|---|");
     D.gcCauses.forEach(c=>L.push(`| ${c[0]} | ${fmt(c[1])} | ${fixed(Number(c[2]),1)} |`));
@@ -3640,7 +3706,7 @@ function buildMarkdown(){
   if(D.mixins&&D.mixins.hyinit){
     const H=D.mixins.hyinit, probs=D.mixins.problems||[], ovl=D.mixins.overlaps||[];
     L.push(`## Mixins`,`Hyinit ${H.version||"?"} · Mixin ${H.mixin||"?"} · ${(D.mixins.sources||[]).length} early plugin JARs`);
-    (D.mixins.sources||[]).forEach(s=>L.push(`- ${s[1]?String(s[1]).split(":").pop():s[0]} ${s[2]||""} (${s[0]}${s[3]?`, sha256 ${String(s[3]).slice(0,8)}`:""})`));
+    (D.mixins.sources||[]).forEach(s=>L.push(`- ${s[1]?String(s[1]).split(":").pop():s[0]} ${s[2]||""} (${s[0]}${s[3]?`, sha256 ${String(s[3]).slice(0,8)}`:""})${has(s[9])?`, Mixin apply time ${fmt(s[9])} ms at class load`:""}${has(s[10])?`, ${fmt(s[10])} Mixins off by the mod's settings`:""}`));
     probs.forEach(p=>{
       L.push(`- ${String(p[0]).toUpperCase()}: ${p[1]}${p[2]?` (${p[2]})`:""}`);
       const frame=Array.isArray(p[4])?p[4].find(l=>l[1]==="m"):null;
@@ -3681,11 +3747,13 @@ function buildSummary(){
   const steps=g.steps.map((e,i)=>`${i+1}. ${findingText(e.spans)}`);
   const mods=T&&T>=300?modSplit(D.modCpu,4).filter(m=>m.self>0&&m.id!==CAPTURE_MOD&&!/^(com\.hypixel\.|Hytale:)/.test(m.id)).slice(0,3)
     .map(m=>`- ${m.id.slice(m.id.indexOf(":")+1)} ${fixed(pct(m.self,T),1)}% self, ${fixed(pct(m.total,T),1)}% total`):[];
-  const blocks=[head,ev.length?[g.cause||!g.why.length?"**Diagnosis**":"**Notable**",...ev]:[],steps.length?["**Next steps**",...steps]:[],mods.length?["**Mods by own CPU**",...mods]:[]];
+  const costRows=modCostRows().length&&!modCostLow()?modCostRows().filter(r=>r.own>0):[], mixinMods=costRows.slice(0,3)
+    .map(r=>`- ${modCostLabel(r,costRows)} ${modCostAmount(r.own)} of world thread samples in its own Mixin code`);
+  const blocks=[head,ev.length?[g.cause||!g.why.length?"**Diagnosis**":"**Notable**",...ev]:[],steps.length?["**Next steps**",...steps]:[],mods.length?["**Mods by own CPU**",...mods]:[],mixinMods.length?["**Mixin code by mod**",...mixinMods]:[]];
   const text=()=>blocks.filter(b=>b.length).map(b=>b.join("\n")).join("\n\n");
   let out=text();
   while(out.length>1990){
-    const b=[blocks[3],blocks[2],blocks[1]].find(x=>x.length>2);
+    const b=[blocks[4],blocks[3],blocks[2],blocks[1]].find(x=>x.length>2);
     if(!b) return out.slice(0,1989)+"…";
     b.pop(); out=text();
   }

@@ -38,6 +38,7 @@ final class HytaleMixins {
     private static final String SAVED_NOTE = "Saved when the crashed run started. Problems after startup are only in that run's server log.";
     private static final long COUNT_CACHE_MILLIS = 5_000;
     private static final int LABEL_CACHE_LIMIT = 20_000;
+    private static final FrameLabels.Label NO_LABEL = new FrameLabels.Label(false, List.of());
     private static final Gson GSON = new GsonBuilder().serializeNulls().setPrettyPrinting().create();
 
     private static final Pattern MIXIN_ARRAY =
@@ -95,12 +96,15 @@ final class HytaleMixins {
             number(snapshot.get("transformNanos")), number(snapshot.get("mixinTargetClasses")),
             number(snapshot.get("bootstrapMillis")), number(snapshot.get("problemsOmitted")));
         Map<String, Long> methodsBySource = methodMap == null ? null : methodsBySource(methodMap);
+        Map<?, ?> applyNanos = applyNanos(snapshot);
+        Map<String, Long> offBySettings = offBySettings(snapshot);
         List<MixinSection.Source> sources = new ArrayList<>();
         for (Map<?, ?> s : maps(snapshot.get("sources"))) {
             String file = string(s.get("file"));
             sources.add(new MixinSection.Source(file, string(s.get("pluginId")), string(s.get("version")),
                 string(s.get("sha256")), strings(s.get("configs")), bool(s.get("hasMain")), bool(s.get("mixinsSkipped")),
-                string(s.get("mixinCompatibility")), methodsBySource == null ? null : methodsBySource.getOrDefault(file, 0L)));
+                string(s.get("mixinCompatibility")), methodsBySource == null ? null : methodsBySource.getOrDefault(file, 0L),
+                number(applyNanos.get(file)), offBySettings.get(file)));
         }
         List<MixinSection.Config> configs = new ArrayList<>();
         for (Map<?, ?> c : maps(snapshot.get("configs"))) {
@@ -119,6 +123,23 @@ final class HytaleMixins {
             "Hyinit" + (version == null ? "" : " " + version), versions, sources, configs, problems, overlaps, note));
     }
 
+    private static Map<?, ?> applyNanos(Map<String, Object> snapshot) {
+        return snapshot.get("applyNanosBySource") instanceof Map<?, ?> map ? map : Map.of();
+    }
+
+    private static Map<String, Long> offBySettings(Map<String, Object> snapshot) {
+        Map<String, Set<String>> mixins = new LinkedHashMap<>();
+        for (Map<?, ?> skip : maps(snapshot.get("conditionSkips"))) {
+            String source = string(skip.get("source"));
+            if (source != null && "configPlugin".equals(string(skip.get("kind")))) {
+                mixins.computeIfAbsent(source, k -> new LinkedHashSet<>()).add(string(skip.get("mixin")));
+            }
+        }
+        Map<String, Long> out = new LinkedHashMap<>();
+        mixins.forEach((source, off) -> out.put(source, (long) off.size()));
+        return out;
+    }
+
     private static Map<String, Long> methodsBySource(Map<String, Map<String, List<Map<String, String>>>> methodMap) {
         Map<String, Long> out = new LinkedHashMap<>();
         for (Map<String, List<Map<String, String>>> methods : methodMap.values()) {
@@ -126,7 +147,7 @@ final class HytaleMixins {
                 Set<String> seen = new LinkedHashSet<>();
                 for (Map<String, String> entry : entries) {
                     String source = entry.get("source");
-                    if (source != null && seen.add(source)) {
+                    if (source != null && seen.add(source + '\n' + entry.get("descriptor"))) {
                         out.merge(source, 1L, Long::sum);
                     }
                 }
@@ -140,14 +161,18 @@ final class HytaleMixins {
         List<MixinSection.Overlap> out = new ArrayList<>();
         for (Map.Entry<String, Map<String, List<Map<String, String>>>> cls : new TreeMap<>(methodMap).entrySet()) {
             for (Map.Entry<String, List<Map<String, String>>> method : new TreeMap<>(cls.getValue()).entrySet()) {
-                Set<String> mods = new LinkedHashSet<>();
-                Set<MixinSection.Patch> patches = new LinkedHashSet<>();
+                Map<String, Set<MixinSection.Patch>> byOverload = new LinkedHashMap<>();
                 for (Map<String, String> entry : method.getValue()) {
-                    String mod = modName(entry.get("source"), modNames);
-                    mods.add(mod);
-                    patches.add(new MixinSection.Patch(mod, entry.get("mixin")));
+                    byOverload.computeIfAbsent(entry.get("descriptor"), k -> new LinkedHashSet<>())
+                        .add(new MixinSection.Patch(modName(entry.get("source"), modNames), entry.get("mixin")));
                 }
-                if (mods.size() > 1) {
+                Set<MixinSection.Patch> patches = new LinkedHashSet<>();
+                for (Set<MixinSection.Patch> overload : byOverload.values()) {
+                    if (overload.stream().map(MixinSection.Patch::mod).distinct().count() > 1) {
+                        patches.addAll(overload);
+                    }
+                }
+                if (!patches.isEmpty()) {
                     out.add(new MixinSection.Overlap(cls.getKey() + "." + method.getKey(), List.copyOf(patches)));
                 }
             }
@@ -180,41 +205,48 @@ final class HytaleMixins {
         return stripped.isEmpty() ? base : stripped;
     }
 
-    static String label(List<Map<String, String>> entries, Map<String, String> modNames) {
+    static FrameLabels.Label label(List<Map<String, String>> entries, Map<String, String> modNames) {
         if (entries == null || entries.isEmpty()) {
             return null;
         }
         boolean merged = true;
-        Map<String, Set<String>> byMod = new LinkedHashMap<>();
+        Map<String, Set<String>> byJar = new LinkedHashMap<>();
         for (Map<String, String> entry : entries) {
             merged &= "merged".equals(entry.get("kind"));
             String mixin = entry.get("mixin");
-            byMod.computeIfAbsent(modName(entry.get("source"), modNames), k -> new LinkedHashSet<>())
+            String source = entry.get("source");
+            byJar.computeIfAbsent(source == null || source.isBlank() ? null : source, k -> new LinkedHashSet<>())
                 .add(mixin == null ? "?" : mixin.substring(mixin.lastIndexOf('.') + 1));
         }
-        List<String> parts = new ArrayList<>(byMod.size());
-        byMod.forEach((mod, mixins) -> parts.add(mod + " (" + String.join(", ", mixins) + ")"));
-        return (merged ? "Mixin code from " : "changed by Mixin from ") + String.join(", ", parts);
+        List<FrameLabels.Origin> origins = new ArrayList<>(byJar.size());
+        byJar.forEach((jar, mixins) -> origins.add(new FrameLabels.Origin(modName(jar, modNames), jar, List.copyOf(mixins))));
+        return new FrameLabels.Label(merged, origins);
     }
 
     static FrameLabels.Source labels(HyinitReader reader) {
         if (!reader.present()) {
             return null;
         }
-        Map<String, String> cache = new ConcurrentHashMap<>();
+        Map<String, FrameLabels.Label> cache = new ConcurrentHashMap<>();
         AtomicReference<Map<String, String>> names = new AtomicReference<>();
-        return (className, methodName) -> {
-            String key = className + '#' + methodName;
-            String cached = cache.get(key);
+        return (className, methodName, descriptor, line) -> {
+            String overload = !reader.knowsOverloads() ? "" : descriptor != null ? descriptor
+                : line > 0 ? Integer.toString(line) : "";
+            String key = className + '#' + methodName + '#' + overload;
+            FrameLabels.Label cached = cache.get(key);
             if (cached != null) {
-                return cached.isEmpty() ? null : cached;
+                return cached == NO_LABEL ? null : cached;
             }
-            List<Map<String, String>> entries = reader.mixinsFor(className, methodName);
+            List<Map<String, String>> entries = atLine(reader.mixinsFor(className, methodName, descriptor),
+                descriptor == null ? line : 0);
             String original = FrameLabels.originalMethod(methodName);
             if (entries.isEmpty() && !original.equals(methodName)) {
-                entries = reader.mixinsFor(className, original);
+                entries = reader.mixinsFor(className, original, descriptor);
+                if (entries.isEmpty() && descriptor != null) {
+                    entries = reader.mixinsFor(className, original, null);
+                }
             }
-            String label = null;
+            FrameLabels.Label label = null;
             if (!entries.isEmpty()) {
                 Map<String, String> mods = names.get();
                 if (mods == null) {
@@ -227,9 +259,32 @@ final class HytaleMixins {
             if (cache.size() >= LABEL_CACHE_LIMIT) {
                 cache.clear();
             }
-            cache.put(key, label == null ? "" : label);
+            cache.put(key, label == null ? NO_LABEL : label);
             return label;
         };
+    }
+
+    private static List<Map<String, String>> atLine(List<Map<String, String>> entries, int line) {
+        if (line <= 0 || entries.isEmpty()) {
+            return entries;
+        }
+        List<Map<String, String>> out = new ArrayList<>(entries.size());
+        for (Map<String, String> entry : entries) {
+            Long first = lineNumber(entry.get("firstLine"));
+            Long last = lineNumber(entry.get("lastLine"));
+            if (first == null || last == null || first <= line && line <= last) {
+                out.add(entry);
+            }
+        }
+        return out;
+    }
+
+    private static Long lineNumber(String value) {
+        try {
+            return value == null ? null : Long.valueOf(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     static ProblemCounts problemCounts() {
@@ -278,6 +333,8 @@ final class HytaleMixins {
 
         out.append("Early plugin JARs\n");
         Map<String, Long> methodsBySource = methodsBySource(methodMap);
+        Map<?, ?> applyNanos = applyNanos(snapshot);
+        Map<String, Long> offBySettings = offBySettings(snapshot);
         for (Map<?, ?> s : maps(snapshot.get("sources"))) {
             String file = string(s.get("file"));
             out.append("  ").append(file)
@@ -285,6 +342,13 @@ final class HytaleMixins {
                 .append("  version ").append(text(s.get("version")))
                 .append("  sha256 ").append(text(s.get("sha256")))
                 .append("  methods ").append(methodsBySource.getOrDefault(file, 0L));
+            Long apply = number(applyNanos.get(file));
+            if (apply != null) {
+                out.append("  Mixin apply time ").append(apply / 1_000_000).append(" ms");
+            }
+            if (offBySettings.containsKey(file)) {
+                out.append("  off by the mod's settings ").append(offBySettings.get(file));
+            }
             if (Boolean.TRUE.equals(bool(s.get("mixinsSkipped")))) {
                 out.append("  Mixins skipped");
             }
@@ -346,7 +410,9 @@ final class HytaleMixins {
         }
 
         out.append("\nChanged methods. merged: Mixin code added to the class. changed: an original method that calls Mixin code.\n");
-        out.append("Columns: method, kind, Mixin, config, JAR\n");
+        boolean overloads = methodMap.values().stream().flatMap(methods -> methods.values().stream())
+            .flatMap(List::stream).anyMatch(entry -> entry.get("descriptor") != null);
+        out.append("Columns: method, kind, Mixin, config, JAR").append(overloads ? ", descriptor, lines\n" : "\n");
         for (Map.Entry<String, Map<String, List<Map<String, String>>>> cls : new TreeMap<>(methodMap).entrySet()) {
             out.append('\n').append(cls.getKey()).append('\n');
             for (Map.Entry<String, List<Map<String, String>>> method : new TreeMap<>(cls.getValue()).entrySet()) {
@@ -355,7 +421,14 @@ final class HytaleMixins {
                         .append("  ").append(text(entry.get("kind")))
                         .append("  ").append(text(entry.get("mixin")))
                         .append("  ").append(text(entry.get("config")))
-                        .append("  ").append(text(entry.get("source"))).append('\n');
+                        .append("  ").append(text(entry.get("source")));
+                    if (overloads) {
+                        String first = entry.get("firstLine");
+                        String last = entry.get("lastLine");
+                        out.append("  ").append(text(entry.get("descriptor")))
+                            .append("  ").append(first == null || last == null ? "-" : first + "-" + last);
+                    }
+                    out.append('\n');
                 }
             }
         }

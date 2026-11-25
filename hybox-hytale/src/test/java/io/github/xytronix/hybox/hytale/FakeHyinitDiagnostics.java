@@ -52,16 +52,113 @@ public final class FakeHyinitDiagnostics {
     }
 
     public static Map<String, Map<String, List<Map<String, String>>>> methodMap() {
+        return methodMap(false);
+    }
+
+    static Map<String, Map<String, List<Map<String, String>>>> methodMap(boolean overloads) {
+        Shape shape = new Shape(overloads);
         return Map.of(
-            "com.hypixel.hytale.server.core.universe.world.World", Map.of(
+            WORLD, Map.of(
                 "tick", List.of(
-                    entry("cc.irori.refixes.early.mixin.MixinWorld", "refixes.mixins.json", "refixes-0.6.1.jar", "changed"),
-                    entry("com.example.region.mixin.WorldMixin", "region_manager.mixins.json", "RegionManagerMixin-1.5.0.jar", "changed")),
+                    shape.entry("cc.irori.refixes.early.mixin.MixinWorld", REFIXES, "changed", "(F)V", "100", "140"),
+                    shape.entry("com.example.region.mixin.WorldMixin", REGION, "changed", "(F)V", "100", "140")),
+                "unload", List.of(
+                    shape.entry("cc.irori.refixes.early.mixin.MixinWorld", REFIXES, "changed", "()V", "200", "210"),
+                    shape.entry("com.example.region.mixin.WorldMixin", REGION, "changed", "(Z)V", "220", "240")),
                 "handler$zej000$refixesjar$refixes$tick", List.of(
-                    entry("cc.irori.refixes.early.mixin.MixinWorld", "refixes.mixins.json", "refixes-0.6.1.jar", "merged"))),
+                    shape.entry("cc.irori.refixes.early.mixin.MixinWorld", REFIXES, "merged", "(F)V", null, null))),
             "com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk", Map.of(
                 "load", List.of(
-                    entry("cc.irori.refixes.early.mixin.MixinChunk", "refixes.mixins.json", "refixes-0.6.1.jar", "changed"))));
+                    shape.entry("cc.irori.refixes.early.mixin.MixinChunk", REFIXES, "changed", "()V", "20", "30"))),
+            MixinOverloads.class.getName(), Map.of(
+                "work", List.of(
+                    shape.entry("cc.irori.refixes.early.mixin.MixinOverloads", REFIXES, "merged", "(J)J", null, null))));
+    }
+
+    static final String WORLD = "com.hypixel.hytale.server.core.universe.world.World";
+    private static final String REFIXES = "refixes-0.6.1.jar";
+    private static final String REGION = "RegionManagerMixin-1.5.0.jar";
+
+    private record Shape(boolean overloads) {
+        Map<String, String> entry(String mixin, String source, String kind, String descriptor, String first, String last) {
+            Map<String, String> out = new LinkedHashMap<>();
+            out.put("mixin", mixin);
+            out.put("config", source.equals(REFIXES) ? "refixes.mixins.json" : "region_manager.mixins.json");
+            out.put("source", source);
+            out.put("kind", kind);
+            if (overloads) {
+                out.put("descriptor", descriptor);
+                out.put("firstLine", first);
+                out.put("lastLine", last);
+            }
+            return out;
+        }
+    }
+
+    public static final class MixinOverloads {
+        private MixinOverloads() {
+        }
+
+        public static long work(long millis) {
+            long end = System.nanoTime() + millis * 1_000_000;
+            long sum = 0;
+            while (System.nanoTime() < end) {
+                sum += Long.numberOfTrailingZeros(sum + end);
+            }
+            return sum;
+        }
+
+        public static long work(long millis, int seed) {
+            long end = System.nanoTime() + millis * 1_000_000;
+            long sum = seed;
+            while (System.nanoTime() < end) {
+                sum += Long.numberOfLeadingZeros(sum ^ end);
+            }
+            return sum;
+        }
+    }
+
+    public static final class Overloads {
+        private Overloads() {
+        }
+
+        public static int apiVersion() {
+            return 2;
+        }
+
+        public static Map<String, Object> snapshot() {
+            Map<String, Object> out = FakeHyinitDiagnostics.snapshot();
+            out.put("applyNanosBySource", Map.of(REFIXES, 221_289_712L, "Hyinit-0.5.0.jar", 29_034_756L));
+            out.put("conditionSkips", List.of(skip("a.MixinA", null, "configPlugin"), skip("a.MixinB", null, "configPlugin"),
+                skip("a.MixinB", null, "configPlugin"), skip("a.MixinC", "onTick", "condition"),
+                skip("a.MixinD", null, "requirement")));
+            return out;
+        }
+
+        private static Map<String, Object> skip(String mixin, String method, String kind) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("mixin", mixin);
+            out.put("method", method);
+            out.put("field", null);
+            out.put("source", REFIXES);
+            out.put("kind", kind);
+            out.put("condition", kind.equals("configPlugin") ? "config plugin a.Plugin" : "@IfHytale >=0.8.0");
+            return out;
+        }
+
+        public static List<Map<String, String>> mixinsFor(String className, String methodName) {
+            return mixinsFor(className, methodName, null);
+        }
+
+        public static List<Map<String, String>> mixinsFor(String className, String methodName, String descriptor) {
+            Map<String, List<Map<String, String>>> methods = methodMap().get(className.replace('/', '.'));
+            List<Map<String, String>> entries = methods == null ? List.of() : methods.getOrDefault(methodName, List.of());
+            return entries.stream().filter(e -> descriptor == null || descriptor.equals(e.get("descriptor"))).toList();
+        }
+
+        public static Map<String, Map<String, List<Map<String, String>>>> methodMap() {
+            return FakeHyinitDiagnostics.methodMap(true);
+        }
     }
 
     private static Map<String, Object> source(String file, String pluginId, String version, String sha, List<String> configs) {
@@ -75,10 +172,6 @@ public final class FakeHyinitDiagnostics {
         out.put("sha256", sha);
         out.put("configs", configs);
         return out;
-    }
-
-    private static Map<String, String> entry(String mixin, String config, String source, String kind) {
-        return Map.of("mixin", mixin, "config", config, "source", source, "kind", kind);
     }
 
     public static final class Throwing {

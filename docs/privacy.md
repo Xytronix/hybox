@@ -15,7 +15,7 @@ A bundle describes your server in detail. Review it before you share it. See [Sh
 | `extras/threads.txt`, `extras/threads-<n>.txt` | Thread dumps. A frame that a Mixin added or changed ends with the mod and Mixin, such as `[changed by Mixin from Refixes (MixinWorld)]`. | `threads` |
 | `extras/server.txt` | Server name, Hytale version and a hosting-plugin presence flag. | `server` |
 | `extras/plugins.txt` | Identifier, version and name of every plugin. | `plugins` |
-| `extras/mixins.txt` | With a Hyinit that has the diagnostics API: Hyinit and Mixin versions, every early plugin JAR with its full SHA-256, Mixin configs, Mixin problems with their stack traces when Hyinit recorded them, and every method a Mixin added or changed, with the Mixin, config and JAR. File names only, no paths. | `plugins` |
+| `extras/mixins.txt` | With Hyinit 0.5.0 or newer: Hyinit and Mixin versions, every early plugin JAR with its full SHA-256, its Mixin apply time and the number of Mixins off by the mod's settings, Mixin configs, Mixin problems with their stack traces when Hyinit recorded them, and every method a Mixin added or changed, with the Mixin, config, JAR, descriptor and line range. File names only, no paths. | `plugins` |
 | `extras/worlds.txt` | Default world name and its player count. | `worlds` |
 | `extras/heartbeats.txt` | Last heartbeat time of each world. | `heartbeats` |
 | `extras/server-log.txt` | Tail of the newest file in `logs/`, up to `Capture.LogTailLines` lines and 256 KiB, with [chat and command arguments hidden](#chat-and-commands). | `serverLog` and `Capture.IncludeServerLog` |
@@ -28,8 +28,8 @@ Hybox writes these only when `report` is in `Capture.Artifacts`.
 
 | Section | Contents and condition |
 | --- | --- |
-| Environment, Plugins, Asset packs | Server name, Hytale version, container runtime, Mixin loaders such as Hyxin or an older Hyinit, loaded plugins and asset packs. |
-| Mixins | The same details as `extras/mixins.txt`, plus methods changed by more than one mod. With an older Hyinit: its version and the line "Update Hyinit for Mixin details". With another Mixin loader: its version, each registered Mixin config with its Mixin classes, and classes changed by more than one config. |
+| Environment, Plugins, Asset packs | Server name, Hytale version, container runtime, Mixin loaders such as Hyxin, loaded plugins and asset packs. |
+| Mixins | The same details as `extras/mixins.txt`, plus methods changed by more than one mod. With another Mixin loader: its version, each registered Mixin config with its Mixin classes, and classes changed by more than one config. |
 | Tick systems, Entities, Heartbeats, Thread progress, Memory pools, Stalled thread, Deadlock cycle | Engine, JVM and thread state. |
 | Start command | JVM and program arguments with paths shortened and [private arguments](#paths-and-start-arguments) hidden. It comes from the recording. |
 | Heap histogram | Class names, instance counts and sizes. With `Capture.HeapHistogram`. |

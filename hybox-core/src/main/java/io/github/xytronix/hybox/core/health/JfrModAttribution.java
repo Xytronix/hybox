@@ -72,6 +72,10 @@ final class JfrModAttribution {
         return false;
     }
 
+    static boolean hytale(String type) {
+        return type.startsWith(HYTALE_PREFIX);
+    }
+
     static String packageId(String type) {
         String clean = JfrTimelineParser.cleanType(type);
         int first = clean.indexOf('.');
@@ -84,10 +88,6 @@ final class JfrModAttribution {
         }
         int third = clean.indexOf('.', second + 1);
         return third < 0 ? clean : clean.substring(0, third);
-    }
-
-    static boolean mixinCode(String methodName, String label) {
-        return FrameLabels.mixinCodeMod(label) != null || FrameLabels.mixinJar(methodName) != null;
     }
 
     static boolean captureThread(String thread) {
@@ -105,7 +105,7 @@ final class JfrModAttribution {
     }
 
     String classOwner(String type, RecordedClassLoader loader) {
-        if (type == null || isLibrary(type) || type.startsWith(HYTALE_PREFIX)) {
+        if (type == null || isLibrary(type) || hytale(type)) {
             return null;
         }
         return observe(type, loaderId(loader));
@@ -141,19 +141,22 @@ final class JfrModAttribution {
         int size = frames.size();
         String[] types = new String[size];
         String[] names = new String[size];
+        String[] descriptors = new String[size];
         for (int i = 0; i < size; i++) {
             RecordedFrame frame = frames.get(i);
             RecordedMethod method = frame.isJavaFrame() ? frame.getMethod() : null;
             if (method != null) {
                 types[i] = method.getType().getName();
                 names[i] = method.getName();
+                descriptors[i] = method.getDescriptor();
             }
         }
-        return owners(types, names, i -> FrameLabels.label(JfrTimelineParser.cleanType(types[i]), names[i]),
+        return owners(types, names,
+            i -> FrameLabels.find(JfrTimelineParser.cleanType(types[i]), names[i], descriptors[i], 0),
             i -> loaderId(frames.get(i)));
     }
 
-    static int selfFrame(String[] types, String[] names, IntFunction<String> labelOf) {
+    static int selfFrame(String[] types, String[] names, IntFunction<FrameLabels.Label> labelOf) {
         for (int i = 0; i < types.length; i++) {
             if (types[i] != null && (!isLibrary(types[i]) || mixinId(names[i], labelOf.apply(i)) != null)) {
                 return i;
@@ -162,7 +165,8 @@ final class JfrModAttribution {
         return -1;
     }
 
-    Owners owners(String[] types, String[] names, IntFunction<String> labelOf, IntFunction<String> loaderOf) {
+    Owners owners(String[] types, String[] names, IntFunction<FrameLabels.Label> labelOf,
+                  IntFunction<String> loaderOf) {
         String nearest = null;
         String nearestMethod = null;
         String self = null;
@@ -175,7 +179,7 @@ final class JfrModAttribution {
             if (type == null) {
                 continue;
             }
-            boolean engine = isLibrary(type) || type.startsWith(HYTALE_PREFIX);
+            boolean engine = isLibrary(type) || hytale(type);
             String id;
             if (engine) {
                 id = mixinId(names[i], labelOf.apply(i));
@@ -366,10 +370,10 @@ final class JfrModAttribution {
         return best;
     }
 
-    private static String mixinId(String methodName, String label) {
-        String mod = FrameLabels.mixinCodeMod(label);
-        if (mod != null) {
-            return LABEL_MARK + mod;
+    private static String mixinId(String methodName, FrameLabels.Label label) {
+        FrameLabels.Origin origin = FrameLabels.mergedBy(label, methodName);
+        if (origin != null) {
+            return LABEL_MARK + origin.mod();
         }
         String jar = FrameLabels.mixinJar(methodName);
         return jar == null ? null : JAR_MARK + jar;

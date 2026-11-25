@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.0
+
+### Upgrading
+
+- Mixin code by mod, exact overloads, Mixin apply time and the count of Mixins off by the mod's settings need Hyinit 0.5.0 or newer.
+
+### Added
+
+- Mixin code by mod in the report and on the in-game CPU page shows the share of world thread samples that ran in the code each early plugin JAR adds to Hytale with its Mixins.
+- Each mod there also shows at most how much it costs with the Hytale code its Mixin code called, how often a method it changed was on the stack and its busiest Mixin methods.
+- Mixin code by mod also lists the Mixin code that ran on common pool threads in a second table that is labelled as not world thread time.
+- The Mixins section in the report and in game shows the Mixin apply time of each early plugin JAR, which is spent once when a class loads and is not CPU while the server runs.
+- The Mixins section shows how many Mixins of each early plugin JAR are off by the mod's settings.
+- Mixin labels and Mixin code by mod follow the exact overload a Mixin changed, matched by method descriptor in recordings and by line number in stack traces and thread dumps.
+
+### Privacy
+
+- `extras/mixins.txt` also lists the Mixin apply time and the Mixins off by settings of each early plugin JAR and the descriptor and line range of each changed method.
+
 ## 1.2.0
 
 ### Upgrading

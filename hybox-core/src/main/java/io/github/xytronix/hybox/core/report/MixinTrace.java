@@ -2,11 +2,9 @@ package io.github.xytronix.hybox.core.report;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 final class MixinTrace {
     static final String HEADER = "h";
@@ -20,32 +18,18 @@ final class MixinTrace {
 
     record Line(String text, String kind, String mod) {}
 
-    private final Map<String, String> packageMods = new HashMap<>();
+    private final Map<String, String> modsByFile = new HashMap<>();
+    private final MixinPackages packages;
     private final ReportAttribution attribution;
 
     MixinTrace(List<MixinSection.Config> configs, List<MixinSection.Source> sources, ReportAttribution attribution) {
         this.attribution = attribution;
-        Map<String, String> modsByFile = new HashMap<>();
+        this.packages = new MixinPackages(configs);
         for (MixinSection.Source source : sources) {
             if (source.file() != null && source.pluginId() != null) {
                 modsByFile.put(source.file(), shortName(source.pluginId()));
             }
         }
-        Set<String> ambiguous = new HashSet<>();
-        for (MixinSection.Config config : configs) {
-            String pkg = config.mixinPackage();
-            if (pkg == null || pkg.isBlank() || config.source() == null || muted(pkg + ".") || pkg.startsWith(HYTALE)) {
-                continue;
-            }
-            String mod = modsByFile.getOrDefault(config.source(), fileName(config.source()));
-            for (String prefix : List.of(pkg, root(pkg))) {
-                String previous = packageMods.putIfAbsent(prefix, mod);
-                if (previous != null && !previous.equals(mod)) {
-                    ambiguous.add(prefix);
-                }
-            }
-        }
-        ambiguous.forEach(packageMods::remove);
     }
 
     List<Line> lines(String trace) {
@@ -73,11 +57,9 @@ final class MixinTrace {
         if (type.startsWith(HYTALE)) {
             return null;
         }
-        for (int dot = type.lastIndexOf('.'); dot > 0; dot = type.lastIndexOf('.', dot - 1)) {
-            String mod = packageMods.get(type.substring(0, dot));
-            if (mod != null) {
-                return mod;
-            }
+        String jar = packages.jar(type);
+        if (jar != null) {
+            return modsByFile.getOrDefault(jar, fileName(jar));
         }
         String owner = attribution == null ? null : attribution.owner(type);
         return owner == null || owner.equals(ReportAttribution.HYINIT) ? null : shortName(owner);
@@ -98,17 +80,6 @@ final class MixinTrace {
             }
         }
         return false;
-    }
-
-    private static String root(String pkg) {
-        int dot = -1;
-        for (int i = 0; i < 3; i++) {
-            dot = pkg.indexOf('.', dot + 1);
-            if (dot < 0) {
-                return pkg;
-            }
-        }
-        return pkg.substring(0, dot);
     }
 
     private static String shortName(String id) {

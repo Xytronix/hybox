@@ -119,9 +119,10 @@ public final class StalledThread {
         if (info.getLockOwnerName() != null) {
             entries.put("Lock owner", info.getLockOwnerName() + " (#" + info.getLockOwnerId() + ")");
         }
-        String suspect = topSuspectFrame(info.getStackTrace(), frameworkPrefixes);
+        StackTraceElement suspect = topSuspectFrame(info.getStackTrace(), frameworkPrefixes);
         if (suspect != null) {
-            entries.put(FRAME_KEY, FrameLabels.display(suspect));
+            entries.put(FRAME_KEY, FrameLabels.display(suspect.getClassName() + "." + suspect.getMethodName(),
+                suspect.getLineNumber()));
         }
         String stallMs = event.attrs().get("stallMs");
         if (stallMs != null) {
@@ -130,20 +131,19 @@ public final class StalledThread {
         return new DiagnosticSection(title, entries, renderStack(info.getStackTrace()));
     }
 
-    static String topSuspectFrame(StackTraceElement[] stack, Collection<String> frameworkPrefixes) {
-        String lockSite = null;
+    static StackTraceElement topSuspectFrame(StackTraceElement[] stack, Collection<String> frameworkPrefixes) {
+        StackTraceElement lockSite = null;
         for (StackTraceElement frame : stack) {
             String cls = frame.getClassName();
             if (cls.startsWith("java.") || cls.startsWith("jdk.") || cls.startsWith("sun.")
                 || cls.startsWith("io.github.xytronix.hybox.")) {
                 continue;
             }
-            String name = frame.getClassName() + "." + frame.getMethodName();
             if (lockSite == null) {
-                lockSite = name;
+                lockSite = frame;
             }
             if (!matchesPrefix(cls, frameworkPrefixes)) {
-                return name;
+                return frame;
             }
         }
         return lockSite;

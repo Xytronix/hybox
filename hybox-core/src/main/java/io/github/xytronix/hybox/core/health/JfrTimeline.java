@@ -82,6 +82,18 @@ public final class JfrTimeline {
 
     public record ModShare(long samples, long self, long total) {}
 
+    public record MixinHit(String kind, String key, String method, List<String> ownClasses, long samples) {}
+
+    public record MixinCost(long samples, List<MixinHit> hits) {
+        public static final String OWN = "own";
+        public static final String STARTED = "started";
+        public static final String REACH = "reach";
+        public static final String CHANGED = "changed";
+        public static final String KEY_SEPARATOR = "\n";
+        public static final String ID_KEY = "#";
+        public static final String FILE_KEY = "@";
+    }
+
     public record NetIface(String iface, double inAvg, double inPeak, double outAvg, double outPeak) {}
 
     public record SliceFrame(String method, String mod) {}
@@ -172,6 +184,8 @@ public final class JfrTimeline {
     private final List<IncidentMarker> incidentMarkers;
     private final JfrSamples samples;
     private final long[] postGcHeap;
+    private final MixinCost mixinCost;
+    private final MixinCost poolMixinCost;
 
     JfrTimeline(Instant start, Instant end, long totalSamples, CpuStats cpu,
                 double[] cpuMachineSeries, double[] cpuJvmSeries, long[] heapSeries, long[] rssSeries,
@@ -198,7 +212,8 @@ public final class JfrTimeline {
                 long swapFree, long swapTotal, List<NetIface> netOthers,
                 HostCpu hostCpu, Safepoint safepoint, List<ModAction> modActions, List<ModSettings> modSettings,
                 Map<String, Integer> threadGroupSizes, Slices slices, List<GcPause> gcPauses, Swap swap,
-                List<LockWait> lockWaits, List<IncidentMarker> incidentMarkers, JfrSamples samples, long[] postGcHeap) {
+                List<LockWait> lockWaits, List<IncidentMarker> incidentMarkers, JfrSamples samples, long[] postGcHeap,
+                MixinCost mixinCost, MixinCost poolMixinCost) {
         this.start = start;
         this.end = end;
         this.totalSamples = totalSamples;
@@ -277,6 +292,8 @@ public final class JfrTimeline {
         this.incidentMarkers = incidentMarkers;
         this.samples = samples;
         this.postGcHeap = postGcHeap;
+        this.mixinCost = mixinCost;
+        this.poolMixinCost = poolMixinCost;
     }
 
     public static JfrTimeline parse(Path recording) {
@@ -365,4 +382,6 @@ public final class JfrTimeline {
     public List<IncidentMarker> incidentMarkers() { return incidentMarkers; }
     public JfrSamples samples() { return samples; }
     public long[] postGcHeap() { return postGcHeap; }
+    public MixinCost mixinCost() { return mixinCost; }
+    public MixinCost poolMixinCost() { return poolMixinCost; }
 }

@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import io.github.xytronix.hybox.core.health.FrameLabels;
 import io.github.xytronix.hybox.core.health.HealthSnapshot;
 import io.github.xytronix.hybox.core.incident.DiagnosticSection;
 import io.github.xytronix.hybox.core.incident.IncidentId;
@@ -298,6 +299,16 @@ class ReportHtmlTest {
         String raw = render(report(null, List.of(new DiagnosticSection("Stalled thread", Map.of("State", "TIMED_WAITING",
             "Blocked in", "com.x.TickingThread.run$mixinextras$wrapped$39"), "at x"))));
         assertTrue(raw.contains("Waiting in <code>com.x.TickingThread.run</code></div>"));
+
+        try {
+            FrameLabels.install((className, methodName, descriptor, line) -> new FrameLabels.Label(false,
+                List.of(new FrameLabels.Origin("Refixes", "refixes.jar", List.of("MixinTickSleep")))));
+            String plain = render(report(null, List.of(new DiagnosticSection("Stalled thread", Map.of("State", "BLOCKED",
+                "Blocked in", "com.x.TickingThread.run"), "at x"))));
+            assertTrue(plain.contains("Blocked in <code>com.x.TickingThread.run</code></div>"), "the capture decided by line");
+        } finally {
+            FrameLabels.install(null);
+        }
     }
 
     @Test

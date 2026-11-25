@@ -14,13 +14,16 @@ final class HyinitReader {
     private final boolean classMissing;
     private final Method snapshot;
     private final Method mixinsFor;
+    private final Method mixinsForOverload;
     private final Method methodMap;
     private final AtomicBoolean failureLogged = new AtomicBoolean();
 
-    private HyinitReader(boolean classMissing, Method snapshot, Method mixinsFor, Method methodMap) {
+    private HyinitReader(boolean classMissing, Method snapshot, Method mixinsFor, Method mixinsForOverload,
+                         Method methodMap) {
         this.classMissing = classMissing;
         this.snapshot = snapshot;
         this.mixinsFor = mixinsFor;
+        this.mixinsForOverload = mixinsForOverload;
         this.methodMap = methodMap;
     }
 
@@ -39,20 +42,32 @@ final class HyinitReader {
             Object version = api.getMethod("apiVersion").invoke(null);
             if (!(version instanceof Integer number) || number < 1) {
                 LOGGER.log(System.Logger.Level.DEBUG, "Hyinit diagnostics API version " + version + " is not supported.");
-                return new HyinitReader(false, null, null, null);
+                return new HyinitReader(false, null, null, null, null);
             }
             return new HyinitReader(false, api.getMethod("snapshot"),
-                api.getMethod("mixinsFor", String.class, String.class), api.getMethod("methodMap"));
+                api.getMethod("mixinsFor", String.class, String.class), overloadLookup(api), api.getMethod("methodMap"));
         } catch (ClassNotFoundException e) {
-            return new HyinitReader(true, null, null, null);
+            return new HyinitReader(true, null, null, null, null);
         } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
             LOGGER.log(System.Logger.Level.DEBUG, "Hyinit diagnostics are not readable.", e);
-            return new HyinitReader(false, null, null, null);
+            return new HyinitReader(false, null, null, null, null);
+        }
+    }
+
+    private static Method overloadLookup(Class<?> api) {
+        try {
+            return api.getMethod("mixinsFor", String.class, String.class, String.class);
+        } catch (NoSuchMethodException e) {
+            return null;
         }
     }
 
     boolean present() {
         return snapshot != null;
+    }
+
+    boolean knowsOverloads() {
+        return mixinsForOverload != null;
     }
 
     boolean classMissing() {
@@ -65,8 +80,10 @@ final class HyinitReader {
     }
 
     @SuppressWarnings("unchecked")
-    List<Map<String, String>> mixinsFor(String className, String methodName) {
-        List<Map<String, String>> entries = (List<Map<String, String>>) call(mixinsFor, List.class, className, methodName);
+    List<Map<String, String>> mixinsFor(String className, String methodName, String descriptor) {
+        List<Map<String, String>> entries = (List<Map<String, String>>) (descriptor == null || mixinsForOverload == null
+            ? call(mixinsFor, List.class, className, methodName)
+            : call(mixinsForOverload, List.class, className, methodName, descriptor));
         return entries == null ? List.of() : entries;
     }
 

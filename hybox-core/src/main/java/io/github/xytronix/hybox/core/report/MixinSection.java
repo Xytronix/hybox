@@ -39,7 +39,8 @@ public final class MixinSection {
                            Long problemsOmitted) {}
 
     public record Source(String file, String pluginId, String version, String sha256, List<String> configs,
-                         Boolean hasMain, Boolean mixinsSkipped, String compatibility, Long methods) {}
+                         Boolean hasMain, Boolean mixinsSkipped, String compatibility, Long methods, Long applyNanos,
+                         Long offBySettings) {}
 
     public record Config(String name, String source, String mixinPackage, List<String> mixins, Integer targets,
                          String compatibility, Integer priority, Boolean required) {}
@@ -98,6 +99,8 @@ public final class MixinSection {
             put(out, key + " skipped", source.mixinsSkipped());
             put(out, key + " compatibility", source.compatibility());
             put(out, key + " methods", source.methods());
+            put(out, key + " apply time (ns)", source.applyNanos());
+            put(out, key + " off by settings", source.offBySettings());
         }
         index = 0;
         for (Config config : configs) {
@@ -172,7 +175,7 @@ public final class MixinSection {
         for (Map<String, String> s : sources.values()) {
             sourceList.add(new Source(blankToNull(s.get("")), s.get("plugin"), s.get("version"), s.get("SHA-256"),
                 lines(s.get("configs")), bool(s.get("main")), bool(s.get("skipped")), s.get("compatibility"),
-                number(s.get("methods"))));
+                number(s.get("methods")), number(s.get("apply time (ns)")), number(s.get("off by settings"))));
         }
         List<Config> configList = new ArrayList<>();
         for (Map<String, String> c : configs.values()) {
@@ -272,6 +275,8 @@ public final class MixinSection {
                 nullable(json, s.mixinsSkipped());
                 json.value(s.compatibility());
                 nullable(json, s.methods());
+                nullable(json, s.applyNanos() == null ? null : Math.round(s.applyNanos() / 100_000.0) / 10.0);
+                nullable(json, s.offBySettings());
                 json.endArray();
             }
             json.endArray();

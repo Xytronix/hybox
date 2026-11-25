@@ -72,9 +72,7 @@ class StalledThreadTest {
             new StackTraceElement("com.hypixel.hytale.component.Store", "removeEntity", "Store.java", 832),
         };
 
-        assertEquals("com.hypixel.hytale.server.core.universe.world.storage.ChunkStore.getChunkReference",
-            StalledThread.topSuspectFrame(stack, List.of()));
-        assertEquals("dev.sanandrea.hytale.sprinkler.event.SprinklerLifecycleHandler.onEntityRemove",
-            StalledThread.topSuspectFrame(stack, List.of("com.hypixel.hytale.")));
+        assertEquals(stack[2], StalledThread.topSuspectFrame(stack, List.of()));
+        assertEquals(stack[3], StalledThread.topSuspectFrame(stack, List.of("com.hypixel.hytale.")));
     }
 }

@@ -122,12 +122,11 @@ public final class JfrThreadDump {
             if (cls == null || isJdk(cls)) {
                 continue;
             }
-            String classMethod = frameClassMethod(text);
             if (lockSite == null) {
-                lockSite = classMethod;
+                lockSite = text;
             }
             if (!matchesPrefix(cls, frameworkPrefixes)) {
-                return classMethod;
+                return text;
             }
         }
         return lockSite;
@@ -145,7 +144,7 @@ public final class JfrThreadDump {
             entries.put("Waiting on", lock);
         }
         if (blockedIn != null) {
-            entries.put(StalledThread.FRAME_KEY, FrameLabels.display(blockedIn));
+            entries.put(StalledThread.FRAME_KEY, FrameLabels.display(frameClassMethod(blockedIn), frameLine(blockedIn)));
         }
         StringBuilder stack = new StringBuilder();
         for (String line : block) {
@@ -191,6 +190,20 @@ public final class JfrThreadDump {
         String s = atLine.strip().substring(3).strip();
         int paren = s.indexOf('(');
         return paren >= 0 ? s.substring(0, paren) : s;
+    }
+
+    private static int frameLine(String atLine) {
+        int open = atLine.indexOf('(');
+        int close = atLine.indexOf(')', open + 1);
+        int colon = close < 0 ? -1 : atLine.lastIndexOf(':', close);
+        if (open < 0 || colon < open || close <= colon + 1) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(atLine.substring(colon + 1, close));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private static String frameClass(String atLine) {

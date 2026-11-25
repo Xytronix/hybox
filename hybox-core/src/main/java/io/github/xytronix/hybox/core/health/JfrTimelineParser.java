@@ -96,6 +96,7 @@ final class JfrTimelineParser {
     private static final int NET_OTHERS_LIMIT = 5;
     private static final int THREAD_ID_CHARS = 12;
     private static final String WORLD_THREAD_PREFIX = "WorldThread - ";
+    private static final String COMMON_POOL_PREFIX = "ForkJoinPool.commonPool-worker-";
     private static final List<String> WORLD_THREAD_PREFIXES = List.of(WORLD_THREAD_PREFIX, "ChunkLighting - ", "WorldMap - ");
     static final String NO_WORLD = "Not tied to one world";
     private static final String HYTALE_PACKAGE = "com.hypixel.hytale.";
@@ -129,7 +130,8 @@ final class JfrTimelineParser {
     }
 
     private record StackInfo(String leaf, String self, String[] flameFrames, int[] flameOwners, String[] flameLabels,
-                             String chain, String[] chainLabels, String subsystem, JfrModAttribution.Owners owners) {}
+                             String chain, String[] chainLabels, String subsystem, JfrModAttribution.Owners owners,
+                             JfrMixinCost.Stack mixin) {}
 
     private static final String[][] SUBSYSTEM_PATTERNS = {
         {"Collision", ".modules.collision."},
@@ -254,6 +256,8 @@ final class JfrTimelineParser {
         JfrModEvents modEvents = new JfrModEvents(PLUGIN_EVENT_CAP);
         Map<String, Set<String>> idThreads = new HashMap<>();
         JfrSlices slices = new JfrSlices();
+        JfrMixinCost mixinCost = new JfrMixinCost();
+        JfrMixinCost poolMixinCost = new JfrMixinCost();
 
         long minT = Long.MAX_VALUE;
         long maxT = Long.MIN_VALUE;
@@ -296,6 +300,13 @@ final class JfrTimelineParser {
                         recordStack(e.getStackTrace(), stacks, samplesByMethod, chainsByMethod, chainLabels, subsystems,
                             subsystemsByWorld, flameRoot, mods, threadName,
                             JfrModAttribution.captureThread(threadName), slices, t);
+                        JfrMixinCost cost = threadName == null ? null
+                            : threadName.startsWith(WORLD_THREAD_PREFIX) ? mixinCost
+                            : threadName.startsWith(COMMON_POOL_PREFIX) ? poolMixinCost : null;
+                        if (cost != null) {
+                            RecordedStackTrace sampled = e.getStackTrace();
+                            cost.add(sampled == null ? JfrMixinCost.Stack.NONE : stacks.get(sampled).mixin());
+                        }
                     }
                     case "jdk.CPULoad" -> {
                         cpuJvm.add(new Pt(t, 100.0 * (getD(e, "jvmUser") + getD(e, "jvmSystem"))));
@@ -871,7 +882,8 @@ final class JfrTimelineParser {
             lockWaits.stream().map(w -> w.mod() == null ? w : new LockWait(w.thread(), w.group(), w.lock(),
                 w.monitor(), w.startMs(), w.endMs(), w.frame(), mods.resolve(w.mod()), w.owner())).toList(),
             List.copyOf(incidentMarkers), slices.samples(mods::resolve),
-            postGcHeap.stream().sorted(Comparator.comparingLong(Pt::t)).mapToLong(p -> (long) p.v()).toArray());
+            postGcHeap.stream().sorted(Comparator.comparingLong(Pt::t)).mapToLong(p -> (long) p.v()).toArray(),
+            mixinCost.build(), poolMixinCost.build());
     }
 
     private static RetainedChain retainedChain(Map<String, PathTally> paths, long[] withPath, JfrModAttribution mods) {
@@ -1328,12 +1340,14 @@ final class JfrTimelineParser {
         int size = frames.size();
         String[] types = new String[size];
         String[] names = new String[size];
+        String[] descriptors = new String[size];
         for (int i = 0; i < size; i++) {
             RecordedFrame frame = frames.get(i);
             RecordedMethod method = frame.isJavaFrame() ? frame.getMethod() : null;
             if (method != null) {
                 types[i] = method.getType().getName();
                 names[i] = method.getName();
+                descriptors[i] = method.getDescriptor();
             }
         }
         String subsystem = classify(types);
@@ -1345,15 +1359,18 @@ final class JfrTimelineParser {
             }
         }
         if (leafIndex < 0) {
-            return new StackInfo(null, null, null, null, null, null, null, subsystem, JfrModAttribution.Owners.NONE);
+            return new StackInfo(null, null, null, null, null, null, null, subsystem, JfrModAttribution.Owners.NONE,
+                JfrMixinCost.Stack.NONE);
         }
         String leaf = cleanType(types[leafIndex]) + "." + names[leafIndex];
+        FrameLabels.Label[] labels = new FrameLabels.Label[size];
         String[] frameLabels = new String[size];
         boolean labelled = false;
         for (int i = 0; i < size; i++) {
             if (types[i] != null) {
-                frameLabels[i] = FrameLabels.label(cleanType(types[i]), names[i]);
-                labelled |= frameLabels[i] != null;
+                labels[i] = FrameLabels.find(cleanType(types[i]), names[i], descriptors[i], 0);
+                frameLabels[i] = labels[i] == null ? null : labels[i].text();
+                labelled |= labels[i] != null;
             }
         }
 
@@ -1364,7 +1381,7 @@ final class JfrTimelineParser {
             if (types[i] != null) {
                 String type = cleanType(types[i]);
                 path.add(shortName(type) + "." + names[i]);
-                owners.add(JfrModAttribution.mixinCode(names[i], frameLabels[i]) ? FLAME_OWNER_MOD : frameOwner(type));
+                owners.add(FrameLabels.mixinCode(labels[i], names[i]) ? FLAME_OWNER_MOD : frameOwner(type));
                 if (pathLabels != null) {
                     pathLabels.add(frameLabels[i]);
                 }
@@ -1375,9 +1392,9 @@ final class JfrTimelineParser {
             ownerArr[i] = owners.get(i);
         }
 
-        JfrModAttribution.Owners modOwners = mods.owners(types, names, i -> frameLabels[i],
+        JfrModAttribution.Owners modOwners = mods.owners(types, names, i -> labels[i],
             i -> JfrModAttribution.loaderId(frames.get(i)));
-        int selfAt = JfrModAttribution.selfFrame(types, names, i -> frameLabels[i]);
+        int selfAt = JfrModAttribution.selfFrame(types, names, i -> labels[i]);
         String self = selfAt < 0 ? leaf : cleanType(types[selfAt]) + "." + names[selfAt];
 
         StringBuilder chain = new StringBuilder(96);
@@ -1399,7 +1416,8 @@ final class JfrTimelineParser {
         return new StackInfo(leaf, self, path.toArray(new String[0]), ownerArr,
             pathLabels == null ? null : pathLabels.toArray(new String[0]),
             added > 0 ? chain.toString() : null, chainLabelled ? java.util.Arrays.copyOf(chainLabels, added) : null,
-            subsystem, modOwners);
+            subsystem, modOwners, JfrMixinCost.stack(types, names, i -> labels[i],
+                i -> JfrModAttribution.loaderId(frames.get(i))));
     }
 
     private static LockWait lockWait(RecordedEvent e, long end, JfrStackCache<RecordedStackTrace, StackInfo> stacks) {

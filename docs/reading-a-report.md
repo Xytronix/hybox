@@ -108,6 +108,18 @@ Each mod shows one number, its cost: time or memory in the mod's own code, inclu
 
 Code that no plugin class loader ran is shown by its package, such as `cc.irori.refixes`. Hybox gives it to a plugin when that plugin's main class is in the same package, and shows Hyinit's own package as Hyinit, the loader. The line under a mod also names the threads its own code ran on.
 
+## Mixin code by mod
+
+With Hyinit 0.5.0 or newer, Mixin code by mod shows the world thread CPU of each early plugin JAR whose Mixins changed Hytale's code. It sits next to CPU by mod, which covers the code a mod runs as a normal plugin on every thread. Each column is a share of the world thread samples in the recording, and with fewer than 300 world thread samples the columns show sample counts instead:
+
+- **Own Mixin code** is the cost. The sample ran in code the JAR's Mixins added to Hytale, such as an injector handler or a lambda from a Mixin, in a class of the same JAR that code called, or in JDK and library code they called. A class counts as the JAR's own when it shares the root package of the JAR's Mixins and no plugin class loader ran it.
+- **Started by it, at most** adds the Hytale code that Mixin code called, up to the point where it hands back to the original method it wrapped. It is at most what the mod costs, because a `@Redirect` also counts the call it replaced, which would run without the mod too.
+- **On the stack** counts samples where any method the JAR's Mixins changed or added was on the stack. A mod that wraps `TickingThread.run` is on every world thread stack, so this shows where its hooks sit, not what it costs.
+
+Advanced under each mod lists its five busiest Mixin methods and the changed Hytale methods it was seen in. Classes that the JAR loads as normal plugin code are not counted here, they are in CPU by mod. A sample counts for a mod only in the overload its Mixins changed. Mixin code that ran on common pool threads has its own table below the first one, with the same columns as shares of the common pool samples. Hytale runs parallel entity ticking and chunk saving there, so it is not world thread time and does not add to the first table. Other threads are not counted. The copied summary and the in-game CPU page show the own share, and the in-game page adds the other two with the same wording and one line per mod for the common pool. Without Hyinit the section is absent.
+
+The Mixins section is a different view. With Hyinit 0.5.0 or newer its early plugin JAR table has a **Mixin apply time** per mod, the time Mixin spent changing Hytale's classes for that JAR. That time is spent once when a class loads, mostly at startup, so it is not CPU while the server runs. **Off by the mod's settings** counts the Mixins that the mod's own config plugin turned off, for example by a switch in its config file. They are not errors.
+
 ## Memory
 
 - **Allocated memory** is all memory created during the recording. GC frees most of it, so a high [allocation rate](#allocation-rate) means more GC work, not memory in use.

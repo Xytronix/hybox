@@ -47,10 +47,18 @@ class JfrThreadDumpTest {
     }
 
     @Test
-    void withoutFrameworkPrefixesNamesEngineLockSite() {
-        DiagnosticSection section = JfrThreadDump.stuckSection(DUMP, List.of());
-        assertEquals("com.hypixel.hytale.server.core.universe.world.storage.ChunkStore.getChunkReference",
-            section.entries().get("Blocked in"));
+    void withoutFrameworkPrefixesNamesEngineLockSiteAndLooksItsMixinLabelUpByLine() {
+        String site = "com.hypixel.hytale.server.core.universe.world.storage.ChunkStore.getChunkReference";
+        assertEquals(site, JfrThreadDump.stuckSection(DUMP, List.of()).entries().get("Blocked in"));
+        try {
+            FrameLabels.install((className, methodName, descriptor, line) -> line == 563
+                ? new FrameLabels.Label(false, List.of(new FrameLabels.Origin("Refixes", "refixes.jar", List.of("MixinStore"))))
+                : null);
+            assertEquals(site + ", changed by Mixin from Refixes (MixinStore)",
+                JfrThreadDump.stuckSection(DUMP, List.of()).entries().get("Blocked in"));
+        } finally {
+            FrameLabels.install(null);
+        }
     }
 
     @Test

@@ -121,6 +121,29 @@ class HyboxIncidentViewerTest {
     }
 
     @Test
+    void mixinApplyTimeAndMixinsOffBySettingsShowPerModOnlyWhenHyinitGivesThem() throws Exception {
+        JsonObject data = fixture();
+        String head = "{\"bootstrapper\":\"Hyinit 0.5.0\",\"configs\":[],\"conflicts\":null,\"hyinit\":{\"version\":\"0.5.0\"},"
+            + "\"overlaps\":[],\"note\":null,\"problems\":[],\"sources\":[";
+        data.add("mixins", JsonParser.parseString(head
+            + "[\"refixes-0.6.1.jar\",\"IroriPowered:Refixes\",\"0.6.1\",null,[],true,false,null,742,221.3,67],"
+            + "[\"late.jar\",null,null,null,[],true,false,null,0,null,1],"
+            + "[\"plain.jar\",null,null,null,[],true,false,null,3,null,null]]}"));
+        String shown = renderText(IncidentModel.load(bundle(data, "")), "mixins");
+
+        assertTrue(shown.contains("Mixin apply time is spent once when a class loads, mostly at startup."
+            + " It is not CPU while the server runs."), shown);
+        assertTrue(shown.contains("\"Refixes\"") && shown.contains("Mixin apply time 221.3 ms. 67 Mixins off by the mod's settings."), shown);
+        assertTrue(shown.contains("\"late.jar\"") && shown.contains("\"1 Mixin off by the mod's settings.\""), shown);
+        assertFalse(shown.contains("plain.jar"), shown);
+
+        data.add("mixins", JsonParser.parseString(head + "[\"refixes-0.6.1.jar\",\"IroriPowered:Refixes\",\"0.6.1\",null,[],true,"
+            + "false,null,742]]}"));
+        String old = renderText(IncidentModel.load(bundle(data, "")), "mixins");
+        assertFalse(old.contains("Early plugin JARs") || old.contains("Mixin apply time") || old.contains("settings"), old);
+    }
+
+    @Test
     void cpuMemoryAndEngineFitOneScreen() throws Exception {
         JsonObject data = fixture();
         IncidentModel model = IncidentModel.load(bundle(data, ""));
@@ -263,6 +286,71 @@ class HyboxIncidentViewerTest {
         assertTrue(rendered.contains("Worker 50 threads"), rendered);
         assertFalse(rendered.contains("Hybox itself"), rendered);
         assertEquals(6, commands.stream().filter(c -> "Pages/HyboxIncidentThread.ui".equals(c.text)).count());
+    }
+
+    private static final String HYBRID_WAIT =
+        "com.hypixel.hytale.server.core.util.thread.TickingThread.redirect$zfj000$refixesjar$refixes$hybridWait";
+
+    private static String mixinCostRow(String file, String mod, long own, long started, long reach) {
+        String methods = "[[\"" + HYBRID_WAIT + "\"," + Math.max(1, own) + "]]";
+        return "{\"file\":\"" + file + "\",\"mod\":" + (mod == null ? "null" : "\"" + mod + "\"") + ",\"own\":" + own
+            + ",\"started\":" + started + ",\"reach\":" + reach + ",\"ownMethods\":" + (own > 0 ? methods : "[]")
+            + ",\"startedMethods\":" + methods + ",\"changedMethods\":[]}";
+    }
+
+    private String mixinCostPage(long worldSamples, String... rows) throws Exception {
+        JsonObject data = fixture();
+        data.add("mixinCost", JsonParser.parseString("{\"worldSamples\":" + worldSamples + ",\"rows\":["
+            + String.join(",", rows) + "]}"));
+        return renderText(IncidentModel.load(bundle(data, "")), "cpu");
+    }
+
+    @Test
+    void mixinCodeByModShowsTheOwnShareAndSaysAtMostForTheCodeItStartedAlsoWithoutOwnSamples() throws Exception {
+        String cpu = mixinCostPage(6477, mixinCostRow("refixes-0.6.1.jar", "Refixes", 90, 636, 6471),
+            mixinCostRow("late.jar", "Late", 0, 363, 6477), mixinCostRow("idle.jar", "Idle", 0, 0, 6477));
+
+        assertTrue(cpu.contains("\"Mixin code by mod\""), cpu);
+        assertTrue(cpu.contains("\"1.4%\""), cpu);
+        assertTrue(cpu.contains("1.4% of world thread samples ran in its own Mixin code, mostly TickingThread.redirect...hybridWait."
+            + " At most 9.8% with the Hytale code that Mixin code called."
+            + " 99.9% had a method it changed on the stack, which is not its cost."), cpu);
+        assertTrue(cpu.contains("No world thread sample ran in its own Mixin code."
+            + " At most 5.6% with the Hytale code that Mixin code called, mostly TickingThread.redirect...hybridWait."
+            + " 100.0% had a method it changed on the stack, which is not its cost."), cpu);
+        assertFalse(cpu.contains("refixesjar") || cpu.contains("\"Idle\"") || cpu.contains("Too few for shares"), cpu);
+    }
+
+    @Test
+    void mixinCodeOnTheCommonPoolIsALineOfItsOwnThatSaysItIsNotWorldThreadTime() throws Exception {
+        JsonObject data = fixture();
+        String row = mixinCostRow("refixes-0.6.1.jar", "Refixes", 28, 2171, 2227);
+        data.add("mixinCost", JsonParser.parseString("{\"worldSamples\":6477,\"rows\":[" + row + "],\"poolSamples\":3529,"
+            + "\"poolRows\":[" + row + "," + mixinCostRow("idle.jar", "Idle", 0, 0, 40) + "]}"));
+        String cpu = renderText(IncidentModel.load(bundle(data, "")), "cpu");
+
+        assertTrue(cpu.contains("On common pool threads, which is not world thread time, 0.8% of their samples ran in the own"
+            + " Mixin code of Refixes and at most 61.5% with the Hytale code that Mixin code called.\""), cpu);
+        assertTrue(cpu.contains("0.4% of world thread samples ran in its own Mixin code"), cpu);
+        assertFalse(cpu.contains("Mixin code of Idle"), cpu);
+
+        data.add("mixinCost", JsonParser.parseString("{\"worldSamples\":6477,\"rows\":[" + row + "],\"poolSamples\":120,"
+            + "\"poolRows\":[" + mixinCostRow("refixes-0.6.1.jar", "Refixes", 2, 78, 98) + "]}"));
+        String low = renderText(IncidentModel.load(bundle(data, "")), "cpu");
+        assertTrue(low.contains("which is not world thread time, 2 samples ran in the own Mixin code of Refixes and at most"
+            + " 78 samples with the Hytale code that Mixin code called. Only 120 common pool samples, too few for shares."), low);
+    }
+
+    @Test
+    void mixinCodeByModShowsCountsBelowThreeHundredWorldSamplesAndTheJarForEqualNames() throws Exception {
+        String cpu = mixinCostPage(150, mixinCostRow("twin-a.jar", "Twin", 2, 3, 148), mixinCostRow("twin-b.jar", "Twin", 1, 1, 9));
+
+        assertTrue(cpu.contains("Only 150 world thread samples. Too few for shares, so these are sample counts."), cpu);
+        assertTrue(cpu.contains("2 samples ran in its own Mixin code, mostly TickingThread.redirect...hybridWait."
+            + " At most 3 samples with the Hytale code that Mixin code called."
+            + " 148 samples had a method it changed on the stack, which is not its cost."), cpu);
+        assertTrue(cpu.contains("\"twin-a.jar\"") && cpu.contains("\"twin-b.jar\""), cpu);
+        assertFalse(cpu.contains("1.3%") || cpu.contains("\"Twin\""), cpu);
     }
 
     @Test
