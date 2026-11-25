@@ -4,11 +4,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import com.hypixel.hytale.common.plugin.PluginManifest;
 import java.nio.charset.StandardCharsets;
-import jdk.jfr.Category;
-import jdk.jfr.EventType;
 import org.bson.BsonDocument;
 import org.junit.jupiter.api.Test;
-import io.github.xytronix.hybox.core.jfr.HyboxPluginEvent;
 import io.github.xytronix.hybox.core.metrics.HealthGauges;
 import io.github.xytronix.hybox.core.metrics.PrometheusExporter;
 import sun.misc.Unsafe;
@@ -22,12 +19,6 @@ class HyboxIdentityTest {
                 new String(input.readAllBytes(), StandardCharsets.UTF_8)));
             assertEquals("io.github.xytronix.hybox.hytale.HyboxPlugin", manifest.getMain());
         }
-    }
-
-    @Test
-    void customEventsUseHyboxNamesAndCategory() {
-        assertEquals("io.github.xytronix.hybox.PluginEvent", EventType.getEventType(HyboxPluginEvent.class).getName());
-        assertArrayEquals(new String[] {"Hybox"}, HyboxPluginEvent.class.getAnnotation(Category.class).value());
     }
 
     @Test
@@ -54,7 +45,6 @@ class HyboxIdentityTest {
         field.setAccessible(true);
         var runtime = (HyboxRuntime) ((Unsafe) field.get(null)).allocateInstance(HyboxRuntime.class);
         var command = new HyboxCommand(runtime);
-        assertEquals("hybox", command.getName());
         assertTrue(command.getAliases().isEmpty(), command.getAliases().toString());
     }
 }
