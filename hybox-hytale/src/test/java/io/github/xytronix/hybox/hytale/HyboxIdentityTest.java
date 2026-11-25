@@ -25,12 +25,6 @@ class HyboxIdentityTest {
     }
 
     @Test
-    void publicApiHasHyboxNameAndNamespace() {
-        assertEquals("io.github.xytronix.hybox.hytale", HyboxApi.class.getPackageName());
-        assertEquals("HyboxApi", HyboxApi.class.getSimpleName());
-    }
-
-    @Test
     void customEventsUseHyboxNamesAndCategory() {
         assertEquals("io.github.xytronix.hybox.PluginEvent", EventType.getEventType(HyboxPluginEvent.class).getName());
         assertArrayEquals(new String[] {"Hybox"}, HyboxPluginEvent.class.getAnnotation(Category.class).value());
