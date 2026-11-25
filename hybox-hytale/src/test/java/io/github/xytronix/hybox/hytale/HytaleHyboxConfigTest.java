@@ -142,14 +142,14 @@ class HytaleHyboxConfigTest {
             {
               "Version": 1,
               "Jfr": {
-                "OldObjectSampling": true
+                "OldObjectSampling": false
               }
             }
             """, StandardCharsets.UTF_8);
 
         HyboxConfig config = HytaleHyboxConfig.loadOrCreate(dataDir, System.getLogger("hytale-config-test"));
 
-        assertTrue(config.jfrOldObjectSampling());
+        assertFalse(config.jfrOldObjectSampling());
     }
 
     @Test
