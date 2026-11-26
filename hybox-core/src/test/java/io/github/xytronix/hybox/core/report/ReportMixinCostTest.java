@@ -1,6 +1,7 @@
 package io.github.xytronix.hybox.core.report;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
@@ -129,14 +130,15 @@ class ReportMixinCostTest {
     }
 
     private static String written(MixinCost cost, Map<String, String> mixins) throws Exception {
-        return written(cost, null, mixins);
+        return written(cost, null, null, mixins);
     }
 
-    private static String written(MixinCost cost, MixinCost pool, Map<String, String> mixins) throws Exception {
+    private static String written(MixinCost cost, MixinCost pool, MixinCost workPool, Map<String, String> mixins)
+        throws Exception {
         StringBuilder out = new StringBuilder();
         JsonWriter json = new JsonWriter(out);
         json.beginObject();
-        ReportMixinCost.write(json, cost, pool, mixins);
+        ReportMixinCost.write(json, cost, pool, workPool, mixins);
         json.endObject();
         return out.toString();
     }
@@ -167,6 +169,7 @@ class ReportMixinCostTest {
             List<Thread> threads = List.of(
                 new Thread(() -> handler$zza000$testjar$spin(600), "WorldThread - test"),
                 new Thread(() -> handler$zza000$testjar$spin(600), "ForkJoinPool.commonPool-worker-1"),
+                new Thread(() -> handler$zza000$testjar$spin(600), "WorkPool-1"),
                 new Thread(() -> handler$zza000$testjar$spin(600), "pool-worker-1"));
             threads.forEach(Thread::start);
             for (Thread thread : threads) {
@@ -193,7 +196,15 @@ class ReportMixinCostTest {
         assertTrue(pool.find(), html.substring(html.indexOf("\"mixinCost\""), html.indexOf("\"mixinCost\"") + 900));
         long pooled = Long.parseLong(pool.group(1));
         assertTrue(pooled > 0 && Long.parseLong(pool.group(2)) > 0 && Long.parseLong(pool.group(2)) <= pooled, pool.group());
-        assertTrue(timeline.totalSamples() > world + pooled, world + " and " + pooled + " of " + timeline.totalSamples());
+        Matcher work = Pattern.compile("\"workPoolSamples\":(\\d+),\"workPoolRows\":\\[\\{\"file\":\"test.jar\",\"mod\":\"Test\","
+            + "\"own\":(\\d+),").matcher(html);
+        assertTrue(work.find(), html.substring(html.indexOf("\"mixinCost\""), html.indexOf("\"mixinCost\"") + 1400));
+        long worked = Long.parseLong(work.group(1));
+        assertTrue(worked > 0 && Long.parseLong(work.group(2)) > 0 && Long.parseLong(work.group(2)) <= worked, work.group());
+        assertEquals(pooled, timeline.poolMixinCost().samples());
+        assertEquals(worked, timeline.workPoolMixinCost().samples());
+        assertTrue(timeline.totalSamples() > world + pooled + worked,
+            world + ", " + pooled + " and " + worked + " of " + timeline.totalSamples());
         assertTrue(own > 0 && own <= world, own + " of " + world);
         assertEquals(own, Long.parseLong(row.group(3)));
         assertEquals(own, Long.parseLong(row.group(4)));
@@ -221,10 +232,16 @@ class ReportMixinCostTest {
             + "\"startedMethods\":[[\"" + wait + "\",98]],\"changedMethods\":[[\"a.T.run\",990]]}]}}",
             written(cost, hyinit));
         assertEquals("{\"mixinCost\":null}", written(cost, Map.of("Bootstrapper", "Hyxin")));
-        assertEquals("{\"mixinCost\":null}", written(null, cost, hyinit));
-        String pooled = written(cost, new MixinCost(400, List.of(hit(MixinCost.STARTED, "#refixesjar", wait, 250))), hyinit);
+        assertEquals("{\"mixinCost\":null}", written(null, cost, cost, hyinit));
+        String pooled = written(cost, new MixinCost(400, List.of(hit(MixinCost.STARTED, "#refixesjar", wait, 250))), null,
+            hyinit);
         assertTrue(pooled.endsWith(",\"poolSamples\":400,\"poolRows\":[{\"file\":\"refixes-0.6.1.jar\",\"mod\":\"Refixes\","
             + "\"own\":0,\"started\":250,\"reach\":0,\"ownMethods\":[],\"startedMethods\":[[\"" + wait + "\",250]],"
             + "\"changedMethods\":[]}]}}"), pooled);
+        String worked = written(cost, null, new MixinCost(700, List.of(hit(MixinCost.OWN, "#refixesjar", wait, 70))), hyinit);
+        assertTrue(worked.endsWith("\"changedMethods\":[[\"a.T.run\",990]]}],\"workPoolSamples\":700,\"workPoolRows\":[{"
+            + "\"file\":\"refixes-0.6.1.jar\",\"mod\":\"Refixes\",\"own\":70,\"started\":0,\"reach\":0,\"ownMethods\":[[\""
+            + wait + "\",70]],\"startedMethods\":[],\"changedMethods\":[]}]}}"), worked);
+        assertFalse(worked.contains("\"poolSamples\"") || worked.contains("\"poolRows\""), worked);
     }
 }

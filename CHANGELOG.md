@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.1
+
+### Fixed
+
+- On Hytale 0.8 Mixin code by mod also counts the Mixin code that ran on the server work pool threads, where Hytale 0.8 runs world generation. It has a table of its own in the report and one line per mod on the in-game CPU page, both labelled as not world thread time. Before, this time was in no table.
+
 ## 1.3.0
 
 ### Upgrading

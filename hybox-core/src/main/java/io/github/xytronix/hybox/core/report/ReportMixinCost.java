@@ -114,7 +114,8 @@ final class ReportMixinCost {
             .toList();
     }
 
-    static void write(JsonWriter json, MixinCost cost, MixinCost pool, Map<String, String> mixins) throws IOException {
+    static void write(JsonWriter json, MixinCost cost, MixinCost pool, MixinCost workPool, Map<String, String> mixins)
+        throws IOException {
         MixinSection.Parsed parsed = MixinSection.parse(mixins);
         if (parsed == null || parsed.versions() == null || cost == null || cost.samples() <= 0) {
             json.name("mixinCost").nullValue();
@@ -126,6 +127,10 @@ final class ReportMixinCost {
         if (pool != null) {
             json.name("poolSamples").value(pool.samples());
             rows(json, "poolRows", pool, parsed);
+        }
+        if (workPool != null) {
+            json.name("workPoolSamples").value(workPool.samples());
+            rows(json, "workPoolRows", workPool, parsed);
         }
         json.endObject();
     }

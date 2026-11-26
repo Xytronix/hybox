@@ -713,17 +713,22 @@ final class HyboxIncidentRenderer {
                 + " had a method it changed on the stack, which is not its cost.");
         }
         p.rest(rows.size() - CPU_MODS, "more mod");
-        double pool = number(cost.get("poolSamples"), 0);
+        mixinPoolCost(p, cost, "poolSamples", "poolRows", "common pool");
+        mixinPoolCost(p, cost, "workPoolSamples", "workPoolRows", "work pool");
+    }
+
+    private static void mixinPoolCost(Plan p, JsonObject cost, String samples, String rowsKey, String name) {
+        double pool = number(cost.get(samples), 0);
         boolean poolLow = pool < MIXIN_COST_MIN_SAMPLES;
         int shown = 0;
-        for (JsonElement element : array(cost.get("poolRows"))) {
+        for (JsonElement element : array(cost.get(rowsKey))) {
             JsonObject row = object(element);
             double own = number(row.get("own"), 0), started = number(row.get("started"), 0);
             if (pool <= 0 || own <= 0 && started <= 0 || shown++ >= CPU_MODS) continue;
-            p.paragraph("On common pool threads, which is not world thread time, " + mixinCostAmount(own, pool, poolLow)
+            p.paragraph("On " + name + " threads, which is not world thread time, " + mixinCostAmount(own, pool, poolLow)
                 + (poolLow ? "" : " of their samples") + " ran in the own Mixin code of " + mixinCostName(row) + " and at most "
                 + mixinCostAmount(started, pool, poolLow) + " with the Hytale code that Mixin code called."
-                + (poolLow ? " Only " + count(pool, "common pool sample") + ", too few for shares." : ""));
+                + (poolLow ? " Only " + count(pool, name + " sample") + ", too few for shares." : ""));
         }
     }
 

@@ -3157,10 +3157,14 @@ function mixinStackHtml(trace){
   const body=trace.map(l=>`<span class="stk${esc(l[1])}"${l[2]?` data-mod="${esc(l[2])}"`:""}>${esc(l[0])}</span>`).join("\n");
   return `<details class="mxstk"><summary>Stack trace <small>${esc(sum)}</small></summary><pre class="stk">${body}</pre></details>`;
 }
-const MOD_COST_NOTE="Counted on world thread samples. Mixin code on common pool threads is in its own table below when there is any, and other threads are not counted. Own Mixin code is the cost: the sample ran in code the mod's Mixins added to Hytale, in a class of the same JAR that code called, or in library code they called. Started by it adds the Hytale code those Mixins called, up to the point where they hand back to the code they wrapped. That is at most what the mod costs, since a redirect also counts the call it replaced. On the stack counts samples with any method the mod's Mixins changed or added. That shows where its hooks sit, not what they cost. Code the JAR runs as a normal plugin is in CPU by mod.";
+const MOD_COST_NOTE="Counted on world thread samples. Mixin code on common pool threads and on Hytale 0.8 work pool threads has a table of its own below when there is any, and other threads are not counted. Own Mixin code is the cost: the sample ran in code the mod's Mixins added to Hytale, in a class of the same JAR that code called, or in library code they called. Started by it adds the Hytale code those Mixins called, up to the point where they hand back to the code they wrapped. That is at most what the mod costs, since a redirect also counts the call it replaced. On the stack counts samples with any method the mod's Mixins changed or added. That shows where its hooks sit, not what they cost. Code the JAR runs as a normal plugin is in CPU by mod.";
 const MOD_COST_MIN_SAMPLES=300;
 const MOD_COST_LOW="Too few for shares, so the columns show sample counts.";
 const MOD_COST_POOL_NOTE="This is not world thread time. Hytale runs parallel entity ticking and chunk saving on the common pool, so a share here is a share of that work and does not add to the table above. The columns mean the same.";
+const MOD_COST_WORK_POOL_NOTE="This is not world thread time. Hytale 0.8 runs heavy work such as world generation on its work pool, so a share here is a share of that work and does not add to the other tables. The columns mean the same.";
+const MOD_COST_POOLS=[
+  {samples:"poolSamples",rows:"poolRows",name:"common pool",note:MOD_COST_POOL_NOTE,id:"mxp-t",where:"Common pool"},
+  {samples:"workPoolSamples",rows:"workPoolRows",name:"work pool",note:MOD_COST_WORK_POOL_NOTE,id:"mxw-t",where:"Work pool"}];
 function modCostRows(){
   const C=D.mixinCost;
   if(!C||!C.worldSamples||!Array.isArray(C.rows)) return [];
@@ -3168,9 +3172,9 @@ function modCostRows(){
 }
 function modCostName(r){return r.mod||(r.file?String(r.file).replace(/\.jar$/i,""):"unknown");}
 function modCostLabel(r,rows){const n=modCostName(r);return r.file&&rows.filter(x=>modCostName(x)===n).length>1?r.file:n;}
-function modCostPoolRows(){
+function modCostPoolRows(pool){
   const C=D.mixinCost;
-  return modCostRows().length&&C.poolSamples>0&&Array.isArray(C.poolRows)?C.poolRows.filter(r=>r.own>0||r.started>0):[];
+  return modCostRows().length&&C[pool.samples]>0&&Array.isArray(C[pool.rows])?C[pool.rows].filter(r=>r.own>0||r.started>0):[];
 }
 function modCostLow(T){return (T===undefined?D.mixinCost.worldSamples:T)<MOD_COST_MIN_SAMPLES;}
 function modCostAmount(n,T){return modCostLow(T)?plural(fmt(n),"sample","samples"):`${fixed(pct(n,T===undefined?D.mixinCost.worldSamples:T),1)}%`;}
@@ -3191,14 +3195,17 @@ function modCostTable(rows,T,id,where){
     +thc("On the stack","A method the mod's Mixins changed or added was on the stack. This is not its cost.",{sort:"num",r:true});
   return `<div class="tscroll"><table class="sortable" id="${id}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
-function modCostPoolLead(P){return modCostLow(P)?`Only ${fmt(P)} common pool samples. ${MOD_COST_LOW}`:`Shares of ${fmt(P)} common pool samples.`;}
+function modCostPoolLead(P,name){return modCostLow(P)?`Only ${fmt(P)} ${name} samples. ${MOD_COST_LOW}`:`Shares of ${fmt(P)} ${name} samples.`;}
 function modCostHtml(){
   const C=D.mixinCost, rows=modCostRows();
   if(!rows.length) return "";
-  const T=C.worldSamples, low=modCostLow(), pool=modCostPoolRows(), P=C.poolSamples;
+  const T=C.worldSamples, low=modCostLow();
   const lead=low?`Only <b>${fmt(T)}</b> world thread samples. ${MOD_COST_LOW}`:`World thread CPU by early plugin JAR, from <b>${fmt(T)}</b> world thread samples.`;
   return `<p class="lead">${lead}</p>${recordingScopeBadge()}<div class="subnote">${esc(MOD_COST_NOTE)}</div>`+modCostTable(rows,T,"mxc-t","World thread")
-    +(pool.length?`<h3 class="subh">On common pool threads, not world thread time</h3><div class="subnote">${esc(MOD_COST_POOL_NOTE)} ${modCostPoolLead(P)}</div>`+modCostTable(pool,P,"mxp-t","Common pool"):"");
+    +MOD_COST_POOLS.map(p=>{
+      const pool=modCostPoolRows(p), P=C[p.samples];
+      return pool.length?`<h3 class="subh">On ${p.name} threads, not world thread time</h3><div class="subnote">${esc(p.note)} ${modCostPoolLead(P,p.name)}</div>`+modCostTable(pool,P,p.id,p.where):"";
+    }).join("");
 }
 function modCostMarkdown(){
   const C=D.mixinCost, rows=modCostRows();
@@ -3211,11 +3218,12 @@ function modCostMarkdown(){
     if((r.startedMethods||[]).length) L.push("",`Started by Mixin code of ${name}, at most:`,...lines(r.startedMethods));
     if((r.changedMethods||[]).length) L.push("",`Changed methods of ${name} on the stack, not a cost:`,...lines(r.changedMethods));
   });
-  const pool=modCostPoolRows(), P=C.poolSamples;
-  if(pool.length){
-    L.push("",`On common pool threads, not world thread time. ${modCostPoolLead(P)}`,"","| Mod | JAR | Own Mixin code | Started by it, at most | On the stack |","|---|---|---|---|---|");
+  MOD_COST_POOLS.forEach(p=>{
+    const pool=modCostPoolRows(p), P=C[p.samples];
+    if(!pool.length) return;
+    L.push("",`On ${p.name} threads, not world thread time. ${modCostPoolLead(P,p.name)}`,"","| Mod | JAR | Own Mixin code | Started by it, at most | On the stack |","|---|---|---|---|---|");
     pool.forEach(r=>L.push(`| ${modCostName(r)} | ${r.file||"-"} | ${modCostAmount(r.own,P)} | ${modCostAmount(r.started,P)} | ${modCostAmount(r.reach,P)} |`));
-  }
+  });
   L.push("");
   return L;
 }

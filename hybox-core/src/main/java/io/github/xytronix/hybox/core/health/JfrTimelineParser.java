@@ -97,6 +97,7 @@ final class JfrTimelineParser {
     private static final int THREAD_ID_CHARS = 12;
     private static final String WORLD_THREAD_PREFIX = "WorldThread - ";
     private static final String COMMON_POOL_PREFIX = "ForkJoinPool.commonPool-worker-";
+    private static final String WORK_POOL_PREFIX = "WorkPool-";
     private static final List<String> WORLD_THREAD_PREFIXES = List.of(WORLD_THREAD_PREFIX, "ChunkLighting - ", "WorldMap - ");
     static final String NO_WORLD = "Not tied to one world";
     private static final String HYTALE_PACKAGE = "com.hypixel.hytale.";
@@ -258,6 +259,7 @@ final class JfrTimelineParser {
         JfrSlices slices = new JfrSlices();
         JfrMixinCost mixinCost = new JfrMixinCost();
         JfrMixinCost poolMixinCost = new JfrMixinCost();
+        JfrMixinCost workPoolMixinCost = new JfrMixinCost();
 
         long minT = Long.MAX_VALUE;
         long maxT = Long.MIN_VALUE;
@@ -302,7 +304,8 @@ final class JfrTimelineParser {
                             JfrModAttribution.captureThread(threadName), slices, t);
                         JfrMixinCost cost = threadName == null ? null
                             : threadName.startsWith(WORLD_THREAD_PREFIX) ? mixinCost
-                            : threadName.startsWith(COMMON_POOL_PREFIX) ? poolMixinCost : null;
+                            : threadName.startsWith(COMMON_POOL_PREFIX) ? poolMixinCost
+                            : threadName.startsWith(WORK_POOL_PREFIX) ? workPoolMixinCost : null;
                         if (cost != null) {
                             RecordedStackTrace sampled = e.getStackTrace();
                             cost.add(sampled == null ? JfrMixinCost.Stack.NONE : stacks.get(sampled).mixin());
@@ -883,7 +886,7 @@ final class JfrTimelineParser {
                 w.monitor(), w.startMs(), w.endMs(), w.frame(), mods.resolve(w.mod()), w.owner())).toList(),
             List.copyOf(incidentMarkers), slices.samples(mods::resolve),
             postGcHeap.stream().sorted(Comparator.comparingLong(Pt::t)).mapToLong(p -> (long) p.v()).toArray(),
-            mixinCost.build(), poolMixinCost.build());
+            mixinCost.build(), poolMixinCost.build(), workPoolMixinCost.build());
     }
 
     private static RetainedChain retainedChain(Map<String, PathTally> paths, long[] withPath, JfrModAttribution mods) {

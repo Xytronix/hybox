@@ -519,7 +519,8 @@ public final class ReportHtml {
         ReportDiagnosticsWriter.writeAssetPacks(json, sections.assetPacks());
         MixinSection.write(json, sections.mixins(), attribution);
         ReportMixinCost.write(json, timeline == null ? null : timeline.mixinCost(),
-            timeline == null ? null : timeline.poolMixinCost(), sections.mixins());
+            timeline == null ? null : timeline.poolMixinCost(), timeline == null ? null : timeline.workPoolMixinCost(),
+            sections.mixins());
         ReportDiagnosticsWriter.writeLog(json, logLines);
         ReportDiagnosticsWriter.writeConfigs(json, sections.configs());
         history.write(json, report, timeline, tick, timeline == null ? List.of() : attribution.cpu(timeline.cpuByMod()));

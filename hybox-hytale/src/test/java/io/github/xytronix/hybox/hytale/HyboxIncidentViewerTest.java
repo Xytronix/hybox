@@ -342,6 +342,19 @@ class HyboxIncidentViewerTest {
     }
 
     @Test
+    void mixinCodeOnTheWorkPoolIsALineOfItsOwnApartFromTheCommonPool() throws Exception {
+        JsonObject data = fixture();
+        String row = mixinCostRow("refixes-0.6.1.jar", "Refixes", 28, 2171, 2227);
+        data.add("mixinCost", JsonParser.parseString("{\"worldSamples\":6477,\"rows\":[" + row + "],\"workPoolSamples\":2000,"
+            + "\"workPoolRows\":[" + mixinCostRow("refixes-0.6.1.jar", "Refixes", 50, 400, 600) + "]}"));
+        String cpu = renderText(IncidentModel.load(bundle(data, "")), "cpu");
+
+        assertTrue(cpu.contains("On work pool threads, which is not world thread time, 2.5% of their samples ran in the own"
+            + " Mixin code of Refixes and at most 20.0% with the Hytale code that Mixin code called.\""), cpu);
+        assertFalse(cpu.contains("On common pool threads"), cpu);
+    }
+
+    @Test
     void mixinCodeByModShowsCountsBelowThreeHundredWorldSamplesAndTheJarForEqualNames() throws Exception {
         String cpu = mixinCostPage(150, mixinCostRow("twin-a.jar", "Twin", 2, 3, 148), mixinCostRow("twin-b.jar", "Twin", 1, 1, 9));
 

@@ -186,6 +186,7 @@ public final class JfrTimeline {
     private final long[] postGcHeap;
     private final MixinCost mixinCost;
     private final MixinCost poolMixinCost;
+    private final MixinCost workPoolMixinCost;
 
     JfrTimeline(Instant start, Instant end, long totalSamples, CpuStats cpu,
                 double[] cpuMachineSeries, double[] cpuJvmSeries, long[] heapSeries, long[] rssSeries,
@@ -213,7 +214,7 @@ public final class JfrTimeline {
                 HostCpu hostCpu, Safepoint safepoint, List<ModAction> modActions, List<ModSettings> modSettings,
                 Map<String, Integer> threadGroupSizes, Slices slices, List<GcPause> gcPauses, Swap swap,
                 List<LockWait> lockWaits, List<IncidentMarker> incidentMarkers, JfrSamples samples, long[] postGcHeap,
-                MixinCost mixinCost, MixinCost poolMixinCost) {
+                MixinCost mixinCost, MixinCost poolMixinCost, MixinCost workPoolMixinCost) {
         this.start = start;
         this.end = end;
         this.totalSamples = totalSamples;
@@ -294,6 +295,7 @@ public final class JfrTimeline {
         this.postGcHeap = postGcHeap;
         this.mixinCost = mixinCost;
         this.poolMixinCost = poolMixinCost;
+        this.workPoolMixinCost = workPoolMixinCost;
     }
 
     public static JfrTimeline parse(Path recording) {
@@ -384,4 +386,5 @@ public final class JfrTimeline {
     public long[] postGcHeap() { return postGcHeap; }
     public MixinCost mixinCost() { return mixinCost; }
     public MixinCost poolMixinCost() { return poolMixinCost; }
+    public MixinCost workPoolMixinCost() { return workPoolMixinCost; }
 }
